@@ -19,6 +19,11 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - Chinese and English README and changelog files.
 - A new skiff, moving-star trail, and gradient-water visual identity, with a theme-aware top-bar icon.
 
+### Fixed
+
+- Fixed a blank custom tab caused by an overly strict mount-container check in some SiYuan environments.
+- Added a visible startup error panel so mount failures no longer result in a silent blank page.
+
 ### Limitations
 
 - This is a read-only test release and does not change fields or cells.

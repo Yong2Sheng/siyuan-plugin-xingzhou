@@ -21,6 +21,7 @@ const ICON = `<symbol id="${ICON_ID}" viewBox="0 0 24 24">
 
 type AppInstance = {
     component: XingzhouApp;
+    mount: HTMLDivElement;
 };
 
 export default class XingzhouPlugin extends Plugin {
@@ -62,17 +63,36 @@ export default class XingzhouPlugin extends Plugin {
         this.addTab({
             type: TAB_TYPE,
             init(this: Custom) {
-                if (!(this.element instanceof HTMLElement) || plugin.stopped) return;
-                const component = new XingzhouApp({
-                    target: this.element,
-                    props: {
-                        load: () => loadWorkItems(plugin.settings.attributeViewId),
-                        openDocument: (blockId: string) => plugin.openBlock(blockId),
-                        openDatabase: () => plugin.openNativeDatabase(),
-                    },
-                });
-                plugin.instances.set(this, { component });
-                plugin.currentTab = this.tab;
+                if (plugin.stopped) return;
+
+                const target = this.element;
+                if (!target || typeof target.replaceChildren !== "function") {
+                    console.error("行舟页签初始化失败：思源没有提供可用的挂载容器。", target);
+                    return;
+                }
+
+                const mount = document.createElement("div");
+                mount.className = "xingzhou-tab-mount";
+                mount.setAttribute("aria-label", "行舟 · 个人项目与事务中心");
+                mount.textContent = "行舟正在启动……";
+                target.replaceChildren(mount);
+
+                try {
+                    mount.textContent = "";
+                    const component = new XingzhouApp({
+                        target: mount,
+                        props: {
+                            load: () => loadWorkItems(plugin.settings.attributeViewId),
+                            openDocument: (blockId: string) => plugin.openBlock(blockId),
+                            openDatabase: () => plugin.openNativeDatabase(),
+                        },
+                    });
+                    plugin.instances.set(this, { component, mount });
+                    plugin.currentTab = this.tab;
+                } catch (error) {
+                    console.error("行舟界面挂载失败。", error);
+                    renderMountError(mount, error);
+                }
             },
             destroy(this: Custom) {
                 plugin.instances.get(this)?.component.$destroy();
@@ -172,4 +192,19 @@ function createTextInput(value: string): HTMLInputElement {
     input.value = value;
     input.spellcheck = false;
     return input;
+}
+
+function renderMountError(target: HTMLElement, error: unknown): void {
+    const panel = document.createElement("div");
+    panel.className = "xingzhou-mount-error";
+
+    const title = document.createElement("h2");
+    title.textContent = "行舟界面启动失败";
+    const description = document.createElement("p");
+    description.textContent = "请重新加载插件；如果问题仍然存在，请把下面的错误信息发给开发者。";
+    const details = document.createElement("code");
+    details.textContent = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+
+    panel.append(title, description, details);
+    target.replaceChildren(panel);
 }
