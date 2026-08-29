@@ -17,6 +17,7 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - SiYuan theme tokens, dark-mode compatibility, and responsive layout.
 - Attribute View ID and database block ID settings.
 - Chinese and English README and changelog files.
+- A new skiff, moving-star trail, and gradient-water visual identity, with a theme-aware top-bar icon.
 
 ### Limitations
 

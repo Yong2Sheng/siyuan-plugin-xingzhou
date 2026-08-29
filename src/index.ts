@@ -8,8 +8,15 @@ const SETTINGS_FILE = "settings.json";
 const TAB_TYPE = "xingzhou-center";
 const ICON_ID = "iconXingzhou";
 const ICON = `<symbol id="${ICON_ID}" viewBox="0 0 24 24">
-    <path d="M3 13.5h18l-3.2 5H6.2L3 13.5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-    <path d="M12 3v10M12 4.2l5.2 6H12M10 19.5c1.2 1 2.8 1.5 4.5 1.5 1.8 0 3.4-.6 4.5-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="rotate(-8 8.5 16.5)">
+        <path d="M2.6 18.2c2.2.6 4.3.5 6.2-.1" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" opacity=".7"/>
+        <path d="M4.3 15.9c2.5.4 5.3.2 8.1-.6-.8 1.8-2.3 2.8-4.4 3.2-1.6-.2-2.9-1.1-3.7-2.6Z" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/>
+        <path d="M6.6 15.2c1.6 0 3.2-.2 4.7-.6" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
+        <path d="M12 14.8c1-.4 1.9-1 2.8-1.7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+    </g>
+    <path d="m17.6 2.2 1.05 2.25 2.45.23-1.85 1.61.53 2.41-2.18-1.27-2.17 1.27.52-2.41-1.84-1.61 2.44-.23 1.05-2.25Z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/>
+    <path d="M16 10c1.8 1.2 3 2.6 3.6 4.2" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>
+    <path d="M3 21c4 .7 7.8-.1 11.2-2.3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".65"/>
 </symbol>`;
 
 type AppInstance = {
