@@ -1,0 +1,32 @@
+{
+  "name": "siyuan-plugin-xingzhou",
+  "author": "Yong2Sheng",
+  "url": "https://github.com/Yong2Sheng/siyuan-plugin-xingzhou",
+  "version": "0.1.0",
+  "minAppVersion": "3.8.0",
+  "backends": ["all"],
+  "frontends": ["desktop", "desktop-window", "browser-desktop"],
+  "displayName": {
+    "default": "行舟 · 个人项目与事务中心",
+    "zh_CN": "行舟 · 个人项目与事务中心",
+    "en_US": "Xingzhou · Personal Projects & Tasks"
+  },
+  "description": {
+    "default": "以思源属性视图为唯一数据源，浏览个人项目、任务、事务与长期领域。",
+    "zh_CN": "以思源属性视图为唯一数据源，浏览个人项目、任务、事务与长期领域。",
+    "en_US": "A read-oriented personal project and task center backed by a native SiYuan Attribute View."
+  },
+  "readme": {
+    "default": "README.md",
+    "zh_CN": "README.md",
+    "en_US": "README.en.md"
+  },
+  "funding": {
+    "openCollective": "",
+    "patreon": "",
+    "github": "",
+    "custom": []
+  },
+  "keywords": ["project", "task", "attribute-view", "personal", "项目管理"],
+  "disabledInPublish": true
+}

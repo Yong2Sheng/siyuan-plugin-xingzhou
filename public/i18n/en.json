@@ -1,0 +1,11 @@
+{
+  "openCenter": "Open Xingzhou",
+  "centerTitle": "Xingzhou · Personal Projects & Tasks",
+  "settingsTitle": "Xingzhou Settings",
+  "attributeViewId": "Attribute View ID",
+  "attributeViewIdDescription": "Xingzhou reads this Attribute View and does not automatically alter fields or work items.",
+  "databaseBlockId": "Database Block ID",
+  "databaseBlockIdDescription": "Used by Open Native Database. Leave empty to disable the entry.",
+  "save": "Save",
+  "saved": "Settings saved"
+}

@@ -1,0 +1,11 @@
+{
+  "openCenter": "打开行舟",
+  "centerTitle": "行舟 · 个人项目与事务中心",
+  "settingsTitle": "行舟设置",
+  "attributeViewId": "属性视图 ID",
+  "attributeViewIdDescription": "行舟只读取这个属性视图，不会自动修改字段或工作项。",
+  "databaseBlockId": "数据库块 ID",
+  "databaseBlockIdDescription": "用于“打开原始数据库”；留空时该入口不可用。",
+  "save": "保存",
+  "saved": "设置已保存"
+}

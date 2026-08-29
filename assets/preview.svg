@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="768" viewBox="0 0 1024 768">
+  <rect width="1024" height="768" fill="#f6f3ed"/>
+  <rect x="28" y="26" width="968" height="716" rx="16" fill="#fffdfa" stroke="#d9d5ce"/>
+  <text x="64" y="78" font-family="Source Han Sans CN" font-size="13" fill="#7b817d" letter-spacing="2">个人项目与事务中心</text>
+  <text x="64" y="119" font-family="Source Han Sans CN" font-size="30" font-weight="700" fill="#26332f" letter-spacing="5">行舟</text>
+  <rect x="848" y="64" width="85" height="30" rx="15" fill="#e7eee9"/><text x="869" y="84" font-family="Source Han Sans CN" font-size="12" fill="#4d6d64">只读预览</text>
+  <line x1="28" y1="142" x2="996" y2="142" stroke="#dedbd4"/>
+  <g font-family="Source Han Sans CN" font-size="14" fill="#68716d">
+    <text x="66" y="177">本周</text><text x="138" y="177" font-weight="700" fill="#3f7265">全部工作项</text><text x="257" y="177">收件箱</text><text x="335" y="177">整理</text>
+  </g>
+  <rect x="132" y="193" width="96" height="3" rx="2" fill="#3f7265"/>
+  <line x1="28" y1="196" x2="996" y2="196" stroke="#dedbd4"/>
+  <rect x="59" y="214" width="54" height="30" rx="6" fill="#dfece7"/><text x="74" y="234" font-family="Source Han Sans CN" font-size="12" font-weight="700" fill="#3f7265">全部</text>
+  <text x="134" y="234" font-family="Source Han Sans CN" font-size="12" fill="#6d746f">活跃项目</text><text x="215" y="234" font-family="Source Han Sans CN" font-size="12" fill="#6d746f">将来／也许</text><text x="310" y="234" font-family="Source Han Sans CN" font-size="12" fill="#6d746f">已结束</text>
+  <line x1="28" y1="260" x2="996" y2="260" stroke="#dedbd4"/>
+  <rect x="28" y="260" width="208" height="482" fill="#f1f1ed"/>
+  <line x1="236" y1="260" x2="236" y2="742" stroke="#d9d5ce"/><line x1="600" y1="260" x2="600" y2="742" stroke="#d9d5ce"/>
+  <g font-family="Source Han Sans CN">
+    <text x="52" y="296" font-size="12" font-weight="700" fill="#747b77">长期领域</text>
+    <rect x="43" y="309" width="178" height="38" rx="7" fill="#dfece7"/><text x="57" y="333" font-size="14" fill="#3f7265">写小说</text><text x="177" y="332" font-size="11" fill="#6d746f">活跃</text>
+    <text x="57" y="374" font-size="14" fill="#2c3532">学 3D</text><text x="151" y="374" font-size="11" fill="#7a807c">将来／也许</text>
+    <text x="52" y="423" font-size="12" font-weight="700" fill="#747b77">独立工作项</text><text x="57" y="457" font-size="14" fill="#2c3532">无上层领域／项目</text>
+    <text x="258" y="296" font-size="15" font-weight="700" fill="#2c3532">层级浏览</text><text x="258" y="316" font-size="11" fill="#7a807c">默认仅展开活跃路径</text>
+    <rect x="249" y="336" width="337" height="42" rx="7" fill="#e7f0ec"/><circle cx="275" cy="357" r="5" fill="#3f7265"/><text x="292" y="362" font-size="14" fill="#26332f">写小说</text><text x="527" y="360" font-size="11" fill="#3f7265">活跃</text>
+    <circle cx="298" cy="406" r="5" fill="#68a581"/><text x="315" y="411" font-size="14" fill="#26332f">世界观构建</text>
+    <circle cx="321" cy="454" r="5" fill="#d09b43"/><text x="338" y="459" font-size="14" fill="#26332f">恶魔世界的经济</text>
+    <circle cx="344" cy="502" r="5" fill="#7b91a8"/><text x="361" y="507" font-size="14" fill="#26332f">收集城堡资料</text>
+    <text x="628" y="299" font-size="12" fill="#3f7265">事务</text><text x="628" y="342" font-size="24" font-weight="700" fill="#26332f">收集城堡资料</text>
+    <text x="628" y="390" font-size="12" fill="#7a807c">上层工作项</text><text x="752" y="390" font-size="13" fill="#2c3532">恶魔世界的经济</text>
+    <text x="628" y="424" font-size="12" fill="#7a807c">计划日期</text><text x="752" y="424" font-size="13" fill="#2c3532">2026/08/30</text>
+  </g>
+  <rect x="624" y="458" width="342" height="123" rx="10" fill="#e7f0ec" stroke="#c8dcd4"/><rect x="624" y="458" width="4" height="123" rx="2" fill="#3f7265"/>
+  <text x="642" y="487" font-family="Source Han Sans CN" font-size="12" fill="#68716d">本次行动细则</text><text x="642" y="523" font-family="Source Han Sans CN" font-size="15" font-weight="700" fill="#26332f">收集并标注十张不同地区的城堡参考图。</text>
+  <rect x="624" y="597" width="342" height="82" rx="10" fill="#f1f1ed" stroke="#d9d5ce"/><text x="642" y="625" font-family="Source Han Sans CN" font-size="12" fill="#68716d">下一步行动</text><text x="642" y="653" font-family="Source Han Sans CN" font-size="14" fill="#26332f">整理贸易路线假设。</text>
+  <rect x="624" y="696" width="342" height="30" rx="7" fill="#3f7265"/><text x="754" y="716" font-family="Source Han Sans CN" font-size="13" font-weight="700" fill="#fff">打开关联文档</text>
+</svg>
