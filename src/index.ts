@@ -1,11 +1,11 @@
 import { openTab, Plugin, Setting, showMessage, type Custom, type Tab } from "siyuan";
 import XingzhouApp from "./XingzhouApp.svelte";
 import { DEFAULT_SETTINGS, normalizeSettings, type XingzhouSettings } from "./config";
+import { getXingzhouTabId, XINGZHOU_TAB_TYPE } from "./tab-id";
 import { loadWorkItems } from "./work-items";
 import "./index.scss";
 
 const SETTINGS_FILE = "settings.json";
-const TAB_TYPE = "xingzhou-center";
 const ICON_ID = "iconXingzhou";
 const ICON = `<symbol id="${ICON_ID}" viewBox="0 0 24 24">
     <g transform="rotate(-8 8.5 16.5)">
@@ -61,7 +61,7 @@ export default class XingzhouPlugin extends Plugin {
     private registerTab(): void {
         const plugin = this;
         this.addTab({
-            type: TAB_TYPE,
+            type: XINGZHOU_TAB_TYPE,
             init(this: Custom) {
                 if (plugin.stopped) return;
 
@@ -114,7 +114,7 @@ export default class XingzhouPlugin extends Plugin {
         this.opening = openTab({
             app: this.app,
             custom: {
-                id: `${this.name}-${TAB_TYPE}`,
+                id: getXingzhouTabId(this.name),
                 icon: ICON_ID,
                 title: this.i18n.centerTitle || "行舟 · 个人项目与事务中心",
             },

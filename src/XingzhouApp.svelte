@@ -12,8 +12,8 @@
     type ItemFilter = "all" | "active" | "future" | "closed";
 
     const mainPages: Array<{ id: MainPage; label: string }> = [
+        { id: "all", label: "全部" },
         { id: "week", label: "本周" },
-        { id: "all", label: "全部工作项" },
         { id: "inbox", label: "收件箱" },
         { id: "review", label: "整理" },
     ];
@@ -146,7 +146,7 @@
     <nav class="xz-main-nav" aria-label="主页面">
         {#each mainPages as entry}
             <button class:active={page === entry.id} type="button" on:click={() => page = entry.id}>
-                {entry.label}{#if entry.id !== "all"}<span class="xz-soon">后续</span>{/if}
+                {entry.label}
             </button>
         {/each}
     </nav>

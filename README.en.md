@@ -29,7 +29,18 @@ Xingzhou is a SiYuan plugin for managing personal projects with low friction. A 
 - SiYuan theme token and dark-mode support.
 - Configurable Attribute View ID and database block ID.
 
-This release is intentionally read-only. It never adds fields, changes work items, or auto-repairs relations. Week planning, inbox, and review pages are visible placeholders for later iterations.
+This release is intentionally read-only. It never adds fields, changes work items, or auto-repairs relations.
+
+### Current page status
+
+| Page | Status |
+| --- | --- |
+| All | Implemented: database loading, hierarchy browsing, status filters, and details |
+| Week | Planned: organize the week by actual plan dates |
+| Inbox | Planned: low-friction capture, browsing, and triage |
+| Review | Planned: a lightweight weekly review flow |
+
+Main navigation uses page names only. Development-state labels are kept out of tab names and are explained inside pages that are not implemented yet.
 
 ## Expected fields
 

@@ -18,10 +18,13 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - Attribute View ID and database block ID settings.
 - Chinese and English README and changelog files.
 - A new skiff, moving-star trail, and gradient-water visual identity, with a theme-aware top-bar icon.
+- Main navigation now reads All, Week, Inbox, and Review, with All placed first.
+- The workspace now uses a canvas-and-panels layout with clearer separation between the area sidebar, hierarchy tree, and detail pane while continuing to follow SiYuan themes.
 
 ### Fixed
 
-- Fixed a blank custom tab caused by an overly strict mount-container check in some SiYuan environments.
+- Fixed a blank page caused by a mismatch between the custom tab’s open ID and SiYuan’s registration rule.
+- Relaxed mount-container validation and added a mount regression test for broader SiYuan compatibility.
 - Added a visible startup error panel so mount failures no longer result in a silent blank page.
 
 ### Limitations
