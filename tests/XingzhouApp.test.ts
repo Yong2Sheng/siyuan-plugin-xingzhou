@@ -103,6 +103,56 @@ describe("XingzhouApp", () => {
         await vi.waitFor(() => expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("完成第一卷"));
     });
 
+    it("侧栏按领域与想法、顶层项目和独立事务分组，全部筛选完整展开层级", async () => {
+        const base = {
+            id: "domain", rowId: "domain", title: "写小说", documentId: null, detached: true,
+            type: "长期领域", status: "重点投入", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: null, noDeadline: false, durationMinutes: null, energy: "", updatedAt: Date.now(),
+        };
+        const idea = { ...base, id: "idea", rowId: "idea", title: "尝试短篇叙事", type: "想法", status: "将来" };
+        const project = { ...base, id: "project", rowId: "project", title: "完成第一卷", type: "项目", status: "进行中", parentIds: [base.id] };
+        const subproject = { ...base, id: "subproject", rowId: "subproject", title: "整理世界观", type: "项目", status: "暂停", parentIds: [project.id], topProjectIds: [project.id] };
+        const transaction = { ...base, id: "transaction", rowId: "transaction", title: "绘制贸易路线", type: "事务", status: "待开始", parentIds: [subproject.id], topProjectIds: [project.id] };
+        const independent = { ...base, id: "independent", rowId: "independent", title: "签署租房合同", type: "事务", status: "待开始" };
+        const workItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [base, idea, project, subproject, transaction, independent], missingFields: [], fields: {},
+        };
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox: vi.fn().mockResolvedValue(workItemData),
+                saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
+            },
+        });
+        (document.querySelector(".xz-global-capture-button") as HTMLButtonElement).click();
+        await tick();
+        const input = document.querySelector("#xz-quick-capture-input") as HTMLInputElement;
+        input.value = "初始化侧栏测试";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        (document.querySelector(".xz-quick-capture-dialog form") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        await vi.waitFor(() => expect(document.querySelector(".xz-sidebar")).not.toBeNull());
+
+        const sidebar = document.querySelector(".xz-sidebar") as HTMLElement;
+        expect(sidebar.textContent).toContain("长期领域与想法");
+        expect(sidebar.textContent).toContain("顶层项目");
+        expect(sidebar.textContent).toContain("独立事务");
+        expect(sidebar.textContent).not.toContain("全部领域与工作项");
+        expect(sidebar.querySelector(".xz-sidebar-group--areas")?.textContent).toContain("尝试短篇叙事");
+        expect(sidebar.querySelector(".xz-sidebar-group--projects")?.textContent).toContain("完成第一卷");
+        expect(sidebar.querySelector(".xz-sidebar-group--transactions")?.textContent).toContain("签署租房合同");
+        expect(document.querySelector(".xz-tree-scroll")?.textContent).toContain("绘制贸易路线");
+
+        (sidebar.querySelector('[data-work-item-id="project"]') as HTMLButtonElement).click();
+        await tick();
+        expect(document.querySelector(".xz-tree-scroll")?.textContent).toContain("整理世界观");
+        expect(document.querySelector(".xz-tree-scroll")?.textContent).not.toContain("签署租房合同");
+
+        [...document.querySelectorAll<HTMLButtonElement>(".xz-segmented button")].find((button) => button.textContent?.trim() === "活跃项目")?.click();
+        await tick();
+        expect(document.querySelector(".xz-tree-scroll")?.textContent).toContain("绘制贸易路线");
+    });
+
     it("从收件箱查看独立条目时精确高亮，并允许直接编辑数据库字段", async () => {
         const item = {
             id: "item-1", rowId: "item-1", title: "清理房间中的垃圾", documentId: null, detached: true,

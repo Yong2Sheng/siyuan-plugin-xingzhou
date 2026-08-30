@@ -41,7 +41,7 @@
     let loading = true;
     let error = "";
     let selectedId: string | null = null;
-    let scope: "all" | "independent" | string = "all";
+    let scope: "all" | string = "all";
     let expandedIds = new Set<string>();
     let inboxDraft = "";
     let capturing = false;
@@ -78,14 +78,21 @@
             ? (data?.items ?? []).filter((item) => item.id !== deleteTargetId && item.topProjectIds.includes(deleteTargetId)).length
             : 0;
     }
-    $: domains = data?.items.filter((item) => item.type === "长期领域") ?? [];
-    $: independentRoots = tree.roots.filter((item) => item.type !== "长期领域");
+    $: areaAndIdeaRoots = sortSidebarItems((data?.items ?? []).filter((item) => item.type === "长期领域" || (item.type === "想法" && !item.parentIds[0])));
+    $: topLevelProjects = sortSidebarItems((data?.items ?? []).filter((item) => {
+        if (item.type !== "项目") return false;
+        const parentItem = item.parentIds[0] ? tree.byId.get(item.parentIds[0]) : null;
+        return !parentItem || parentItem.type === "长期领域";
+    }));
+    $: independentTransactions = sortSidebarItems(tree.roots.filter((item) => item.type === "事务"));
+    $: categorizedSidebarIds = new Set([...areaAndIdeaRoots, ...topLevelProjects, ...independentTransactions].map((item) => item.id));
+    $: uncategorizedRoots = sortSidebarItems(tree.roots.filter((item) => !categorizedSidebarIds.has(item.id)));
     $: {
-        data; scope; filter; tree; independentRoots;
+        data; scope; filter; tree;
         visibleIds = getVisibleIds();
     }
     $: {
-        scope; tree; independentRoots; visibleIds;
+        scope; tree; visibleIds;
         visibleRoots = getVisibleRoots();
     }
     $: parent = selected?.parentIds[0] ? tree.byId.get(selected.parentIds[0]) ?? null : null;
@@ -124,8 +131,12 @@
         data = nextData;
         tree = buildWorkItemTree(nextData.items);
         selectedId = selectedId && tree.byId.has(selectedId) ? selectedId : nextData.items[0]?.id ?? null;
-        expandedIds = new Set(nextData.items.filter((item) => hasActiveDescendant(item.id, tree)).map((item) => item.id));
+        expandedIds = getDefaultExpandedIds(filter, nextData.items);
         loading = false;
+    }
+
+    function sortSidebarItems(items: WorkItem[]): WorkItem[] {
+        return [...items].sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
     }
 
     async function submitInbox() {
@@ -627,17 +638,13 @@
     function getVisibleIds(): Set<string> {
         if (!data) return new Set();
         let candidates = data.items;
-        if (scope === "independent") {
-            const ids = new Set<string>();
-            for (const root of independentRoots) for (const id of collectDescendantIds(root.id, tree)) ids.add(id);
-            candidates = data.items.filter((item) => ids.has(item.id));
-        } else if (scope !== "all") {
+        if (scope !== "all") {
             const ids = collectDescendantIds(scope, tree);
             candidates = data.items.filter((item) => ids.has(item.id));
         }
 
         const matched = candidates.filter((item) => {
-            if (filter === "active") return item.type === "项目" && isActive(item);
+            if (filter === "active") return isActive(item);
             if (filter === "future") return item.status === "将来" || item.status === "将来／也许" || item.status === "暂停";
             if (filter === "closed") return isClosed(item);
             return true;
@@ -658,7 +665,6 @@
     }
 
     function getVisibleRoots(): WorkItem[] {
-        if (scope === "independent") return independentRoots.filter((item) => visibleIds.has(item.id));
         if (scope !== "all") {
             const scoped = tree.byId.get(scope);
             return scoped && visibleIds.has(scoped.id) ? [scoped] : [];
@@ -674,6 +680,21 @@
 
     function expandActivePaths() {
         expandedIds = new Set((data?.items ?? []).filter((item) => hasActiveDescendant(item.id, tree)).map((item) => item.id));
+    }
+
+    function expandAllVisible() {
+        expandedIds = new Set((data?.items ?? []).filter((item) => (tree.children.get(item.id) ?? []).some((child) => visibleIds.has(child.id))).map((item) => item.id));
+    }
+
+    function getDefaultExpandedIds(targetFilter: ItemFilter, items: WorkItem[]): Set<string> {
+        if (targetFilter === "active") return new Set(items.filter((item) => hasActiveDescendant(item.id, tree)).map((item) => item.id));
+        return new Set(items.filter((item) => (tree.children.get(item.id) ?? []).length > 0).map((item) => item.id));
+    }
+
+    function setFilter(nextFilter: ItemFilter) {
+        filter = nextFilter;
+        scope = "all";
+        expandedIds = getDefaultExpandedIds(nextFilter, data?.items ?? []);
     }
 
     function collapseAll() {
@@ -950,11 +971,15 @@
         <div class="xz-secondary-bar">
             <div class="xz-segmented">
                 {#each itemFilters as entry}
-                    <button class:active={filter === entry.id} type="button" on:click={() => filter = entry.id}>{entry.label}</button>
+                    <button class:active={filter === entry.id} type="button" on:click={() => setFilter(entry.id)}>{entry.label}</button>
                 {/each}
             </div>
             <div class="xz-secondary-actions">
-                <button class="xz-link-button" type="button" on:click={expandActivePaths}>仅展开活跃路径</button>
+                {#if filter === "active"}
+                    <button class="xz-link-button" type="button" on:click={expandActivePaths}>展开活跃路径</button>
+                {:else}
+                    <button class="xz-link-button" type="button" on:click={expandAllVisible}>全部展开</button>
+                {/if}
                 <button class="xz-link-button" type="button" on:click={collapseAll}>全部收起</button>
                 <button class="xz-link-button" type="button" on:click={() => void openDatabase()}>打开原始数据库</button>
             </div>
@@ -969,31 +994,48 @@
 
         <main class="xz-workspace">
             <aside class="xz-sidebar">
-                <section>
-                    <h2>长期领域</h2>
-                    <button class:active={scope === "all"} class="xz-scope-button" type="button" on:click={() => scope = "all"}>全部领域与工作项</button>
-                    {#each domains as domain (domain.id)}
-                        <button class:active={scope === domain.id} class="xz-scope-button" type="button" data-work-item-id={domain.id} on:click={() => { scope = domain.id; selectedId = domain.id; }}>
-                            <span>{domain.title}</span><small>{domain.status || "未设置"}</small>
-                        </button>
-                    {/each}
-                </section>
-                <section>
-                    <h2>独立工作项</h2>
-                    <button class:active={scope === "independent"} class="xz-scope-button" type="button" on:click={() => scope = "independent"}>
-                        <span>全部</span><small>{independentRoots.length}</small>
-                    </button>
-                    {#each independentRoots as item (item.id)}
-                        <button class:active={scope === item.id} class="xz-scope-button xz-scope-button--item" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
+                <section class="xz-sidebar-group xz-sidebar-group--areas">
+                    <h2><span>长期领域与想法</span><small>{areaAndIdeaRoots.length}</small></h2>
+                    {#if areaAndIdeaRoots.length === 0}<p class="xz-sidebar-empty">暂无内容</p>{/if}
+                    {#each areaAndIdeaRoots as item (item.id)}
+                        <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
                             <span>{item.title}</span><small>{item.status || "未设置"}</small>
                         </button>
                     {/each}
                 </section>
+                <section class="xz-sidebar-group xz-sidebar-group--projects">
+                    <h2><span>顶层项目</span><small>{topLevelProjects.length}</small></h2>
+                    {#if topLevelProjects.length === 0}<p class="xz-sidebar-empty">暂无内容</p>{/if}
+                    {#each topLevelProjects as item (item.id)}
+                        <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
+                            <span>{item.title}</span><small>{item.status || "未设置"}</small>
+                        </button>
+                    {/each}
+                </section>
+                <section class="xz-sidebar-group xz-sidebar-group--transactions">
+                    <h2><span>独立事务</span><small>{independentTransactions.length}</small></h2>
+                    {#if independentTransactions.length === 0}<p class="xz-sidebar-empty">暂无内容</p>{/if}
+                    {#each independentTransactions as item (item.id)}
+                        <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
+                            <span>{item.title}</span><small>{item.status || "未设置"}</small>
+                        </button>
+                    {/each}
+                </section>
+                {#if uncategorizedRoots.length > 0}
+                    <section class="xz-sidebar-group xz-sidebar-group--uncategorized">
+                        <h2><span>待归类</span><small>{uncategorizedRoots.length}</small></h2>
+                        {#each uncategorizedRoots as item (item.id)}
+                            <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
+                                <span>{item.title}</span><small>{item.type || "未分类"}</small>
+                            </button>
+                        {/each}
+                    </section>
+                {/if}
                 <footer>{data.attributeViewName}<br><span>{data.items.length} 个工作项</span></footer>
             </aside>
 
             <section class="xz-tree-panel">
-                <div class="xz-panel-heading"><div><span>层级浏览</span><small>默认只展开活跃路径</small></div></div>
+                <div class="xz-panel-heading"><div><span>层级浏览</span><small>{filter === "active" ? "只展开活跃路径" : "当前筛选默认完整展开"}</small></div></div>
                 <div class="xz-tree-scroll">
                     {#if visibleRoots.length === 0}
                         <div class="xz-empty"><p>当前范围没有符合条件的工作项。</p></div>

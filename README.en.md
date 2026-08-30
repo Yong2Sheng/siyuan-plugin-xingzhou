@@ -19,7 +19,8 @@ Xingzhou is a SiYuan plugin for managing personal projects with low friction. A 
 ## Current development status
 
 - Reads the “全部工作项” view from a configured SiYuan Attribute View.
-- Long-term area and independent work-item navigation.
+- All-page navigation grouped into Areas & Ideas, Top-level Projects, and Independent Transactions, with an uncategorized fallback.
+- Full hierarchy expansion in All and active-path expansion with executable items in Active Projects.
 - Active-path expansion and collapse-all controls.
 - All, active project, someday, and closed filters.
 - Direct detail editing for hierarchy, type, status, dates, duration, and energy.

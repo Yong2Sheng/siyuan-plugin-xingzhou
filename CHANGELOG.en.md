@@ -9,6 +9,11 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - Added a global “+ Capture” entry in the header, available from All, Week, Inbox, and Review, with `Cmd/Ctrl + Shift + I` support.
 - Added contextual child creation from area/project details and native context menus, prefilling the direct parent and derived top project.
 
+### Changed
+
+- Removed the redundant all-items sidebar entry and grouped All-page navigation into Areas & Ideas, Top-level Projects, and Independent Transactions, with an uncategorized fallback when needed.
+- Made All expand the full hierarchy by default, while Active Projects exposes executable items along active paths.
+
 ## 0.2.0 - 2026-08-30
 
 The detail view now exposes only information applicable to each work-item role, while deadlines explicitly distinguish Pending, None, and a concrete date.

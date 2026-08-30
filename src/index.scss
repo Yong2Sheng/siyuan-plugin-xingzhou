@@ -166,8 +166,24 @@
     background: color-mix(in srgb, var(--xingzhou-primary) 65%, transparent);
     content: "";
 }
-.xz-sidebar section + section { margin-top: 24px; }
-.xz-sidebar h2 { margin: 0 8px 8px; color: var(--xingzhou-muted); font-size: 12px; font-weight: 600; }
+.xz-sidebar section + section { margin-top: 12px; }
+.xz-sidebar-group {
+    --xz-sidebar-group-accent: var(--xingzhou-primary);
+    position: relative;
+    overflow: hidden;
+    padding: 9px 8px 8px;
+    border: 1px solid var(--xingzhou-strong-border);
+    border-radius: calc(var(--xingzhou-radius) + 2px);
+    background: var(--xingzhou-panel);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--xingzhou-text) 9%, transparent);
+}
+.xz-sidebar-group::before { position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--xz-sidebar-group-accent); content: ""; }
+.xz-sidebar-group--projects { --xz-sidebar-group-accent: var(--b3-theme-success, var(--xingzhou-primary)); }
+.xz-sidebar-group--transactions { --xz-sidebar-group-accent: var(--b3-theme-secondary, var(--xingzhou-primary)); }
+.xz-sidebar-group--uncategorized { --xz-sidebar-group-accent: var(--b3-theme-warning, var(--xingzhou-primary)); }
+.xz-sidebar h2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 6px 7px; color: var(--xingzhou-muted); font-size: 11px; font-weight: 600; }
+.xz-sidebar h2 small { min-width: 18px; padding: 1px 5px; border-radius: 999px; color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); text-align: center; font-size: 9px; font-weight: 400; }
+.xz-sidebar-empty { margin: 5px 7px 3px; color: var(--xingzhou-muted); font-size: 10px; }
 .xz-sidebar footer { margin: 24px 8px 0; color: var(--xingzhou-muted); font-size: 11px; line-height: 1.6; }
 
 .xz-scope-button {
@@ -186,8 +202,7 @@
 .xz-scope-button:hover { background: var(--xingzhou-surface-light); }
 .xz-scope-button.active { color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
 .xz-scope-button small { color: var(--xingzhou-muted); }
-.xz-scope-button--item { padding-left: 18px; font-size: 12px; }
-.xz-scope-button--item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xz-scope-button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .xz-tree-panel { display: flex; flex-direction: column; background: var(--xingzhou-panel); }
 .xz-panel-heading {
