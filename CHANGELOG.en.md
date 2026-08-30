@@ -4,6 +4,12 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
+None.
+
+## 0.2.0 - 2026-08-30
+
+The detail view now exposes only information applicable to each work-item role, while deadlines explicitly distinguish Pending, None, and a concrete date.
+
 ### Changed
 
 - Switched the work-item context menu to SiYuan's native `Menu`, matching the task center's icon, warning action, hover behavior, theme, and dark-mode treatment.
