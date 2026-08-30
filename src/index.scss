@@ -183,6 +183,10 @@
 .xz-sidebar-group--uncategorized { --xz-sidebar-group-accent: var(--b3-theme-warning, var(--xingzhou-primary)); }
 .xz-sidebar h2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 6px 7px; color: var(--xingzhou-muted); font-size: 11px; font-weight: 600; }
 .xz-sidebar h2 small { min-width: 18px; padding: 1px 5px; border-radius: 999px; color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); text-align: center; font-size: 9px; font-weight: 400; }
+.xz-sidebar-group-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.xz-sidebar-group-actions button { display: grid; width: 20px; height: 20px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 50%; color: var(--xz-sidebar-group-accent); background: transparent; font-size: 14px; line-height: 1; cursor: pointer; }
+.xz-sidebar-group-actions button:hover { border-color: color-mix(in srgb, var(--xz-sidebar-group-accent) 48%, var(--xingzhou-border)); background: color-mix(in srgb, var(--xz-sidebar-group-accent) 11%, transparent); }
+.xz-sidebar-group-actions button:focus-visible { outline: 2px solid color-mix(in srgb, var(--xz-sidebar-group-accent) 48%, transparent); outline-offset: 1px; }
 .xz-sidebar-empty { margin: 5px 7px 3px; color: var(--xingzhou-muted); font-size: 10px; }
 .xz-sidebar footer { margin: 24px 8px 0; color: var(--xingzhou-muted); font-size: 11px; line-height: 1.6; }
 

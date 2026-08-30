@@ -116,6 +116,7 @@ export type WorkItemData = {
 
 export type InboxCaptureOptions = {
     type?: string;
+    status?: string;
     parentId?: string;
     topProjectId?: string;
 };
@@ -247,6 +248,7 @@ export async function captureInboxItem(
 
     const changes: WorkItemChanges = {};
     if (options.type) changes.type = options.type;
+    if (options.status) changes.status = options.status;
     if (options.parentId) changes.parent = options.parentId;
     if (options.topProjectId) changes.topProject = options.topProjectId;
     return Object.keys(changes).length > 0 ? updateWorkItem(data, created, changes) : data;

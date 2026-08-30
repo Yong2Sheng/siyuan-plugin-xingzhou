@@ -57,7 +57,7 @@ describe("XingzhouApp", () => {
         expect(document.body.textContent).not.toContain("这个页面仍在规划中");
     });
 
-    it("提供全局快速记录，并能在长期领域下上下文创建顶层项目", async () => {
+    it("提供全局快速添加，并能在长期领域下上下文创建顶层项目", async () => {
         const domain = {
             id: "domain", rowId: "domain", title: "写小说", documentId: null, detached: true,
             type: "长期领域", status: "重点投入", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
@@ -118,10 +118,11 @@ describe("XingzhouApp", () => {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
             items: [base, idea, project, subproject, transaction, independent], missingFields: [], fields: {},
         };
+        const captureInbox = vi.fn().mockResolvedValue(workItemData);
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox: vi.fn().mockResolvedValue(workItemData),
+                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox,
                 saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
             },
         });
@@ -141,7 +142,22 @@ describe("XingzhouApp", () => {
         expect(sidebar.querySelector(".xz-sidebar-group--areas")?.textContent).toContain("尝试短篇叙事");
         expect(sidebar.querySelector(".xz-sidebar-group--projects")?.textContent).toContain("完成第一卷");
         expect(sidebar.querySelector(".xz-sidebar-group--transactions")?.textContent).toContain("签署租房合同");
+        expect(sidebar.querySelectorAll(".xz-sidebar-group-actions button")).toHaveLength(3);
         expect(document.querySelector(".xz-tree-scroll")?.textContent).toContain("绘制贸易路线");
+
+        (sidebar.querySelector('button[aria-label="添加顶层项目"]') as HTMLButtonElement).click();
+        await tick();
+        expect(document.querySelector(".xz-quick-capture-dialog")?.textContent).toContain("添加顶层项目");
+        const projectInput = document.querySelector("#xz-quick-capture-input") as HTMLInputElement;
+        projectInput.value = "准备第二卷";
+        projectInput.dispatchEvent(new Event("input", { bubbles: true }));
+        const areaSelect = document.querySelector("#xz-quick-capture-area") as HTMLSelectElement;
+        areaSelect.value = "domain";
+        areaSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        (document.querySelector(".xz-quick-capture-dialog form") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        await vi.waitFor(() => expect(captureInbox).toHaveBeenNthCalledWith(2, "准备第二卷", {
+            type: "项目", status: "待开始", parentId: "domain",
+        }));
 
         (sidebar.querySelector('[data-work-item-id="project"]') as HTMLButtonElement).click();
         await tick();

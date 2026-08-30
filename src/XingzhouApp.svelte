@@ -17,6 +17,7 @@
     type ItemFilter = "all" | "active" | "future" | "closed";
     type WeekDay = { timestamp: number; key: string; label: string; dateLabel: string; isToday: boolean };
     type ActionField = "currentAction" | "nextAction";
+    type QuickCaptureMode = "global" | "child" | "areaOrIdea" | "topProject" | "transaction";
 
     const mainPages: Array<{ id: MainPage; label: string }> = [
         { id: "all", label: "全部" },
@@ -48,9 +49,11 @@
     let captureError = "";
     let captureMessage = "";
     let quickCaptureOpen = false;
+    let quickCaptureMode: QuickCaptureMode = "global";
     let quickCaptureTitle = "";
     let quickCaptureParent: WorkItem | null = null;
     let quickCaptureType = "事务";
+    let quickCaptureAreaId = "";
     let quickCaptureError = "";
     let quickCaptureNotice = "";
     let weekStart = startOfWeek(Date.now());
@@ -79,6 +82,7 @@
             : 0;
     }
     $: areaAndIdeaRoots = sortSidebarItems((data?.items ?? []).filter((item) => item.type === "长期领域" || (item.type === "想法" && !item.parentIds[0])));
+    $: longTermAreas = areaAndIdeaRoots.filter((item) => item.type === "长期领域");
     $: topLevelProjects = sortSidebarItems((data?.items ?? []).filter((item) => {
         if (item.type !== "项目") return false;
         const parentItem = item.parentIds[0] ? tree.byId.get(item.parentIds[0]) : null;
@@ -161,8 +165,22 @@
     }
 
     async function openQuickCapture(parent: WorkItem | null = null) {
+        quickCaptureMode = parent ? "child" : "global";
         quickCaptureParent = parent;
         quickCaptureType = parent?.type === "长期领域" ? "项目" : parent ? "事务" : "事务";
+        quickCaptureAreaId = "";
+        quickCaptureTitle = "";
+        quickCaptureError = "";
+        quickCaptureOpen = true;
+        await tick();
+        document.querySelector<HTMLInputElement>("#xz-quick-capture-input")?.focus();
+    }
+
+    async function openSidebarCapture(mode: Exclude<QuickCaptureMode, "global" | "child">) {
+        quickCaptureMode = mode;
+        quickCaptureParent = null;
+        quickCaptureType = mode === "areaOrIdea" ? "长期领域" : mode === "topProject" ? "项目" : "事务";
+        quickCaptureAreaId = "";
         quickCaptureTitle = "";
         quickCaptureError = "";
         quickCaptureOpen = true;
@@ -173,7 +191,9 @@
     function closeQuickCapture() {
         if (capturing) return;
         quickCaptureOpen = false;
+        quickCaptureMode = "global";
         quickCaptureParent = null;
+        quickCaptureAreaId = "";
         quickCaptureError = "";
     }
 
@@ -181,24 +201,35 @@
         const title = quickCaptureTitle.trim();
         if (!title || capturing) return;
         const previousIds = new Set(data?.items.map((item) => item.id) ?? []);
-        const options: InboxCaptureOptions | undefined = quickCaptureParent
-            ? {
+        let options: InboxCaptureOptions | undefined;
+        if (quickCaptureMode === "child" && quickCaptureParent) {
+            options = {
                 type: quickCaptureType,
                 parentId: quickCaptureParent.id,
                 topProjectId: quickCaptureParent.type === "项目" ? deriveTopProjectId(quickCaptureParent.id, tree) : "",
-            }
-            : undefined;
+            };
+        } else if (quickCaptureMode === "areaOrIdea") {
+            options = { type: quickCaptureType, status: quickCaptureType === "长期领域" ? "将来" : "收件箱" };
+        } else if (quickCaptureMode === "topProject") {
+            options = { type: "项目", status: "待开始", parentId: quickCaptureAreaId };
+        } else if (quickCaptureMode === "transaction") {
+            options = { type: "事务", status: "收件箱" };
+        }
         capturing = true;
         quickCaptureError = "";
         try {
             const refreshed = await captureInbox(title, options);
             applyData(refreshed);
             const created = refreshed.items.find((item) => !previousIds.has(item.id));
-            quickCaptureNotice = quickCaptureParent ? `已在“${quickCaptureParent.title}”下创建：${title}` : `已加入收件箱：${title}`;
+            quickCaptureNotice = quickCaptureMode === "child" && quickCaptureParent
+                ? `已在“${quickCaptureParent.title}”下创建：${title}`
+                : quickCaptureMode === "global" ? `已加入收件箱：${title}` : `已创建：${title}`;
             quickCaptureOpen = false;
+            quickCaptureMode = "global";
             quickCaptureParent = null;
+            quickCaptureAreaId = "";
             quickCaptureTitle = "";
-            if (created && options?.parentId) revealInboxItem(created);
+            if (created && options) revealInboxItem(created);
         } catch (caught) {
             quickCaptureError = caught instanceof Error ? caught.message : String(caught);
         } finally {
@@ -756,7 +787,7 @@
             {#if quickCaptureNotice}<span class="xz-quick-capture-notice" aria-live="polite">{quickCaptureNotice}</span>{/if}
             <span class="xz-data-source">本地数据库</span>
             <button class="b3-button b3-button--outline xz-global-capture-button" type="button" on:click={() => void openQuickCapture()}>
-                ＋ 记录
+                ＋ 添加
             </button>
             <button class="b3-button b3-button--outline" type="button" on:click={() => void refresh()} disabled={loading}>
                 <svg><use href="#iconRefresh"></use></svg>{loading ? "读取中" : "刷新"}
@@ -995,7 +1026,7 @@
         <main class="xz-workspace">
             <aside class="xz-sidebar">
                 <section class="xz-sidebar-group xz-sidebar-group--areas">
-                    <h2><span>长期领域与想法</span><small>{areaAndIdeaRoots.length}</small></h2>
+                    <h2><span>长期领域与想法</span><span class="xz-sidebar-group-actions"><small>{areaAndIdeaRoots.length}</small><button type="button" aria-label="添加长期领域或想法" title="添加长期领域或想法" on:click={() => void openSidebarCapture("areaOrIdea")}>＋</button></span></h2>
                     {#if areaAndIdeaRoots.length === 0}<p class="xz-sidebar-empty">暂无内容</p>{/if}
                     {#each areaAndIdeaRoots as item (item.id)}
                         <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
@@ -1004,7 +1035,7 @@
                     {/each}
                 </section>
                 <section class="xz-sidebar-group xz-sidebar-group--projects">
-                    <h2><span>顶层项目</span><small>{topLevelProjects.length}</small></h2>
+                    <h2><span>顶层项目</span><span class="xz-sidebar-group-actions"><small>{topLevelProjects.length}</small><button type="button" aria-label="添加顶层项目" title="添加顶层项目" on:click={() => void openSidebarCapture("topProject")}>＋</button></span></h2>
                     {#if topLevelProjects.length === 0}<p class="xz-sidebar-empty">暂无内容</p>{/if}
                     {#each topLevelProjects as item (item.id)}
                         <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
@@ -1013,7 +1044,7 @@
                     {/each}
                 </section>
                 <section class="xz-sidebar-group xz-sidebar-group--transactions">
-                    <h2><span>独立事务</span><small>{independentTransactions.length}</small></h2>
+                    <h2><span>独立事务</span><span class="xz-sidebar-group-actions"><small>{independentTransactions.length}</small><button type="button" aria-label="添加独立事务" title="添加独立事务" on:click={() => void openSidebarCapture("transaction")}>＋</button></span></h2>
                     {#if independentTransactions.length === 0}<p class="xz-sidebar-empty">暂无内容</p>{/if}
                     {#each independentTransactions as item (item.id)}
                         <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
@@ -1166,13 +1197,23 @@
     {#if quickCaptureOpen}
         <div class="xz-dialog-backdrop" role="presentation" on:click|self={closeQuickCapture}>
             <section class="xz-quick-capture-dialog" role="dialog" aria-modal="true" aria-labelledby="xz-quick-capture-title">
-                <span class="xz-section-kicker">{quickCaptureParent ? "上下文新建" : "快速记录"}</span>
-                <h2 id="xz-quick-capture-title">{quickCaptureParent ? `添加到“${quickCaptureParent.title}”` : "记到收件箱"}</h2>
-                <p>{quickCaptureParent ? "上层工作项已经自动带入；新条目仍从收件箱状态开始，之后可以继续整理。" : "这里只需要一个名称；类型、层级和日期可以稍后再补。"}</p>
+                <span class="xz-section-kicker">{quickCaptureMode === "child" ? "上下文新建" : quickCaptureMode === "global" ? "快速添加" : "分类添加"}</span>
+                <h2 id="xz-quick-capture-title">{quickCaptureMode === "child" && quickCaptureParent
+                    ? `添加到“${quickCaptureParent.title}”`
+                    : quickCaptureMode === "areaOrIdea" ? "添加长期领域或想法"
+                    : quickCaptureMode === "topProject" ? "添加顶层项目"
+                    : quickCaptureMode === "transaction" ? "添加独立事务"
+                    : "添加到收件箱"}</h2>
+                <p>{quickCaptureMode === "child"
+                    ? "上层工作项已经自动带入；新条目仍从收件箱状态开始，之后可以继续整理。"
+                    : quickCaptureMode === "areaOrIdea" ? "选择这是持续关注的长期领域，还是暂时独立保存的想法。"
+                    : quickCaptureMode === "topProject" ? "直接建立顶层项目；如果它属于某个长期领域，可以在这里一并选择。"
+                    : quickCaptureMode === "transaction" ? "直接建立一个没有上层工作项的独立事务。"
+                    : "这里只需要一个名称；类型、层级和日期可以稍后再补。"}</p>
                 <form on:submit|preventDefault={() => void submitQuickCapture()}>
                     <label for="xz-quick-capture-input">名称</label>
                     <input id="xz-quick-capture-input" class="b3-text-field" type="text" bind:value={quickCaptureTitle} autocomplete="off" disabled={capturing} placeholder="现在想到什么？" />
-                    {#if quickCaptureParent}
+                    {#if quickCaptureMode === "child" && quickCaptureParent}
                         <label for="xz-quick-capture-type">工作项类型</label>
                         <select id="xz-quick-capture-type" class="b3-select" bind:value={quickCaptureType} disabled={capturing}>
                             <option value="项目">项目</option>
@@ -1181,14 +1222,29 @@
                             <option value="想法">想法</option>
                         </select>
                         <div class="xz-quick-capture-parent"><span>上层工作项</span><strong>{quickCaptureParent.title}</strong></div>
+                    {:else if quickCaptureMode === "areaOrIdea"}
+                        <label for="xz-quick-capture-type">工作项类型</label>
+                        <select id="xz-quick-capture-type" class="b3-select" bind:value={quickCaptureType} disabled={capturing}>
+                            <option value="长期领域">长期领域</option>
+                            <option value="想法">想法</option>
+                        </select>
+                    {:else if quickCaptureMode === "topProject"}
+                        <div class="xz-quick-capture-parent"><span>工作项类型</span><strong>项目</strong></div>
+                        <label for="xz-quick-capture-area">所属长期领域（可选）</label>
+                        <select id="xz-quick-capture-area" class="b3-select" bind:value={quickCaptureAreaId} disabled={capturing}>
+                            <option value="">不指定</option>
+                            {#each longTermAreas as area}<option value={area.id}>{area.title}</option>{/each}
+                        </select>
+                    {:else if quickCaptureMode === "transaction"}
+                        <div class="xz-quick-capture-parent"><span>工作项类型</span><strong>事务</strong></div>
                     {/if}
                     {#if quickCaptureError}<p class="xz-save-error" role="alert">{quickCaptureError}</p>{/if}
                     <div class="xz-delete-actions">
                         <button class="b3-button b3-button--outline" type="button" disabled={capturing} on:click={closeQuickCapture}>取消</button>
-                        <button class="b3-button" type="submit" disabled={capturing || !quickCaptureTitle.trim()}>{capturing ? "正在保存并复核…" : quickCaptureParent ? "创建下级" : "加入收件箱"}</button>
+                        <button class="b3-button" type="submit" disabled={capturing || !quickCaptureTitle.trim()}>{capturing ? "正在保存并复核…" : quickCaptureMode === "child" ? "创建下级" : quickCaptureMode === "global" ? "加入收件箱" : "创建"}</button>
                     </div>
                 </form>
-                <small>快捷键：⌘/Ctrl + Shift + I</small>
+                {#if quickCaptureMode === "global"}<small>快捷键：⌘/Ctrl + Shift + I</small>{/if}
             </section>
         </div>
     {/if}
