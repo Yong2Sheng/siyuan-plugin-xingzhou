@@ -4,7 +4,15 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
-None.
+### Changed
+
+- Switched the work-item context menu to SiYuan's native `Menu`, matching the task center's icon, warning action, hover behavior, theme, and dark-mode treatment.
+- Made the detail view role-aware so areas, top-level projects, subprojects, tasks, transactions, and ideas expose only applicable fields.
+- Derived the top project from the direct-parent chain, displayed it read-only, and updated it together with explicit parent changes.
+
+### Added
+
+- Added `无截止日期` checkbox support and a Pending / None / Concrete date deadline control. Review warns about unconfirmed deadlines but skips explicitly deadline-free items.
 
 ## 0.1.1 - 2026-08-30
 

@@ -1,4 +1,4 @@
-import { openTab, Plugin, Setting, showMessage, type Custom, type Tab } from "siyuan";
+import { Menu, openTab, Plugin, Setting, showMessage, type Custom, type Tab } from "siyuan";
 import XingzhouApp from "./XingzhouApp.svelte";
 import { DEFAULT_SETTINGS, normalizeSettings, type XingzhouSettings } from "./config";
 import { getXingzhouTabId, XINGZHOU_TAB_TYPE } from "./tab-id";
@@ -90,6 +90,18 @@ export default class XingzhouPlugin extends Plugin {
                             ),
                             saveItem: updateWorkItem,
                             deleteItem: deleteWorkItem,
+                            openItemMenu: (event: MouseEvent, onDelete: () => void) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                const menu = new Menu("xingzhou-work-item-actions-menu");
+                                menu.addItem({
+                                    icon: "iconTrashcan",
+                                    label: "删除工作项…",
+                                    warning: true,
+                                    click: () => onDelete(),
+                                });
+                                menu.open({ x: event.clientX, y: event.clientY });
+                            },
                             openDocument: (blockId: string) => plugin.openBlock(blockId),
                             openDatabase: () => plugin.openNativeDatabase(),
                         },

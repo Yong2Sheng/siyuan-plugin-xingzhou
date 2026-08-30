@@ -2,12 +2,14 @@
     import { onMount } from "svelte";
     import TreeNode from "./TreeNode.svelte";
     import { buildWorkItemTree, collectDescendantIds, hasActiveDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
+    import { deriveTopProjectId, getWorkItemProfile, needsDeadlineDecision } from "./work-item-role";
     import type { WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
 
     export let load: () => Promise<WorkItemData>;
     export let captureInbox: (title: string) => Promise<WorkItemData>;
     export let saveItem: (data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData>;
     export let deleteItem: (data: WorkItemData, item: WorkItem) => Promise<WorkItemData>;
+    export let openItemMenu: (event: MouseEvent, onDelete: () => void) => void = (_event, onDelete) => onDelete();
     export let openDocument: (blockId: string) => Promise<void>;
     export let openDatabase: () => Promise<void>;
 
@@ -15,7 +17,6 @@
     type ItemFilter = "all" | "active" | "future" | "closed";
     type WeekDay = { timestamp: number; key: string; label: string; dateLabel: string; isToday: boolean };
     type ActionField = "currentAction" | "nextAction";
-    type ItemContextMenu = { itemId: string; x: number; y: number };
 
     const mainPages: Array<{ id: MainPage; label: string }> = [
         { id: "all", label: "全部" },
@@ -28,9 +29,6 @@
         { id: "active", label: "活跃项目" },
         { id: "future", label: "将来" },
         { id: "closed", label: "已结束" },
-    ];
-    const statusOptions = [
-        "收件箱", "待开始", "已计划", "进行中", "阻塞", "暂停", "将来", "已完成", "已失败", "已取消", "已放弃",
     ];
     const legacyStatuses = new Set(["规划中", "活跃", "等待", "将来／也许"]);
 
@@ -57,8 +55,6 @@
     let savingInline: string | null = null;
     let actionErrors: Record<ActionField, string> = { currentAction: "", nextAction: "" };
     let inlineError = "";
-    let contextMenu: ItemContextMenu | null = null;
-    let contextItem: WorkItem | null = null;
     let deleteTarget: WorkItem | null = null;
     let deleteDescendantCount = 0;
     let deleteTopReferenceCount = 0;
@@ -68,7 +64,7 @@
     let detailDraft = emptyDetailDraft();
 
     $: selected = selectedId ? tree.byId.get(selectedId) ?? null : null;
-    $: contextItem = contextMenu ? tree.byId.get(contextMenu.itemId) ?? null : null;
+    $: selectedProfile = selected ? getWorkItemProfile(selected, tree) : null;
     $: deleteDescendantCount = deleteTarget ? Math.max(0, collectDescendantIds(deleteTarget.id, tree).size - 1) : 0;
     $: {
         const deleteTargetId = deleteTarget?.id;
@@ -87,11 +83,9 @@
         visibleRoots = getVisibleRoots();
     }
     $: parent = selected?.parentIds[0] ? tree.byId.get(selected.parentIds[0]) ?? null : null;
-    $: topProject = selected?.topProjectIds[0] ? tree.byId.get(selected.topProjectIds[0]) ?? null : null;
-    $: parentCandidates = selected
-        ? (data?.items ?? []).filter((item) => item.id !== selected.id && !collectDescendantIds(selected.id, tree).has(item.id))
-        : [];
-    $: topProjectCandidates = (data?.items ?? []).filter((item) => item.type === "项目");
+    $: derivedTopProjectId = selected ? deriveTopProjectId(selected.parentIds[0] ?? "", tree) : "";
+    $: topProject = derivedTopProjectId ? tree.byId.get(derivedTopProjectId) ?? null : null;
+    $: parentCandidates = selected ? getParentCandidates(selected) : [];
     $: selectedIssues = selected ? tree.issues.filter((issue) => issue.itemId === selected.id) : [];
     $: inboxItems = [...(data?.items.filter((item) => item.status === "收件箱") ?? [])]
         .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
@@ -169,26 +163,14 @@
         const itemElement = target.closest<HTMLElement>("[data-work-item-id]");
         const itemId = itemElement?.dataset.workItemId;
         if (!itemId || !tree.byId.has(itemId)) {
-            contextMenu = null;
             return;
         }
-        event.preventDefault();
-        event.stopPropagation();
-        contextMenu = {
-            itemId,
-            x: Math.max(8, Math.min(event.clientX, window.innerWidth - 232)),
-            y: Math.max(8, Math.min(event.clientY, window.innerHeight - 76)),
-        };
-    }
-
-    function handleWindowClick(event: MouseEvent) {
-        const target = event.target;
-        if (contextMenu && (!(target instanceof Element) || !target.closest(".xz-context-menu"))) contextMenu = null;
+        const item = tree.byId.get(itemId);
+        if (item) openItemMenu(event, () => requestDelete(item));
     }
 
     function handleWindowKeydown(event: KeyboardEvent) {
         if (event.key !== "Escape") return;
-        contextMenu = null;
         if (deleteTarget && !deleting) {
             deleteTarget = null;
             deleteError = "";
@@ -196,7 +178,6 @@
     }
 
     function requestDelete(item: WorkItem) {
-        contextMenu = null;
         deleteTarget = item;
         deleteError = "";
     }
@@ -220,7 +201,7 @@
     }
 
     function emptyDetailDraft() {
-        return { title: "", type: "", status: "", parent: "", topProject: "", planDate: "", deadline: "", duration: "", energy: "", currentAction: "", nextAction: "" };
+        return { title: "", type: "", status: "", parent: "", topProject: "", planDate: "", deadline: "", deadlineMode: "pending", duration: "", energy: "", currentAction: "", nextAction: "" };
     }
 
     function resetDetailDraft(item: WorkItem) {
@@ -232,6 +213,7 @@
             topProject: item.topProjectIds[0] ?? "",
             planDate: formatInputDate(item.planDate),
             deadline: formatInputDate(item.deadline),
+            deadlineMode: item.deadline ? "date" : item.noDeadline ? "none" : "pending",
             duration: item.durationMinutes === null ? "" : String(item.durationMinutes),
             energy: item.energy,
             currentAction: item.currentAction,
@@ -334,6 +316,18 @@
         if (normalized === currentValue) return;
 
         const changes: WorkItemChanges = { [role]: normalized };
+        if (role === "parent" && data.fields.topProject) changes.topProject = deriveTopProjectId(value, tree) || null;
+        if (role === "type") {
+            const prospective = { ...selected, type: value };
+            const profile = getWorkItemProfile(prospective, tree);
+            if (!profile.statuses.includes(selected.status) && data.fields.status) changes.status = profile.statuses[0] ?? null;
+            if (value === "长期领域") {
+                if (data.fields.parent) changes.parent = null;
+                if (data.fields.topProject) changes.topProject = null;
+            } else if (data.fields.topProject) {
+                changes.topProject = deriveTopProjectId(selected.parentIds[0] ?? "", tree) || null;
+            }
+        }
         if (role === "planDate") {
             if (value && (selected.status === "收件箱" || selected.status === "待开始")) changes.status = "已计划";
             if (!value && selected.status === "已计划") changes.status = "待开始";
@@ -342,6 +336,56 @@
         inlineError = "";
         try {
             const selectedRowId = selected.rowId;
+            applyData(await saveItem(data, selected, changes));
+            const updated = data?.items.find((item) => item.rowId === selectedRowId);
+            if (updated) {
+                selectedId = updated.id;
+                resetDetailDraft(updated);
+            }
+        } catch (caught) {
+            const message = caught instanceof Error ? caught.message : String(caught);
+            resetDetailDraft(selected);
+            inlineError = message;
+        } finally {
+            savingInline = null;
+        }
+    }
+
+    async function saveDeadlineMode(mode: string) {
+        if (!data || !selected || savingInline) return;
+        detailDraft.deadlineMode = mode;
+        if (mode === "date") return;
+        if (!data.fields.noDeadline) {
+            detailDraft.deadlineMode = selected.deadline ? "date" : "pending";
+            inlineError = "当前数据库尚无“无截止日期”字段，无法明确保存为“无”。";
+            return;
+        }
+        await saveDeadlineChanges(mode === "none"
+            ? { deadline: null, noDeadline: true }
+            : { deadline: null, noDeadline: false });
+    }
+
+    async function saveDeadlineDate(value: string) {
+        if (!data || !selected || savingInline) return;
+        detailDraft.deadline = value;
+        if (!value) {
+            detailDraft.deadlineMode = "pending";
+            if (data.fields.noDeadline) await saveDeadlineChanges({ deadline: null, noDeadline: false });
+            else await saveDeadlineChanges({ deadline: null });
+            return;
+        }
+        detailDraft.deadlineMode = "date";
+        await saveDeadlineChanges(data.fields.noDeadline
+            ? { deadline: value, noDeadline: false }
+            : { deadline: value });
+    }
+
+    async function saveDeadlineChanges(changes: WorkItemChanges) {
+        if (!data || !selected || savingInline) return;
+        const selectedRowId = selected.rowId;
+        savingInline = "deadline";
+        inlineError = "";
+        try {
             applyData(await saveItem(data, selected, changes));
             const updated = data?.items.find((item) => item.rowId === selectedRowId);
             if (updated) {
@@ -467,7 +511,7 @@
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
         return items
-            .filter((item) => !isClosed(item) && !excludedStatuses.has(item.status) && (isOverdue(item) || Boolean(item.planDate && item.planDate < todayStart.getTime())))
+            .filter((item) => !isClosed(item) && !excludedStatuses.has(item.status) && (needsDeadlineDecision(item, tree) || isOverdue(item) || Boolean(item.planDate && item.planDate < todayStart.getTime())))
             .sort((a, b) => Number(isOverdue(b)) - Number(isOverdue(a)) || (a.deadline ?? a.planDate ?? 0) - (b.deadline ?? b.planDate ?? 0));
     }
 
@@ -480,7 +524,21 @@
 
     function reviewDateReason(item: WorkItem): string {
         if (isOverdue(item)) return `截止日期已过 · ${formatDate(item.deadline)}`;
+        if (needsDeadlineDecision(item, tree)) return "截止日期待确认";
         return `计划日期已过 · ${formatDate(item.planDate)}`;
+    }
+
+    function getParentCandidates(item: WorkItem): WorkItem[] {
+        const descendants = collectDescendantIds(item.id, tree);
+        const currentParentId = item.parentIds[0] ?? "";
+        return (data?.items ?? []).filter((candidate) => {
+            if (candidate.id === item.id || descendants.has(candidate.id)) return false;
+            if (candidate.id === currentParentId) return true;
+            if (item.type === "项目") return candidate.type === "长期领域" || candidate.type === "项目";
+            if (item.type === "任务") return candidate.type === "项目";
+            if (item.type === "事务" || item.type === "想法") return candidate.type === "项目" || candidate.type === "任务";
+            return true;
+        });
     }
 
     function shiftWeek(offset: number) {
@@ -591,14 +649,11 @@
     }
 
     function fieldLabel(item: WorkItem): string {
-        if (item.type === "长期领域") return "领域说明／当前关注方向";
-        if (item.type === "项目") return "当前阶段目标";
-        if (item.type === "想法") return "想法说明";
-        return "本次行动细则";
+        return getWorkItemProfile(item, tree).actionLabel;
     }
 </script>
 
-<svelte:window on:click={handleWindowClick} on:contextmenu={handleContextMenu} on:keydown={handleWindowKeydown} on:resize={() => contextMenu = null} />
+<svelte:window on:contextmenu={handleContextMenu} on:keydown={handleWindowKeydown} />
 
 <div class="xz-app">
     <header class="xz-header">
@@ -888,9 +943,10 @@
                 {#if selected}
                     <div class="xz-detail-header">
                         <div class="xz-detail-identity">
+                            {#if selectedProfile}<span class="xz-detail-role">{selectedProfile.label}</span>{/if}
                             <div class="xz-detail-title-row" data-work-item-id={selected.id}>
                                 <input class="xz-inline-title" aria-label="名称" bind:value={detailDraft.title} disabled={Boolean(savingInline)} on:blur={() => void saveInline("title", detailDraft.title)} on:keydown={(event) => event.key === "Enter" && event.currentTarget.blur()} />
-                                {#if selected.status !== "已完成"}
+                                {#if selectedProfile?.showComplete && !isClosed(selected)}
                                     <button class="b3-button xz-complete-button" type="button" disabled={Boolean(savingInline)} on:click={() => void saveInline("status", "已完成")}>
                                         ✓ 完成
                                     </button>
@@ -901,14 +957,25 @@
 
                     <div class="xz-meta-grid xz-meta-grid--editable">
                         <label><span>工作项类型</span><select class="b3-select xz-meta-type-select" aria-label="工作项类型" bind:value={detailDraft.type} disabled={Boolean(savingInline)} on:change={() => void saveInline("type", detailDraft.type)}><option value="">未分类</option>{#each data.fields.type?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
-                        <label><span>状态</span><select class="b3-select xz-meta-status-select" aria-label="状态" bind:value={detailDraft.status} disabled={Boolean(savingInline)} on:change={() => void saveInline("status", detailDraft.status)}><option value="">未设置</option>{#if legacyStatuses.has(detailDraft.status)}<option value={detailDraft.status}>{detailDraft.status}（旧状态）</option>{/if}{#each statusOptions as status}<option value={status}>{status}</option>{/each}</select></label>
-                        <label><span>上层工作项</span><select class="b3-select" bind:value={detailDraft.parent} disabled={Boolean(savingInline)} on:change={() => void saveInline("parent", detailDraft.parent)}><option value="">—</option>{#each parentCandidates as item}<option value={item.id}>{item.title}</option>{/each}</select></label>
-                        <label><span>所属顶层项目</span><select class="b3-select" bind:value={detailDraft.topProject} disabled={Boolean(savingInline)} on:change={() => void saveInline("topProject", detailDraft.topProject)}><option value="">—</option>{#each topProjectCandidates as item}<option value={item.id}>{item.title}</option>{/each}</select></label>
-                        <label><span>计划日期 {#if isToday(selected.planDate) && !isClosed(selected)}<em class="xz-date-hint xz-date-hint--today">今日</em>{/if}</span><input class="b3-text-field" type="date" bind:value={detailDraft.planDate} disabled={Boolean(savingInline)} on:change={() => void saveInline("planDate", detailDraft.planDate)} /></label>
-                        <label><span>截止日期 {#if isOverdue(selected)}<em class="xz-date-hint xz-date-hint--overdue">已逾期</em>{/if}</span><input class="b3-text-field" type="date" bind:value={detailDraft.deadline} disabled={Boolean(savingInline)} on:change={() => void saveInline("deadline", detailDraft.deadline)} /></label>
-                        <label><span>预计时长（分钟）</span><input class="b3-text-field" type="number" min="0" step="1" bind:value={detailDraft.duration} disabled={Boolean(savingInline)} on:change={() => void saveInline("duration", detailDraft.duration)} /></label>
-                        <label><span>所需精力</span><select class="b3-select" bind:value={detailDraft.energy} disabled={Boolean(savingInline)} on:change={() => void saveInline("energy", detailDraft.energy)}><option value="">—</option>{#each data.fields.energy?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
+                        <label><span>{selectedProfile?.statusLabel ?? "状态"}</span><select class="b3-select xz-meta-status-select" aria-label={selectedProfile?.statusLabel ?? "状态"} bind:value={detailDraft.status} disabled={Boolean(savingInline)} on:change={() => void saveInline("status", detailDraft.status)}><option value="">未设置</option>{#if detailDraft.status && !selectedProfile?.statuses.includes(detailDraft.status)}<option value={detailDraft.status}>{detailDraft.status}{legacyStatuses.has(detailDraft.status) ? "（旧状态）" : "（当前值）"}</option>{/if}{#each selectedProfile?.statuses ?? [] as status}<option value={status}>{status}</option>{/each}</select></label>
+                        {#if selectedProfile?.showParent}
+                            <label><span>{selectedProfile.parentLabel}</span><select class="b3-select" bind:value={detailDraft.parent} disabled={Boolean(savingInline)} on:change={() => void saveInline("parent", detailDraft.parent)}><option value="">—</option>{#each parentCandidates as item}<option value={item.id}>{item.title}</option>{/each}</select></label>
+                        {/if}
+                        {#if selectedProfile?.showTopProject}
+                            <div class="xz-meta-readonly-field"><span>所属顶层项目</span><strong>{topProject?.title ?? "尚未形成顶层项目链"}</strong></div>
+                        {/if}
+                        {#if selectedProfile?.showPlanDate}
+                            <label><span>计划日期 {#if isToday(selected.planDate) && !isClosed(selected)}<em class="xz-date-hint xz-date-hint--today">今日</em>{/if}</span><input class="b3-text-field" type="date" bind:value={detailDraft.planDate} disabled={Boolean(savingInline)} on:change={() => void saveInline("planDate", detailDraft.planDate)} /></label>
+                        {/if}
+                        {#if selectedProfile?.showDeadline}
+                            <label class="xz-deadline-field"><span>截止日期 {#if isOverdue(selected)}<em class="xz-date-hint xz-date-hint--overdue">已逾期</em>{:else if detailDraft.deadlineMode === "pending"}<em class="xz-date-hint xz-date-hint--pending">待确认</em>{/if}</span><div class="xz-deadline-control"><select class="b3-select" aria-label="截止日期设置" bind:value={detailDraft.deadlineMode} disabled={Boolean(savingInline)} on:change={() => void saveDeadlineMode(detailDraft.deadlineMode)}><option value="pending">待确认</option><option value="none" disabled={!data.fields.noDeadline}>无</option><option value="date">具体日期</option></select>{#if detailDraft.deadlineMode === "date"}<input class="b3-text-field" aria-label="具体截止日期" type="date" bind:value={detailDraft.deadline} disabled={Boolean(savingInline)} on:change={() => void saveDeadlineDate(detailDraft.deadline)} />{/if}</div></label>
+                        {/if}
+                        {#if selectedProfile?.showExecutionCost}
+                            <label><span>预计时长（分钟）</span><input class="b3-text-field" type="number" min="0" step="1" bind:value={detailDraft.duration} disabled={Boolean(savingInline)} on:change={() => void saveInline("duration", detailDraft.duration)} /></label>
+                            <label><span>所需精力</span><select class="b3-select" bind:value={detailDraft.energy} disabled={Boolean(savingInline)} on:change={() => void saveInline("energy", detailDraft.energy)}><option value="">—</option>{#each data.fields.energy?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
+                        {/if}
                     </div>
+                    {#if selectedProfile?.showDeadline && !data.fields.noDeadline}<p class="xz-missing-field"><strong>缺少“无截止日期”字段</strong><span>目前仍可设置具体日期；新增复选框字段后，才能把“无”和“待确认”区分开。</span></p>{/if}
                     {#if savingInline}<p class="xz-inline-feedback">正在保存并复核……</p>{/if}
                     {#if inlineError}<p class="xz-save-error" role="alert">{inlineError}</p>{/if}
 
@@ -935,22 +1002,24 @@
                             <p>当前数据库尚无此字段；插件不会擅自新增字段。</p>
                         </section>
                     {/if}
-                    <section
-                        class:xz-action-card--editing={editingAction === "nextAction"}
-                        class="xz-action-card xz-action-card--editable"
-                        role="button"
-                        tabindex="0"
-                        on:click={() => startActionEditing("nextAction")}
-                        on:keydown={(event) => handleActionCardKeydown(event, "nextAction")}
-                    >
-                        <header><h3>下一步行动</h3><span>{savingAction === "nextAction" ? "正在保存并复核…" : editingAction === "nextAction" ? "Esc 取消 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span></header>
-                        {#if editingAction === "nextAction"}
-                            <textarea use:focusOnMount class="b3-text-field xz-action-editor" rows="4" aria-label="下一步行动" bind:value={detailDraft.nextAction} disabled={savingAction === "nextAction"} on:click|stopPropagation on:blur={() => void saveAction("nextAction")} on:keydown={(event) => handleActionKeydown(event, "nextAction")}></textarea>
-                        {:else}
-                            <p>{selected.nextAction || "尚未填写明确的下一步行动。"}</p>
-                        {/if}
-                        {#if actionErrors.nextAction}<p class="xz-action-error" role="alert">{actionErrors.nextAction}</p>{/if}
-                    </section>
+                    {#if selectedProfile?.showNextAction}
+                        <section
+                            class:xz-action-card--editing={editingAction === "nextAction"}
+                            class="xz-action-card xz-action-card--editable"
+                            role="button"
+                            tabindex="0"
+                            on:click={() => startActionEditing("nextAction")}
+                            on:keydown={(event) => handleActionCardKeydown(event, "nextAction")}
+                        >
+                            <header><h3>下一步行动</h3><span>{savingAction === "nextAction" ? "正在保存并复核…" : editingAction === "nextAction" ? "Esc 取消 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span></header>
+                            {#if editingAction === "nextAction"}
+                                <textarea use:focusOnMount class="b3-text-field xz-action-editor" rows="4" aria-label="下一步行动" bind:value={detailDraft.nextAction} disabled={savingAction === "nextAction"} on:click|stopPropagation on:blur={() => void saveAction("nextAction")} on:keydown={(event) => handleActionKeydown(event, "nextAction")}></textarea>
+                            {:else}
+                                <p>{selected.nextAction || "尚未填写明确的下一步行动。"}</p>
+                            {/if}
+                            {#if actionErrors.nextAction}<p class="xz-action-error" role="alert">{actionErrors.nextAction}</p>{/if}
+                        </section>
+                    {/if}
 
                     {#if selectedIssues.length > 0}
                         <section class="xz-issues"><h3>关系提示</h3>{#each selectedIssues as issue}<p>{issue.message}</p>{/each}</section>
@@ -969,20 +1038,6 @@
                 {/if}
             </aside>
         </main>
-    {/if}
-
-    {#if contextMenu && contextItem}
-        <div
-            class="xz-context-menu"
-            role="menu"
-            tabindex="-1"
-            aria-label={`${contextItem.title}的操作菜单`}
-            style={`left:${contextMenu.x}px;top:${contextMenu.y}px`}
-        >
-            <button class="xz-context-menu-danger" type="button" role="menuitem" on:click={() => requestDelete(contextItem)}>
-                删除工作项…
-            </button>
-        </div>
     {/if}
 
     {#if deleteTarget}

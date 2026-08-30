@@ -72,15 +72,16 @@ describe("captureInboxItem", () => {
                 currentAction: { id: "current", name: "本次行动细则", type: "text", options: [] },
                 nextAction: { id: "next", name: "下一步行动", type: "text", options: [] },
                 parent: { id: "parent", name: "上层工作项", type: "relation", options: [] },
+                noDeadline: { id: "no-deadline", name: "无截止日期", type: "checkbox", options: [] },
             },
             items: [{
                 id: "item-1", rowId: "item-1", title: "清理垃圾", documentId: null, detached: true,
                 type: "事务", status: "收件箱", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
-                planDate: null, deadline: null, durationMinutes: null, energy: "", updatedAt: null,
+                planDate: null, deadline: null, noDeadline: false, durationMinutes: null, energy: "", updatedAt: null,
             }, {
                 id: "project-1", rowId: "project-1", title: "家庭整理", documentId: null, detached: true,
                 type: "项目", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
-                planDate: null, deadline: null, durationMinutes: null, energy: "", updatedAt: null,
+                planDate: null, deadline: null, noDeadline: false, durationMinutes: null, energy: "", updatedAt: null,
             }],
         };
         const definition: AttributeViewDefinition = {
@@ -92,6 +93,7 @@ describe("captureInboxItem", () => {
                     { key: { id: "current", name: "本次行动细则", type: "text" } },
                     { key: { id: "next", name: "下一步行动", type: "text" } },
                     { key: { id: "parent", name: "上层工作项", type: "relation" } },
+                    { key: { id: "no-deadline", name: "无截止日期", type: "checkbox" } },
                 ],
             },
         };
@@ -104,6 +106,7 @@ describe("captureInboxItem", () => {
                     { id: "current", name: "本次行动细则", type: "text" },
                     { id: "next", name: "下一步行动", type: "text" },
                     { id: "parent", name: "上层工作项", type: "relation" },
+                    { id: "no-deadline", name: "无截止日期", type: "checkbox" },
                 ],
                 rows: [{ id: "item-1", cells: [
                     { value: { keyID: "title", blockID: "item-1", isDetached: true, block: { content: "清理垃圾" } } },
@@ -111,6 +114,7 @@ describe("captureInboxItem", () => {
                     { value: { keyID: "current", text: { content: "收集各房间垃圾并更换垃圾袋" } } },
                     { value: { keyID: "next", text: { content: "拿垃圾袋装好并带下楼" } } },
                     { value: { keyID: "parent", relation: { blockIDs: ["project-1"] } } },
+                    { value: { keyID: "no-deadline", checkbox: { checked: true } } },
                 ] }, { id: "project-1", cells: [
                     { value: { keyID: "title", blockID: "project-1", isDetached: true, block: { content: "家庭整理" } } },
                     { value: { keyID: "status", mSelect: [{ content: "进行中", color: "5" }] } },
@@ -118,6 +122,7 @@ describe("captureInboxItem", () => {
             },
         };
         requestMock
+            .mockResolvedValueOnce({ value: {} })
             .mockResolvedValueOnce({ value: {} })
             .mockResolvedValueOnce({ value: {} })
             .mockResolvedValueOnce({ value: {} })
@@ -130,6 +135,7 @@ describe("captureInboxItem", () => {
             currentAction: "收集各房间垃圾并更换垃圾袋",
             nextAction: "拿垃圾袋装好并带下楼",
             parent: "project-1",
+            noDeadline: true,
         });
 
         expect(requestMock).toHaveBeenNthCalledWith(1, "/api/av/setAttributeViewBlockAttr", expect.objectContaining({
@@ -144,14 +150,17 @@ describe("captureInboxItem", () => {
         expect(requestMock).toHaveBeenNthCalledWith(4, "/api/av/setAttributeViewBlockAttr", expect.objectContaining({
             keyID: "parent", itemID: "item-1", value: { type: "relation", relation: { blockIDs: ["project-1"], contents: [] } },
         }));
-        expect(result.items[0]).toMatchObject({ status: "待开始", currentAction: "收集各房间垃圾并更换垃圾袋", nextAction: "拿垃圾袋装好并带下楼", parentIds: ["project-1"] });
+        expect(requestMock).toHaveBeenNthCalledWith(5, "/api/av/setAttributeViewBlockAttr", expect.objectContaining({
+            keyID: "no-deadline", itemID: "item-1", value: { type: "checkbox", checkbox: { checked: true } },
+        }));
+        expect(result.items[0]).toMatchObject({ status: "待开始", currentAction: "收集各房间垃圾并更换垃圾袋", nextAction: "拿垃圾袋装好并带下楼", parentIds: ["project-1"], noDeadline: true });
     });
 
     it("删除工作项时使用属性视图行 ID，并在重新读取后确认条目消失", async () => {
         const item = {
             id: "source-block", rowId: "row-item", title: "一次性事务", documentId: "source-block", detached: false,
             type: "事务", status: "待开始", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
-            planDate: null, deadline: null, durationMinutes: null, energy: "", updatedAt: null,
+            planDate: null, deadline: null, noDeadline: false, durationMinutes: null, energy: "", updatedAt: null,
         };
         const data: WorkItemData = {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view", items: [item], missingFields: [], fields: {},

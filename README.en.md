@@ -23,6 +23,9 @@ Xingzhou is a SiYuan plugin for managing personal projects with low friction. A 
 - Active-path expansion and collapse-all controls.
 - All, active project, someday, and closed filters.
 - Direct detail editing for hierarchy, type, status, dates, duration, and energy.
+- Role-aware detail layouts for areas, top-level projects, subprojects, tasks, transactions, and ideas, hiding execution-only fields from non-executable roles.
+- Derived, read-only top-project display that updates together with explicit direct-parent changes.
+- Three-state deadlines: Pending confirmation, None, or a concrete date.
 - Title-level completion control that disappears after completion while status remains the single lifecycle source of truth.
 - Click-to-edit current-action and next-action cards with blur-to-save, Escape to cancel, and Cmd/Ctrl+Enter to save.
 - Setting a plan date can move Inbox/Ready items to Planned, but dates never pretend that work has actually started.
@@ -55,7 +58,7 @@ Main navigation uses page names only and keeps development-state labels out of t
 
 ## Expected fields
 
-The primary field is `工作项`. Xingzhou also recognizes `工作项类型`, `状态`, `上层工作项`, `所属顶层项目`, `本次行动细则`, `下一步行动`, `计划日期`, `截止日期`, `预计时长（分钟）`, and `所需精力`. The intended status set is Inbox, Ready, Planned, In Progress, Blocked, Paused, Someday, Completed, Failed, Cancelled, and Abandoned. Legacy values remain readable during migration.
+The primary field is `工作项`. Xingzhou also recognizes `工作项类型`, `状态`, `上层工作项`, `所属顶层项目`, `本次行动细则`, `下一步行动`, `计划日期`, `截止日期`, `无截止日期`, `预计时长（分钟）`, and `所需精力`. Long-term areas use focus-oriented states while other roles use lifecycle states. `无截止日期` is a checkbox that distinguishes an explicit no-deadline decision from an unconfirmed blank. Legacy values remain readable during migration.
 
 ## Development
 
@@ -74,7 +77,7 @@ Xingzhou has no remote service. It accesses only the configured Attribute View t
 
 ## Database schema note
 
-Xingzhou never changes the database schema automatically. Before first use, ensure that the target Attribute View contains the fields you intend to use, especially the `本次行动细则` text field. Legacy statuses remain readable, but moving gradually to the current status set and reviewing native view filters is recommended.
+Xingzhou never changes the database schema automatically. Before first use, ensure that the target Attribute View contains the fields you intend to use, especially the `本次行动细则` text field and the `无截止日期` checkbox. Legacy statuses remain readable, but moving gradually to the current status set and reviewing native view filters is recommended.
 
 ## License
 

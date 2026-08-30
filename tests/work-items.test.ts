@@ -10,6 +10,7 @@ function renderedFixture(): RenderedAttributeView {
         { id: "parent", name: "上层工作项", type: "relation" },
         { id: "top", name: "所属顶层项目", type: "relation" },
         { id: "plan", name: "计划日期", type: "date" },
+        { id: "no-deadline", name: "无截止日期", type: "checkbox" },
         { id: "next", name: "下一步行动", type: "text" },
     ];
     return {
@@ -38,6 +39,7 @@ function renderedFixture(): RenderedAttributeView {
                         { value: { keyID: "parent", type: "relation", relation: { blockIDs: ["domain"] } } },
                         { value: { keyID: "top", type: "relation", relation: { blockIDs: ["domain"] } } },
                         { value: { keyID: "plan", type: "date", date: { content: 1788048000000, isNotEmpty: true } } },
+                        { value: { keyID: "no-deadline", type: "checkbox", checkbox: { checked: true } } },
                         { value: { keyID: "next", type: "text", text: { content: "整理十张参考图" } } },
                     ],
                 },
@@ -60,6 +62,7 @@ describe("parseRenderedAttributeView", () => {
             id: "task",
             parentIds: ["domain"],
             nextAction: "整理十张参考图",
+            noDeadline: true,
             detached: true,
             documentId: null,
         });
@@ -137,6 +140,7 @@ function item(overrides: Partial<WorkItem> & Pick<WorkItem, "id" | "title">): Wo
         topProjectIds: [],
         planDate: null,
         deadline: null,
+        noDeadline: false,
         durationMinutes: null,
         energy: "",
         updatedAt: null,

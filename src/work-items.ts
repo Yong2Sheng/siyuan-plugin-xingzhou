@@ -11,6 +11,7 @@ export const FIELD_NAMES = {
     topProject: ["所属顶层项目", "顶层项目"],
     planDate: ["计划日期"],
     deadline: ["截止日期"],
+    noDeadline: ["无截止日期"],
     duration: ["预计时长（分钟）", "预计时长(分钟)", "预计时长"],
     energy: ["所需精力"],
     updatedAt: ["最近更新"],
@@ -73,7 +74,7 @@ export type AttributeViewDefinition = {
     };
 };
 
-export type EditableWorkItemField = "title" | "type" | "status" | "currentAction" | "nextAction" | "parent" | "topProject" | "planDate" | "deadline" | "duration" | "energy";
+export type EditableWorkItemField = "title" | "type" | "status" | "currentAction" | "nextAction" | "parent" | "topProject" | "planDate" | "deadline" | "noDeadline" | "duration" | "energy";
 
 export type WorkItemField = {
     id: string;
@@ -82,7 +83,7 @@ export type WorkItemField = {
     options: Array<{ name: string; color?: string; desc?: string }>;
 };
 
-export type WorkItemChanges = Partial<Record<EditableWorkItemField, string | number | null>>;
+export type WorkItemChanges = Partial<Record<EditableWorkItemField, string | number | boolean | null>>;
 
 export type WorkItem = {
     id: string;
@@ -98,6 +99,7 @@ export type WorkItem = {
     topProjectIds: string[];
     planDate: number | null;
     deadline: number | null;
+    noDeadline: boolean;
     durationMinutes: number | null;
     energy: string;
     updatedAt: number | null;
@@ -144,7 +146,7 @@ export async function updateWorkItem(
     item: WorkItem,
     changes: WorkItemChanges,
 ): Promise<WorkItemData> {
-    const entries = Object.entries(changes) as Array<[EditableWorkItemField, string | number | null]>;
+    const entries = Object.entries(changes) as Array<[EditableWorkItemField, string | number | boolean | null]>;
     for (const [role, content] of entries) {
         const field = data.fields[role];
         if (!field) throw new Error(`当前数据库中没有“${FIELD_NAMES[role][0]}”字段。`);
@@ -275,7 +277,7 @@ export function parseRenderedAttributeView(rendered: RenderedAttributeView): Wor
         if (column) columnIdByRole.set(role, column.id);
     }
 
-    const missingFields = ["title", "type", "status", "currentAction", "nextAction", "parent", "topProject", "planDate", "deadline", "duration", "energy"]
+    const missingFields = ["title", "type", "status", "currentAction", "nextAction", "parent", "topProject", "planDate", "deadline", "noDeadline", "duration", "energy"]
         .filter((role) => !columnIdByRole.has(role))
         .map((role) => FIELD_NAMES[role as keyof typeof FIELD_NAMES][0]);
 
@@ -307,6 +309,7 @@ export function parseRenderedAttributeView(rendered: RenderedAttributeView): Wor
             topProjectIds: extractRelations(get("topProject")),
             planDate: extractDate(get("planDate")),
             deadline: extractDate(get("deadline")),
+            noDeadline: extractCheckbox(get("noDeadline")),
             durationMinutes: extractNumber(get("duration")),
             energy: extractSelect(get("energy")),
             updatedAt: extractDate(get("updatedAt")),
@@ -335,7 +338,7 @@ function readFieldDefinitions(definition: AttributeViewDefinition): Partial<Reco
     return result;
 }
 
-function buildCellValue(role: EditableWorkItemField, content: string | number | null, field: WorkItemField, item: WorkItem): RawCellValue {
+function buildCellValue(role: EditableWorkItemField, content: string | number | boolean | null, field: WorkItemField, item: WorkItem): RawCellValue {
     if (role === "title") {
         const block: { content: string; id?: string } = { content: String(content ?? "").trim() };
         if (item.documentId) block.id = item.documentId;
@@ -355,6 +358,7 @@ function buildCellValue(role: EditableWorkItemField, content: string | number | 
                 : { content: number, isNotEmpty: true },
         };
     }
+    if (role === "noDeadline") return { type: "checkbox", checkbox: { checked: Boolean(content) } };
     if (role === "planDate" || role === "deadline") {
         const timestamp = typeof content === "number" ? content : content ? new Date(`${content}T00:00:00`).getTime() : 0;
         return { type: "date", date: { content: timestamp, isNotEmpty: Boolean(content) } };
@@ -367,7 +371,7 @@ function buildCellValue(role: EditableWorkItemField, content: string | number | 
     };
 }
 
-function matchesUpdatedValue(item: WorkItem, role: EditableWorkItemField, expected: string | number | null): boolean {
+function matchesUpdatedValue(item: WorkItem, role: EditableWorkItemField, expected: string | number | boolean | null): boolean {
     if (role === "title") return item.title === String(expected ?? "").trim();
     if (role === "type") return item.type === String(expected ?? "");
     if (role === "status") return item.status === String(expected ?? "");
@@ -376,6 +380,7 @@ function matchesUpdatedValue(item: WorkItem, role: EditableWorkItemField, expect
     if (role === "parent") return (item.parentIds[0] ?? "") === String(expected ?? "");
     if (role === "topProject") return (item.topProjectIds[0] ?? "") === String(expected ?? "");
     if (role === "energy") return item.energy === String(expected ?? "");
+    if (role === "noDeadline") return item.noDeadline === Boolean(expected);
     if (role === "duration") return item.durationMinutes === (expected === null || expected === "" ? null : Number(expected));
     const actual = role === "planDate" ? item.planDate : item.deadline;
     if (!expected) return actual === null;
@@ -406,6 +411,10 @@ function extractSelect(value?: RawCellValue): string {
 
 function extractRelations(value?: RawCellValue): string[] {
     return [...new Set(value?.relation?.blockIDs?.filter(Boolean) ?? [])];
+}
+
+function extractCheckbox(value?: RawCellValue): boolean {
+    return Boolean(value?.checkbox?.checked);
 }
 
 function extractNumber(value?: RawCellValue): number | null {

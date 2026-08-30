@@ -60,8 +60,8 @@ describe("XingzhouApp", () => {
     it("从收件箱查看独立条目时精确高亮，并允许直接编辑数据库字段", async () => {
         const item = {
             id: "item-1", rowId: "item-1", title: "清理房间中的垃圾", documentId: null, detached: true,
-            type: "", status: "收件箱", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
-            planDate: Date.now(), deadline: Date.now() - 2 * 24 * 60 * 60 * 1000, durationMinutes: null, energy: "", updatedAt: Date.now(),
+            type: "事务", status: "收件箱", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: Date.now(), deadline: Date.now() - 2 * 24 * 60 * 60 * 1000, noDeadline: false, durationMinutes: null, energy: "", updatedAt: Date.now(),
         };
         const workItemData = {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
@@ -75,6 +75,7 @@ describe("XingzhouApp", () => {
                 topProject: { id: "top", name: "所属顶层项目", type: "relation", options: [] },
                 planDate: { id: "plan", name: "计划日期", type: "date", options: [] },
                 deadline: { id: "deadline", name: "截止日期", type: "date", options: [] },
+                noDeadline: { id: "no-deadline", name: "无截止日期", type: "checkbox", options: [] },
                 duration: { id: "duration", name: "预计时长（分钟）", type: "number", options: [] },
                 energy: { id: "energy", name: "所需精力", type: "select", options: [{ name: "低" }] },
             },
@@ -164,6 +165,13 @@ describe("XingzhouApp", () => {
         await tick();
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
         expect(saveItem.mock.calls[0][2]).toMatchObject({ planDate: "2026-09-01", status: "已计划" });
+
+        saveItem.mockClear();
+        const deadlineMode = document.querySelector('select[aria-label="截止日期设置"]') as HTMLSelectElement;
+        deadlineMode.value = "none";
+        deadlineMode.dispatchEvent(new Event("change", { bubbles: true }));
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
+        expect(saveItem.mock.calls[0][2]).toEqual({ deadline: null, noDeadline: true });
     });
 
     it("本周页按实际日期分组，并能把待安排条目分配到某一天", async () => {
@@ -172,7 +180,7 @@ describe("XingzhouApp", () => {
         const scheduled = {
             id: "scheduled", rowId: "scheduled", title: "今天处理合同", documentId: null, detached: true,
             type: "事务", status: "已计划", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
-            planDate: today.getTime(), deadline: null, durationMinutes: 30, energy: "低", updatedAt: Date.now(),
+            planDate: today.getTime(), deadline: null, noDeadline: true, durationMinutes: 30, energy: "低", updatedAt: Date.now(),
         };
         const unscheduled = {
             ...scheduled, id: "unscheduled", rowId: "unscheduled", title: "整理书架", status: "待开始", planDate: null,
@@ -238,7 +246,7 @@ describe("XingzhouApp", () => {
         const domain = {
             id: "domain", rowId: "row-domain", title: "写小说", documentId: "domain-doc", detached: false,
             type: "长期领域", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
-            planDate: null, deadline: null, durationMinutes: null, energy: "", updatedAt: Date.now(),
+            planDate: null, deadline: null, noDeadline: false, durationMinutes: null, energy: "", updatedAt: Date.now(),
         };
         const child = {
             ...domain, id: "child", rowId: "row-child", title: "世界观构建", documentId: null, detached: true,
@@ -249,10 +257,11 @@ describe("XingzhouApp", () => {
             items: [domain, child], missingFields: [], fields: {},
         };
         const deleteItem = vi.fn().mockResolvedValue({ ...workItemData, items: [child] });
+        const openItemMenu = vi.fn((_event: MouseEvent, onDelete: () => void) => onDelete());
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(), deleteItem,
+                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(), deleteItem, openItemMenu,
                 openDocument: vi.fn(), openDatabase: vi.fn(),
             },
         });
@@ -268,14 +277,18 @@ describe("XingzhouApp", () => {
         [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "全部")?.click();
         await tick();
         await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="domain"]'), document.body.innerHTML).not.toBeNull());
+        const detail = document.querySelector(".xz-detail") as HTMLElement;
+        expect(detail.querySelector(".xz-detail-role")?.textContent).toBe("长期领域");
+        expect(detail.textContent).toContain("投入状态");
+        expect(detail.textContent).toContain("领域说明／当前关注方向");
+        expect(detail.textContent).not.toContain("计划日期");
+        expect(detail.textContent).not.toContain("预计时长");
+        expect(detail.querySelector(".xz-complete-button")).toBeNull();
         (document.querySelector('[data-work-item-id="domain"]') as HTMLElement).dispatchEvent(new MouseEvent("contextmenu", {
             bubbles: true, cancelable: true, clientX: 120, clientY: 160,
         }));
         await tick();
-        expect(document.querySelector('[role="menu"]')?.textContent).toContain("删除工作项");
-
-        ([...document.querySelectorAll("button")].find((button) => button.textContent?.includes("删除工作项")) as HTMLButtonElement).click();
-        await tick();
+        expect(openItemMenu).toHaveBeenCalledOnce();
         expect(document.querySelector('[role="dialog"]')?.textContent).toContain("关联的思源文档不会被删除");
         expect(document.querySelector('[role="dialog"]')?.textContent).toContain("1 个下级工作项");
         expect(document.querySelector('[role="dialog"]')?.textContent).toContain("1 个工作项把它设为所属顶层项目");
@@ -291,7 +304,7 @@ describe("XingzhouApp", () => {
         const base = {
             id: "base", rowId: "base", title: "基础条目", documentId: null, detached: true,
             type: "事务", status: "待开始", currentAction: "已有行动", nextAction: "", parentIds: [], topProjectIds: [],
-            planDate: null, deadline: null, durationMinutes: 30, energy: "低", updatedAt: now,
+            planDate: null, deadline: null, noDeadline: true, durationMinutes: 30, energy: "低", updatedAt: now,
         };
         const domain = { ...base, id: "domain", rowId: "domain", title: "创作", type: "长期领域", status: "进行中" };
         const projects = [1, 2, 3, 4].map((number) => ({
