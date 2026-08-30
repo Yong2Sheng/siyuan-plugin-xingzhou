@@ -2,7 +2,7 @@ import { openTab, Plugin, Setting, showMessage, type Custom, type Tab } from "si
 import XingzhouApp from "./XingzhouApp.svelte";
 import { DEFAULT_SETTINGS, normalizeSettings, type XingzhouSettings } from "./config";
 import { getXingzhouTabId, XINGZHOU_TAB_TYPE } from "./tab-id";
-import { loadWorkItems } from "./work-items";
+import { captureInboxItem, loadWorkItems, updateWorkItem } from "./work-items";
 import "./index.scss";
 
 const SETTINGS_FILE = "settings.json";
@@ -83,6 +83,12 @@ export default class XingzhouPlugin extends Plugin {
                         target: mount,
                         props: {
                             load: () => loadWorkItems(plugin.settings.attributeViewId),
+                            captureInbox: (title: string) => captureInboxItem(
+                                plugin.settings.attributeViewId,
+                                plugin.settings.databaseBlockId,
+                                title,
+                            ),
+                            saveItem: updateWorkItem,
                             openDocument: (blockId: string) => plugin.openBlock(blockId),
                             openDatabase: () => plugin.openNativeDatabase(),
                         },

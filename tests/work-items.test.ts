@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildWorkItemTree, collectDescendantIds, hasActiveDescendant } from "../src/tree";
-import { parseRenderedAttributeView, type RenderedAttributeView, type WorkItem } from "../src/work-items";
+import { buildInboxCapturePayload, findInboxViewId, parseRenderedAttributeView, type AttributeViewDefinition, type RenderedAttributeView, type WorkItem } from "../src/work-items";
 
 function renderedFixture(): RenderedAttributeView {
     const columns = [
@@ -88,6 +88,42 @@ describe("buildWorkItemTree", () => {
     });
 });
 
+describe("收件箱捕获", () => {
+    it("找到原生快速收件箱视图并生成带默认填充的独立行请求", () => {
+        const definition: AttributeViewDefinition = {
+            av: {
+                id: "av-id",
+                name: "测试数据库",
+                views: [
+                    { id: "all-view", name: "全部工作项", type: "table" },
+                    { id: "inbox-view", name: "快速收件箱", type: "table" },
+                ],
+            },
+        };
+        const viewID = findInboxViewId(definition);
+        const payload = buildInboxCapturePayload({
+            attributeViewId: "av-id",
+            databaseBlockId: "database-block",
+            inboxViewId: viewID,
+            itemId: "20260829200000-abc1234",
+            title: "整理旧合同",
+        });
+
+        expect(payload).toMatchObject({
+            avID: "av-id",
+            blockID: "database-block",
+            viewID: "inbox-view",
+            ignoreDefaultFill: false,
+            srcs: [{
+                id: "20260829200000-abc1234",
+                itemID: "20260829200000-abc1234",
+                isDetached: true,
+                content: "整理旧合同",
+            }],
+        });
+    });
+});
+
 function item(overrides: Partial<WorkItem> & Pick<WorkItem, "id" | "title">): WorkItem {
     return {
         rowId: overrides.id,
@@ -103,6 +139,7 @@ function item(overrides: Partial<WorkItem> & Pick<WorkItem, "id" | "title">): Wo
         deadline: null,
         durationMinutes: null,
         energy: "",
+        updatedAt: null,
         ...overrides,
     };
 }
