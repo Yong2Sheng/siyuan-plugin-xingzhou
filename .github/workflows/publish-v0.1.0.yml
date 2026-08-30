@@ -1,0 +1,94 @@
+name: Publish v0.1.0 from Existing Tag
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/release-notes/v0.1.0.md"
+      - ".github/workflows/publish-v0.1.0.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout v0.1.0 source
+        uses: actions/checkout@v7
+        with:
+          ref: "v0.1.0"
+
+      - name: Checkout release metadata
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          path: ".release-metadata"
+          sparse-checkout: |
+            .github/release-notes/v0.1.0.md
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - name: Install dependencies
+        run: CI=true pnpm install --frozen-lockfile
+
+      - name: Verify versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./plugin.json').version")" = "0.1.0"
+          test "$(node -p "require('./package.json').version")" = "0.1.0"
+
+      - name: Check
+        run: CI=true pnpm check
+
+      - name: Test
+        run: CI=true pnpm test
+
+      - name: Build for production
+        run: CI=true pnpm build
+
+      - name: Verify release package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f package.zip
+          unzip -tq package.zip
+          tmp_dir="$(mktemp -d)"
+          trap 'rm -rf "$tmp_dir"' EXIT
+          unzip -q package.zip -d "$tmp_dir"
+          for file in LICENSE README.md README.en.md CHANGELOG.md CHANGELOG.en.md plugin.json icon.png preview.png index.js index.css i18n/en.json i18n/zh-CN.json; do
+            test -f "$tmp_dir/$file"
+          done
+          cmp plugin.json "$tmp_dir/plugin.json"
+          if unzip -Z1 package.zip | grep -Eq '(^|/)(src|test|tests|node_modules|\.git|docs|patches)(/|$)|(^|/)package\.zip$|\.map$'; then
+            echo "Unexpected development file found in package.zip" >&2
+            exit 1
+          fi
+
+      - name: Create v0.1.0 GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          artifactErrorsFailBuild: true
+          artifacts: "package.zip"
+          bodyFile: ".release-metadata/.github/release-notes/v0.1.0.md"
+          draft: false
+          generateReleaseNotes: false
+          makeLatest: true
+          name: "行舟 v0.1.0 · Xingzhou v0.1.0"
+          prerelease: false
+          tag: "v0.1.0"
+          token: ${{ secrets.GITHUB_TOKEN }}
