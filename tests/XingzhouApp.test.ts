@@ -59,7 +59,7 @@ describe("XingzhouApp", () => {
         const item = {
             id: "item-1", rowId: "item-1", title: "清理房间中的垃圾", documentId: null, detached: true,
             type: "", status: "收件箱", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
-            planDate: null, deadline: Date.now() - 2 * 24 * 60 * 60 * 1000, durationMinutes: null, energy: "", updatedAt: Date.now(),
+            planDate: Date.now(), deadline: Date.now() - 2 * 24 * 60 * 60 * 1000, durationMinutes: null, energy: "", updatedAt: Date.now(),
         };
         const workItemData = {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
@@ -69,6 +69,11 @@ describe("XingzhouApp", () => {
                 type: { id: "type", name: "工作项类型", type: "select", options: [{ name: "事务" }] },
                 status: { id: "status", name: "状态", type: "select", options: [{ name: "收件箱" }, { name: "待开始" }] },
                 nextAction: { id: "next", name: "下一步行动", type: "text", options: [] },
+                parent: { id: "parent", name: "上层工作项", type: "relation", options: [] },
+                topProject: { id: "top", name: "所属顶层项目", type: "relation", options: [] },
+                planDate: { id: "plan", name: "计划日期", type: "date", options: [] },
+                deadline: { id: "deadline", name: "截止日期", type: "date", options: [] },
+                duration: { id: "duration", name: "预计时长（分钟）", type: "number", options: [] },
                 energy: { id: "energy", name: "所需精力", type: "select", options: [{ name: "低" }] },
             },
         };
@@ -96,24 +101,187 @@ describe("XingzhouApp", () => {
         expect(exactScope?.classList.contains("active"), document.body.textContent ?? "").toBe(true);
         expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("清理房间中的垃圾");
         expect(document.body.textContent).toContain("这是数据库独立条目，不需要建立或关联文档");
-        expect(document.querySelector(".xz-tag--overdue")?.textContent).toBe("已逾期");
+        expect(document.querySelector(".xz-date-hint--today")?.textContent).toBe("今日");
+        expect(document.querySelector(".xz-date-hint--overdue")?.textContent).toBe("已逾期");
+        expect(document.querySelector(".xz-detail-header-actions .xz-tag--today")).toBeNull();
 
-        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "编辑")?.click();
+        saveItem.mockClear();
+        (document.querySelector(".xz-complete-button") as HTMLButtonElement).click();
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
+        expect(saveItem.mock.calls[0][2]).toEqual({ status: "已完成" });
+
+        expect((document.querySelector(".xz-inline-title") as HTMLInputElement).value).toBe("清理房间中的垃圾");
+        expect(document.querySelectorAll(".xz-meta-grid--editable select")).toHaveLength(5);
+        expect(document.querySelector(".xz-detail-header select")).toBeNull();
+        const statusSelect = document.querySelector(".xz-meta-status-select") as HTMLSelectElement;
+        expect([...statusSelect.options].map((option) => option.value)).toContain("已计划");
+        expect([...statusSelect.options].map((option) => option.value)).not.toContain("规划中");
+
+        expect([...document.querySelectorAll("button")].find((button) => button.textContent?.includes("编辑行动内容"))).toBeUndefined();
+        expect(document.body.textContent).toContain("当前数据库尚无此字段");
+        const nextActionCard = [...document.querySelectorAll<HTMLElement>(".xz-action-card")]
+            .find((card) => card.querySelector("h3")?.textContent === "下一步行动") as HTMLElement;
+        nextActionCard.click();
         await tick();
-        expect((document.querySelector(".xz-detail-form input") as HTMLInputElement).value).toBe("清理房间中的垃圾");
-        expect(document.querySelector(".xz-detail-form textarea")).toBeInstanceOf(HTMLTextAreaElement);
-        expect(document.body.textContent).toContain("代码已经支持，待数据库迁移后即可直接编辑");
-        const statusSelect = [...document.querySelectorAll<HTMLSelectElement>(".xz-detail-form select")]
-            .find((select) => [...select.options].some((option) => option.value === "已计划"));
-        expect(statusSelect).toBeTruthy();
-        expect([...statusSelect!.options].map((option) => option.value)).not.toContain("规划中");
+        let actionEditor = document.querySelector('textarea[aria-label="下一步行动"]') as HTMLTextAreaElement;
+        expect(actionEditor).toBeInstanceOf(HTMLTextAreaElement);
+        expect(document.activeElement).toBe(actionEditor);
 
-        const planDate = document.querySelector('.xz-detail-form input[type="date"]') as HTMLInputElement;
+        saveItem.mockClear();
+        actionEditor.value = "这次输入需要取消";
+        actionEditor.dispatchEvent(new Event("input", { bubbles: true }));
+        actionEditor.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        await tick();
+        expect(document.querySelector('textarea[aria-label="下一步行动"]')).toBeNull();
+        expect(saveItem).not.toHaveBeenCalled();
+
+        nextActionCard.click();
+        await tick();
+        actionEditor = document.querySelector('textarea[aria-label="下一步行动"]') as HTMLTextAreaElement;
+        actionEditor.value = "把垃圾装袋并带到楼下";
+        actionEditor.dispatchEvent(new Event("input", { bubbles: true }));
+        actionEditor.blur();
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
+        expect(saveItem.mock.calls[0][2]).toEqual({ nextAction: "把垃圾装袋并带到楼下" });
+
+        saveItem.mockClear();
+        ([...document.querySelectorAll<HTMLElement>(".xz-action-card")].find((card) => card.querySelector("h3")?.textContent === "下一步行动") as HTMLElement).click();
+        await tick();
+        actionEditor = document.querySelector('textarea[aria-label="下一步行动"]') as HTMLTextAreaElement;
+        actionEditor.value = "快捷键保存的下一步";
+        actionEditor.dispatchEvent(new Event("input", { bubbles: true }));
+        actionEditor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }));
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
+        expect(saveItem.mock.calls[0][2]).toEqual({ nextAction: "快捷键保存的下一步" });
+
+        saveItem.mockClear();
+        const planDate = document.querySelector('.xz-meta-grid--editable input[type="date"]') as HTMLInputElement;
         planDate.value = "2026-09-01";
         planDate.dispatchEvent(new Event("input", { bubbles: true }));
+        planDate.dispatchEvent(new Event("change", { bubbles: true }));
         await tick();
-        (document.querySelector(".xz-detail-form") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
         expect(saveItem.mock.calls[0][2]).toMatchObject({ planDate: "2026-09-01", status: "已计划" });
+    });
+
+    it("本周页按实际日期分组，并能把待安排条目分配到某一天", async () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const scheduled = {
+            id: "scheduled", rowId: "scheduled", title: "今天处理合同", documentId: null, detached: true,
+            type: "事务", status: "已计划", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: today.getTime(), deadline: null, durationMinutes: 30, energy: "低", updatedAt: Date.now(),
+        };
+        const unscheduled = {
+            ...scheduled, id: "unscheduled", rowId: "unscheduled", title: "整理书架", status: "待开始", planDate: null,
+        };
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const activeWindow = {
+            ...scheduled, id: "window", rowId: "window", title: "办理有效期内的事务", planDate: yesterday.getTime(), deadline: tomorrow.getTime(),
+        };
+        const unscheduledProject = {
+            ...unscheduled, id: "project", rowId: "project", title: "不应进入待安排的项目", type: "项目",
+        };
+        const workItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [scheduled, unscheduled, activeWindow, unscheduledProject], missingFields: [],
+            fields: {
+                title: { id: "title", name: "工作项", type: "block", options: [] },
+                status: { id: "status", name: "状态", type: "select", options: [{ name: "已计划" }] },
+                planDate: { id: "plan", name: "计划日期", type: "date", options: [] },
+            },
+        };
+        const saveItem = vi.fn().mockResolvedValue(workItemData);
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn(() => new Promise<never>(() => undefined)),
+                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, openDocument: vi.fn(), openDatabase: vi.fn(),
+            },
+        });
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
+        await tick();
+        const input = document.querySelector("#xz-inbox-input") as HTMLInputElement;
+        input.value = "初始化测试数据";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await tick();
+        (document.querySelector(".xz-capture-card") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        await vi.waitFor(() => expect(document.body.textContent).toContain("已加入收件箱：初始化测试数据"));
+
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "本周")?.click();
+        await tick();
+        expect(document.body.textContent).toContain("周一");
+        expect(document.body.textContent).toContain("周日");
+        expect(document.querySelector(".xz-week-board")?.textContent).toContain("今天处理合同");
+        expect(document.querySelector(".xz-week-backlog")?.textContent).toContain("整理书架");
+        expect(document.querySelector(".xz-week-backlog")?.textContent).toContain("办理有效期内的事务");
+        expect(document.querySelector(".xz-week-backlog")?.textContent).not.toContain("不应进入待安排的项目");
+
+        const assignment = document.querySelector('select[aria-label="安排“整理书架”"]') as HTMLSelectElement;
+        const targetDate = assignment.options[1].value;
+        assignment.value = targetDate;
+        assignment.dispatchEvent(new Event("change", { bubbles: true }));
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
+        expect(saveItem.mock.calls[0][2]).toEqual({ planDate: targetDate, status: "已计划" });
+    });
+
+    it("整理页根据真实数据生成周度检查，并能跳转到问题条目", async () => {
+        const now = Date.now();
+        const day = 24 * 60 * 60 * 1000;
+        const base = {
+            id: "base", rowId: "base", title: "基础条目", documentId: null, detached: true,
+            type: "事务", status: "待开始", currentAction: "已有行动", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: null, durationMinutes: 30, energy: "低", updatedAt: now,
+        };
+        const domain = { ...base, id: "domain", rowId: "domain", title: "创作", type: "长期领域", status: "进行中" };
+        const projects = [1, 2, 3, 4].map((number) => ({
+            ...base, id: `project-${number}`, rowId: `project-${number}`, title: `活跃项目 ${number}`, type: "项目", status: "进行中", parentIds: ["domain"],
+        }));
+        const inbox = { ...base, id: "inbox", rowId: "inbox", title: "需要归类的想法", type: "想法", status: "收件箱", currentAction: "" };
+        const overdue = { ...base, id: "overdue", rowId: "overdue", title: "需要重新安排的事务", status: "已计划", currentAction: "", planDate: now - 3 * day, deadline: now - day };
+        const completed = { ...base, id: "completed", rowId: "completed", title: "本周完成的事务", status: "已完成" };
+        const workItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [domain, ...projects, inbox, overdue, completed], missingFields: [],
+            fields: {
+                title: { id: "title", name: "工作项", type: "block", options: [] },
+                currentAction: { id: "current", name: "本次行动细则", type: "text", options: [] },
+                nextAction: { id: "next", name: "下一步行动", type: "text", options: [] },
+            },
+        };
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn(() => new Promise<never>(() => undefined)),
+                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
+            },
+        });
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
+        await tick();
+        const input = document.querySelector("#xz-inbox-input") as HTMLInputElement;
+        input.value = "初始化整理数据";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await tick();
+        (document.querySelector(".xz-capture-card") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        await vi.waitFor(() => expect(document.body.textContent).toContain("已加入收件箱：初始化整理数据"));
+
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "整理")?.click();
+        await tick();
+        expect(document.body.textContent).toContain("每周整理");
+        expect(document.body.textContent).toContain("需要收敛");
+        expect(document.body.textContent).toContain("需要归类的想法");
+        expect(document.body.textContent).toContain("需要重新安排的事务");
+        expect(document.body.textContent).toContain("本周完成的事务");
+        expect(document.querySelector(".xz-review-item-overdue")?.textContent).toContain("截止日期已过");
+        expect([...document.querySelectorAll<HTMLButtonElement>(".xz-review-item-list button")].filter((button) => button.textContent?.includes("需要重新安排的事务"))).toHaveLength(1);
+        const actionStep = [...document.querySelectorAll<HTMLElement>(".xz-review-step")].find((step) => step.querySelector("h3")?.textContent === "让执行项可以直接开始");
+        expect(actionStep?.classList.contains("xz-review-step--ready")).toBe(true);
+
+        [...document.querySelectorAll<HTMLButtonElement>(".xz-review-item-list button")].find((button) => button.textContent?.includes("需要归类的想法"))?.click();
+        await tick();
+        expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("需要归类的想法");
     });
 });

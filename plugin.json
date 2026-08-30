@@ -12,9 +12,9 @@
     "en_US": "Xingzhou · Personal Projects & Tasks"
   },
   "description": {
-    "default": "以思源属性视图为唯一数据源，浏览个人项目、任务、事务与长期领域。",
-    "zh_CN": "以思源属性视图为唯一数据源，浏览个人项目、任务、事务与长期领域。",
-    "en_US": "A read-oriented personal project and task center backed by a native SiYuan Attribute View."
+    "default": "以思源属性视图为唯一数据源，捕获、安排与整理个人项目和事务。",
+    "zh_CN": "以思源属性视图为唯一数据源，捕获、安排与整理个人项目和事务。",
+    "en_US": "A personal project and task center for capturing, scheduling, and reviewing work in a native SiYuan Attribute View."
   },
   "readme": {
     "default": "README.md",

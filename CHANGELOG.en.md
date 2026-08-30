@@ -13,12 +13,23 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - Added Planned semantics: assigning a plan date can move Inbox/Ready items to Planned, but time alone never changes them to In Progress.
 - Added derived Today and Overdue badges without overwriting lifecycle status.
 - Added full read/write support for current-action details when the database field exists.
+- Replaced the Week placeholder with a Monday-to-Sunday view using actual dates and previous/current/next week navigation.
+- Added an Unscheduled pool limited to executable Transactions and Ideas, excluding projects and long-term areas.
+- Added active plan-to-deadline window reminders for executable items.
+- Added week-level scheduling, moving, unscheduling, and direct completion with post-write verification.
+- Replaced the Review placeholder with a five-step weekly check for Inbox items, active top-level projects, stale dates, missing action details, and this week's closed items.
+- Added per-item review prioritization so the same item appears in only one highest-priority step per pass.
 
 ### Changed
 
 - Replaced the “read-only preview” badge with “local database”.
 - Simplified editable statuses to Inbox, Ready, Planned, In Progress, Blocked, Paused, Someday, Completed, Failed, Cancelled, and Abandoned, while keeping legacy values readable during migration.
 - Shortened the independent-item aggregate label to “All” and listed root items directly beneath it.
+- Moved type and status into the unified metadata panel.
+- Placed the completion control beside the title, matched its height to the title field, and hid it after completion.
+- Replaced the global action-edit mode with independent click-to-edit cards, blur-to-save, Escape cancellation, and Cmd/Ctrl+Enter saving.
+- Moved the Week backlog to the left and strengthened the visual separation of scheduled item cards.
+- Strengthened Review card boundaries, theme-aware accent rails, spacing, and responsive behavior.
 
 ### Fixed
 
@@ -26,6 +37,10 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - Fixed stale reactive hierarchy results after Inbox capture.
 - Restored the default database block ID when an older settings file contains an empty value.
 - Restored text selection in the details pane and clarified that detached items do not require documents.
+- Fixed remote action controls and layout shifts caused by the former global action-edit mode.
+- Fixed empty grid tracks showing as large grey regions in Review item lists.
+- Fixed Review accent rails disappearing when a theme does not define a warning-color token.
+- Fixed duplicate Review entries when an item had both stale dates and missing action details.
 
 ### Note
 

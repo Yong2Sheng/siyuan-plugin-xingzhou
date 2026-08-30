@@ -73,7 +73,7 @@ export type AttributeViewDefinition = {
     };
 };
 
-export type EditableWorkItemField = "title" | "type" | "status" | "currentAction" | "nextAction" | "planDate" | "deadline" | "duration" | "energy";
+export type EditableWorkItemField = "title" | "type" | "status" | "currentAction" | "nextAction" | "parent" | "topProject" | "planDate" | "deadline" | "duration" | "energy";
 
 export type WorkItemField = {
     id: string;
@@ -326,6 +326,10 @@ function buildCellValue(role: EditableWorkItemField, content: string | number | 
         return { type: "block", block, isDetached: item.detached };
     }
     if (role === "currentAction" || role === "nextAction") return { type: "text", text: { content: String(content ?? "") } };
+    if (role === "parent" || role === "topProject") {
+        const relationId = String(content ?? "");
+        return { type: "relation", relation: { blockIDs: relationId ? [relationId] : [], contents: [] } };
+    }
     if (role === "duration") {
         const number = content === null || content === "" ? null : Number(content);
         return {
@@ -353,6 +357,8 @@ function matchesUpdatedValue(item: WorkItem, role: EditableWorkItemField, expect
     if (role === "status") return item.status === String(expected ?? "");
     if (role === "currentAction") return item.currentAction === String(expected ?? "").trim();
     if (role === "nextAction") return item.nextAction === String(expected ?? "").trim();
+    if (role === "parent") return (item.parentIds[0] ?? "") === String(expected ?? "");
+    if (role === "topProject") return (item.topProjectIds[0] ?? "") === String(expected ?? "");
     if (role === "energy") return item.energy === String(expected ?? "");
     if (role === "duration") return item.durationMinutes === (expected === null || expected === "" ? null : Number(expected));
     const actual = role === "planDate" ? item.planDate : item.deadline;

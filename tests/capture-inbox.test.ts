@@ -71,10 +71,15 @@ describe("captureInboxItem", () => {
                 status: { id: "status", name: "状态", type: "select", options: [{ name: "待开始", color: "4" }] },
                 currentAction: { id: "current", name: "本次行动细则", type: "text", options: [] },
                 nextAction: { id: "next", name: "下一步行动", type: "text", options: [] },
+                parent: { id: "parent", name: "上层工作项", type: "relation", options: [] },
             },
             items: [{
                 id: "item-1", rowId: "item-1", title: "清理垃圾", documentId: null, detached: true,
                 type: "事务", status: "收件箱", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+                planDate: null, deadline: null, durationMinutes: null, energy: "", updatedAt: null,
+            }, {
+                id: "project-1", rowId: "project-1", title: "家庭整理", documentId: null, detached: true,
+                type: "项目", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
                 planDate: null, deadline: null, durationMinutes: null, energy: "", updatedAt: null,
             }],
         };
@@ -86,6 +91,7 @@ describe("captureInboxItem", () => {
                     { key: { id: "status", name: "状态", type: "select", options: [{ name: "待开始", color: "4" }] } },
                     { key: { id: "current", name: "本次行动细则", type: "text" } },
                     { key: { id: "next", name: "下一步行动", type: "text" } },
+                    { key: { id: "parent", name: "上层工作项", type: "relation" } },
                 ],
             },
         };
@@ -97,16 +103,22 @@ describe("captureInboxItem", () => {
                     { id: "status", name: "状态", type: "select" },
                     { id: "current", name: "本次行动细则", type: "text" },
                     { id: "next", name: "下一步行动", type: "text" },
+                    { id: "parent", name: "上层工作项", type: "relation" },
                 ],
                 rows: [{ id: "item-1", cells: [
                     { value: { keyID: "title", blockID: "item-1", isDetached: true, block: { content: "清理垃圾" } } },
                     { value: { keyID: "status", mSelect: [{ content: "待开始", color: "4" }] } },
                     { value: { keyID: "current", text: { content: "收集各房间垃圾并更换垃圾袋" } } },
                     { value: { keyID: "next", text: { content: "拿垃圾袋装好并带下楼" } } },
+                    { value: { keyID: "parent", relation: { blockIDs: ["project-1"] } } },
+                ] }, { id: "project-1", cells: [
+                    { value: { keyID: "title", blockID: "project-1", isDetached: true, block: { content: "家庭整理" } } },
+                    { value: { keyID: "status", mSelect: [{ content: "进行中", color: "5" }] } },
                 ] }],
             },
         };
         requestMock
+            .mockResolvedValueOnce({ value: {} })
             .mockResolvedValueOnce({ value: {} })
             .mockResolvedValueOnce({ value: {} })
             .mockResolvedValueOnce({ value: {} })
@@ -117,6 +129,7 @@ describe("captureInboxItem", () => {
             status: "待开始",
             currentAction: "收集各房间垃圾并更换垃圾袋",
             nextAction: "拿垃圾袋装好并带下楼",
+            parent: "project-1",
         });
 
         expect(requestMock).toHaveBeenNthCalledWith(1, "/api/av/setAttributeViewBlockAttr", expect.objectContaining({
@@ -128,6 +141,9 @@ describe("captureInboxItem", () => {
         expect(requestMock).toHaveBeenNthCalledWith(3, "/api/av/setAttributeViewBlockAttr", expect.objectContaining({
             keyID: "next", itemID: "item-1", value: { type: "text", text: { content: "拿垃圾袋装好并带下楼" } },
         }));
-        expect(result.items[0]).toMatchObject({ status: "待开始", currentAction: "收集各房间垃圾并更换垃圾袋", nextAction: "拿垃圾袋装好并带下楼" });
+        expect(requestMock).toHaveBeenNthCalledWith(4, "/api/av/setAttributeViewBlockAttr", expect.objectContaining({
+            keyID: "parent", itemID: "item-1", value: { type: "relation", relation: { blockIDs: ["project-1"], contents: [] } },
+        }));
+        expect(result.items[0]).toMatchObject({ status: "待开始", currentAction: "收集各房间垃圾并更换垃圾袋", nextAction: "拿垃圾袋装好并带下楼", parentIds: ["project-1"] });
     });
 });

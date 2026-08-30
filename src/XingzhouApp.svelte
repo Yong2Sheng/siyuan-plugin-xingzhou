@@ -12,6 +12,8 @@
 
     type MainPage = "week" | "all" | "inbox" | "review";
     type ItemFilter = "all" | "active" | "future" | "closed";
+    type WeekDay = { timestamp: number; key: string; label: string; dateLabel: string; isToday: boolean };
+    type ActionField = "currentAction" | "nextAction";
 
     const mainPages: Array<{ id: MainPage; label: string }> = [
         { id: "all", label: "全部" },
@@ -45,9 +47,14 @@
     let capturing = false;
     let captureError = "";
     let captureMessage = "";
-    let editing = false;
-    let saving = false;
-    let saveError = "";
+    let weekStart = startOfWeek(Date.now());
+    let weekSavingIds = new Set<string>();
+    let weekError = "";
+    let editingAction: ActionField | null = null;
+    let savingAction: ActionField | null = null;
+    let savingInline: string | null = null;
+    let actionErrors: Record<ActionField, string> = { currentAction: "", nextAction: "" };
+    let inlineError = "";
     let draftSourceId: string | null = null;
     let detailDraft = emptyDetailDraft();
 
@@ -64,10 +71,23 @@
     }
     $: parent = selected?.parentIds[0] ? tree.byId.get(selected.parentIds[0]) ?? null : null;
     $: topProject = selected?.topProjectIds[0] ? tree.byId.get(selected.topProjectIds[0]) ?? null : null;
+    $: parentCandidates = selected
+        ? (data?.items ?? []).filter((item) => item.id !== selected.id && !collectDescendantIds(selected.id, tree).has(item.id))
+        : [];
+    $: topProjectCandidates = (data?.items ?? []).filter((item) => item.type === "项目");
     $: selectedIssues = selected ? tree.issues.filter((issue) => issue.itemId === selected.id) : [];
     $: inboxItems = [...(data?.items.filter((item) => item.status === "收件箱") ?? [])]
         .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-    $: if (selected && selected.id !== draftSourceId && !saving) resetDetailDraft(selected);
+    $: weekDays = buildWeekDays(weekStart);
+    $: weekItemsByDate = groupWeekItems(data?.items ?? [], weekStart);
+    $: scheduledWeekCount = [...weekItemsByDate.values()].reduce((count, items) => count + items.length, 0);
+    $: unscheduledWeekItems = getUnscheduledWeekItems(data?.items ?? []);
+    $: activeWindowItems = getActiveWindowItems(data?.items ?? []);
+    $: reviewActiveProjects = getReviewActiveProjects(data?.items ?? []);
+    $: reviewDateItems = getReviewDateItems(data?.items ?? []);
+    $: reviewMissingActionItems = getReviewMissingActionItems(data?.items ?? [], new Set(reviewDateItems.map((item) => item.id)));
+    $: reviewCompletedThisWeek = getReviewCompletedThisWeek(data?.items ?? []);
+    $: if (selected && selected.id !== draftSourceId) resetDetailDraft(selected);
 
     onMount(() => { void refresh(); });
 
@@ -125,7 +145,7 @@
     }
 
     function emptyDetailDraft() {
-        return { title: "", type: "", status: "", planDate: "", deadline: "", duration: "", energy: "", currentAction: "", nextAction: "" };
+        return { title: "", type: "", status: "", parent: "", topProject: "", planDate: "", deadline: "", duration: "", energy: "", currentAction: "", nextAction: "" };
     }
 
     function resetDetailDraft(item: WorkItem) {
@@ -133,6 +153,8 @@
             title: item.title,
             type: item.type,
             status: item.status,
+            parent: item.parentIds[0] ?? "",
+            topProject: item.topProjectIds[0] ?? "",
             planDate: formatInputDate(item.planDate),
             deadline: formatInputDate(item.deadline),
             duration: item.durationMinutes === null ? "" : String(item.durationMinutes),
@@ -141,49 +163,108 @@
             nextAction: item.nextAction,
         };
         draftSourceId = item.id;
-        editing = false;
-        saveError = "";
+        editingAction = null;
+        savingAction = null;
+        actionErrors = { currentAction: "", nextAction: "" };
+        inlineError = "";
     }
 
-    function startEditing() {
+    function startActionEditing(field: ActionField) {
+        const fieldAvailable = field === "currentAction" ? data?.fields.currentAction : data?.fields.nextAction;
+        if (!selected || !fieldAvailable) return;
+        detailDraft = { ...detailDraft, [field]: selected[field] };
+        actionErrors = { ...actionErrors, [field]: "" };
+        editingAction = field;
+    }
+
+    function cancelActionEditing(field: ActionField) {
         if (!selected) return;
-        resetDetailDraft(selected);
-        editing = true;
+        detailDraft = { ...detailDraft, [field]: selected[field] };
+        actionErrors = { ...actionErrors, [field]: "" };
+        if (editingAction === field) editingAction = null;
     }
 
-    async function submitDetail() {
-        if (!data || !selected || saving) return;
-        if (!detailDraft.title.trim()) {
-            saveError = "名称不能为空。";
+    async function saveAction(field: ActionField) {
+        if (!data || !selected || savingAction) return;
+        const value = detailDraft[field];
+        if (value === selected[field]) {
+            if (editingAction === field) editingAction = null;
             return;
         }
-        const changes: WorkItemChanges = {};
-        if (detailDraft.title.trim() !== selected.title) changes.title = detailDraft.title.trim();
-        if (detailDraft.type !== selected.type) changes.type = detailDraft.type;
-        if (detailDraft.status !== selected.status) changes.status = detailDraft.status;
-        if (detailDraft.planDate !== formatInputDate(selected.planDate)) changes.planDate = detailDraft.planDate || null;
-        if (detailDraft.deadline !== formatInputDate(selected.deadline)) changes.deadline = detailDraft.deadline || null;
-        if (detailDraft.duration !== (selected.durationMinutes === null ? "" : String(selected.durationMinutes))) {
-            changes.duration = detailDraft.duration === "" ? null : Number(detailDraft.duration);
+        const sourceId = selected.id;
+        const sourceRowId = selected.rowId;
+        savingAction = field;
+        actionErrors = { ...actionErrors, [field]: "" };
+        try {
+            applyData(await saveItem(data, selected, { [field]: value }));
+            const updated = data?.items.find((item) => item.rowId === sourceRowId);
+            if (updated) {
+                detailDraft = { ...detailDraft, [field]: updated[field] };
+                if (selectedId === sourceId) draftSourceId = updated.id;
+            }
+            if (editingAction === field) editingAction = null;
+        } catch (caught) {
+            actionErrors = { ...actionErrors, [field]: caught instanceof Error ? caught.message : String(caught) };
+        } finally {
+            savingAction = null;
         }
-        if (detailDraft.energy !== selected.energy) changes.energy = detailDraft.energy;
-        if (data.fields.currentAction && detailDraft.currentAction !== selected.currentAction) changes.currentAction = detailDraft.currentAction;
-        if (detailDraft.nextAction !== selected.nextAction) changes.nextAction = detailDraft.nextAction;
+    }
 
-        // 计划日期只决定“已计划”，不会根据时间流逝把条目伪装成已经开始。
-        const statusWasEdited = detailDraft.status !== selected.status;
-        const planDateWasEdited = detailDraft.planDate !== formatInputDate(selected.planDate);
-        if (!statusWasEdited && planDateWasEdited) {
-            if (detailDraft.planDate && (selected.status === "收件箱" || selected.status === "待开始")) changes.status = "已计划";
-            if (!detailDraft.planDate && selected.status === "已计划") changes.status = "待开始";
-        }
-        if (Object.keys(changes).length === 0) {
-            editing = false;
+    function handleActionKeydown(event: KeyboardEvent, field: ActionField) {
+        if (event.key === "Escape") {
+            event.preventDefault();
+            cancelActionEditing(field);
             return;
         }
+        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            void saveAction(field);
+        }
+    }
 
-        saving = true;
-        saveError = "";
+    function handleActionCardKeydown(event: KeyboardEvent, field: ActionField) {
+        if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        startActionEditing(field);
+    }
+
+    function focusOnMount(node: HTMLTextAreaElement) {
+        node.focus();
+        node.setSelectionRange(node.value.length, node.value.length);
+    }
+
+    async function saveInline(role: "title" | "type" | "status" | "parent" | "topProject" | "planDate" | "deadline" | "duration" | "energy", value: string) {
+        if (!data || !selected || savingInline) return;
+        if (role === "title" && !value.trim()) {
+            detailDraft.title = selected.title;
+            inlineError = "名称不能为空。";
+            return;
+        }
+        const normalized: string | number | null = role === "title"
+            ? value.trim()
+            : role === "duration"
+                ? (value === "" ? null : Number(value))
+                : (role === "planDate" || role === "deadline") && value === ""
+                    ? null
+                    : value;
+        const currentValue = role === "title" ? selected.title
+            : role === "type" ? selected.type
+                : role === "status" ? selected.status
+                    : role === "parent" ? (selected.parentIds[0] ?? "")
+                        : role === "topProject" ? (selected.topProjectIds[0] ?? "")
+                            : role === "planDate" ? formatInputDate(selected.planDate)
+                                : role === "deadline" ? formatInputDate(selected.deadline)
+                                    : role === "duration" ? (selected.durationMinutes === null ? null : selected.durationMinutes)
+                                        : selected.energy;
+        if (normalized === currentValue) return;
+
+        const changes: WorkItemChanges = { [role]: normalized };
+        if (role === "planDate") {
+            if (value && (selected.status === "收件箱" || selected.status === "待开始")) changes.status = "已计划";
+            if (!value && selected.status === "已计划") changes.status = "待开始";
+        }
+        savingInline = role;
+        inlineError = "";
         try {
             const selectedRowId = selected.rowId;
             applyData(await saveItem(data, selected, changes));
@@ -192,12 +273,152 @@
                 selectedId = updated.id;
                 resetDetailDraft(updated);
             }
-            editing = false;
         } catch (caught) {
-            saveError = caught instanceof Error ? caught.message : String(caught);
+            const message = caught instanceof Error ? caught.message : String(caught);
+            resetDetailDraft(selected);
+            inlineError = message;
         } finally {
-            saving = false;
+            savingInline = null;
         }
+    }
+
+    async function updateWeekItem(item: WorkItem, changes: WorkItemChanges) {
+        if (!data || weekSavingIds.has(item.id)) return;
+        weekSavingIds = new Set(weekSavingIds).add(item.id);
+        weekError = "";
+        try {
+            applyData(await saveItem(data, item, changes));
+        } catch (caught) {
+            weekError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            const next = new Set(weekSavingIds);
+            next.delete(item.id);
+            weekSavingIds = next;
+        }
+    }
+
+    async function assignWeekDate(item: WorkItem, dateKey: string) {
+        const changes: WorkItemChanges = { planDate: dateKey || null };
+        if (dateKey && (item.status === "收件箱" || item.status === "待开始")) changes.status = "已计划";
+        if (!dateKey && item.status === "已计划") changes.status = "待开始";
+        await updateWeekItem(item, changes);
+    }
+
+    function handleWeekAssignment(event: Event, item: WorkItem) {
+        const select = event.currentTarget as HTMLSelectElement;
+        const dateKey = select.value === "__clear" ? "" : select.value;
+        select.value = "";
+        void assignWeekDate(item, dateKey);
+    }
+
+    function startOfWeek(timestamp: number): number {
+        const date = new Date(timestamp);
+        date.setHours(0, 0, 0, 0);
+        const day = date.getDay();
+        date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+        return date.getTime();
+    }
+
+    function buildWeekDays(start: number): WeekDay[] {
+        const labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+        return labels.map((label, index) => {
+            const date = new Date(start);
+            date.setDate(date.getDate() + index);
+            return {
+                timestamp: date.getTime(),
+                key: formatInputDate(date.getTime()),
+                label,
+                dateLabel: `${date.getMonth() + 1}月${date.getDate()}日`,
+                isToday: isToday(date.getTime()),
+            };
+        });
+    }
+
+    function groupWeekItems(items: WorkItem[], start: number): Map<string, WorkItem[]> {
+        const result = new Map<string, WorkItem[]>();
+        const end = new Date(start);
+        end.setDate(end.getDate() + 7);
+        for (const item of items) {
+            if (!item.planDate || item.planDate < start || item.planDate >= end.getTime()) continue;
+            const key = formatInputDate(item.planDate);
+            const existing = result.get(key) ?? [];
+            existing.push(item);
+            result.set(key, existing);
+        }
+        for (const dayItems of result.values()) {
+            dayItems.sort((a, b) => Number(isClosed(a)) - Number(isClosed(b)) || a.title.localeCompare(b.title, "zh-CN"));
+        }
+        return result;
+    }
+
+    function getUnscheduledWeekItems(items: WorkItem[]): WorkItem[] {
+        const excludedStatuses = new Set(["收件箱", "暂停", "将来", "将来／也许", "已完成", "已失败", "已取消", "已放弃"]);
+        return items
+            .filter((item) => !item.planDate && (item.type === "事务" || item.type === "想法") && !excludedStatuses.has(item.status))
+            .sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+    }
+
+    function getActiveWindowItems(items: WorkItem[]): WorkItem[] {
+        const excludedStatuses = new Set(["收件箱", "暂停", "将来", "将来／也许", "已完成", "已失败", "已取消", "已放弃"]);
+        const today = formatInputDate(Date.now());
+        return items
+            .filter((item) => {
+                if ((item.type !== "事务" && item.type !== "想法") || !item.planDate || !item.deadline || excludedStatuses.has(item.status)) return false;
+                return formatInputDate(item.planDate) <= today && formatInputDate(item.deadline) >= today;
+            })
+            .sort((a, b) => (a.deadline ?? 0) - (b.deadline ?? 0) || a.title.localeCompare(b.title, "zh-CN"));
+    }
+
+    function getReviewActiveProjects(items: WorkItem[]): WorkItem[] {
+        return items
+            .filter((item) => {
+                if (item.type !== "项目" || (item.status !== "进行中" && item.status !== "活跃")) return false;
+                const parentItem = item.parentIds[0] ? tree.byId.get(item.parentIds[0]) : null;
+                return !parentItem || parentItem.type === "长期领域";
+            })
+            .sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+    }
+
+    function getReviewMissingActionItems(items: WorkItem[], higherPriorityIds: Set<string>): WorkItem[] {
+        if (!data?.fields.currentAction) return [];
+        const actionableStatuses = new Set(["待开始", "已计划", "进行中", "阻塞"]);
+        return items
+            .filter((item) => !higherPriorityIds.has(item.id) && (item.type === "事务" || item.type === "想法") && actionableStatuses.has(displayStatus(item.status)) && !item.currentAction.trim())
+            .sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+    }
+
+    function getReviewDateItems(items: WorkItem[]): WorkItem[] {
+        const excludedStatuses = new Set(["收件箱", "暂停", "将来", "将来／也许"]);
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        return items
+            .filter((item) => !isClosed(item) && !excludedStatuses.has(item.status) && (isOverdue(item) || Boolean(item.planDate && item.planDate < todayStart.getTime())))
+            .sort((a, b) => Number(isOverdue(b)) - Number(isOverdue(a)) || (a.deadline ?? a.planDate ?? 0) - (b.deadline ?? b.planDate ?? 0));
+    }
+
+    function getReviewCompletedThisWeek(items: WorkItem[]): WorkItem[] {
+        const thisWeekStart = startOfWeek(Date.now());
+        return items
+            .filter((item) => isClosed(item) && Boolean(item.updatedAt && item.updatedAt >= thisWeekStart))
+            .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    }
+
+    function reviewDateReason(item: WorkItem): string {
+        if (isOverdue(item)) return `截止日期已过 · ${formatDate(item.deadline)}`;
+        return `计划日期已过 · ${formatDate(item.planDate)}`;
+    }
+
+    function shiftWeek(offset: number) {
+        const date = new Date(weekStart);
+        date.setDate(date.getDate() + offset * 7);
+        weekStart = date.getTime();
+    }
+
+    function formatWeekRange(): string {
+        const end = new Date(weekStart);
+        end.setDate(end.getDate() + 6);
+        const start = new Date(weekStart);
+        return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日 — ${end.getMonth() + 1}月${end.getDate()}日`;
     }
 
     function getVisibleIds(): Set<string> {
@@ -382,12 +603,135 @@
                 {/if}
             </section>
         </main>
-    {:else if page !== "all"}
-        <main class="xz-coming-soon">
-            <div class="xz-empty-icon">舟</div>
-            <h2>{page === "week" ? "本周安排" : "周度整理"}</h2>
-            <p>这个页面仍在规划中。</p>
-            <button class="b3-button" type="button" on:click={() => page = "all"}>返回全部</button>
+    {:else if page === "week"}
+        <main class="xz-week-page">
+            <header class="xz-week-header">
+                <div>
+                    <span class="xz-section-kicker">按实际日期安排</span>
+                    <h2>本周</h2>
+                    <p>{formatWeekRange()} · 已安排 {scheduledWeekCount} 项</p>
+                </div>
+                <div class="xz-week-navigation">
+                    <button class="b3-button b3-button--outline" type="button" on:click={() => shiftWeek(-1)}>上一周</button>
+                    <button class="b3-button b3-button--outline" type="button" on:click={() => weekStart = startOfWeek(Date.now())}>回到本周</button>
+                    <button class="b3-button b3-button--outline" type="button" on:click={() => shiftWeek(1)}>下一周</button>
+                </div>
+            </header>
+
+            {#if loading && !data}
+                <div class="xz-state"><span class="xz-spinner"></span><p>正在读取本周安排……</p></div>
+            {:else if error && !data}
+                <div class="xz-state xz-error"><h2>暂时无法读取本周安排</h2><p>{error}</p><button class="b3-button" type="button" on:click={() => void refresh()}>重试</button></div>
+            {:else if data}
+                {#if weekError}<p class="xz-week-error" role="alert">{weekError}</p>{/if}
+                <div class="xz-week-layout">
+                    <section class="xz-week-board" aria-label="一周安排">
+                        {#each weekDays as day (day.key)}
+                            <article class:xz-week-day--today={day.isToday} class="xz-week-day">
+                                <header><div><strong>{day.label}</strong><span>{day.dateLabel}</span></div>{#if day.isToday}<em>今天</em>{/if}</header>
+                                <div class="xz-week-day-items">
+                                    {#if (weekItemsByDate.get(day.key) ?? []).length === 0}
+                                        <p class="xz-week-day-empty">暂无安排</p>
+                                    {:else}
+                                        {#each weekItemsByDate.get(day.key) ?? [] as item (item.id)}
+                                            <article class:xz-week-item--closed={isClosed(item)} class="xz-week-item">
+                                                <button class="xz-week-item-title" type="button" on:click={() => revealInboxItem(item)}>{item.title}</button>
+                                                <div class="xz-week-item-meta"><span>{displayStatus(item.status) || "未设置"}</span>{#if item.durationMinutes !== null}<span>{item.durationMinutes} 分钟</span>{/if}{#if item.energy}<span>{item.energy}精力</span>{/if}</div>
+                                                <div class="xz-week-item-actions">
+                                                    <select aria-label={`移动“${item.title}”`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekAssignment(event, item)}>
+                                                        <option value="">移动到…</option>{#each weekDays as targetDay}<option value={targetDay.key}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}<option value="__clear">取消安排</option>
+                                                    </select>
+                                                    <button type="button" disabled={weekSavingIds.has(item.id) || item.status === "已完成"} on:click={() => void updateWeekItem(item, { status: "已完成" })}>{item.status === "已完成" ? "已完成" : "完成"}</button>
+                                                </div>
+                                            </article>
+                                        {/each}
+                                    {/if}
+                                </div>
+                            </article>
+                        {/each}
+                    </section>
+
+                    <aside class="xz-week-backlog">
+                        <header><div><span class="xz-section-kicker">可执行事项</span><h3>待安排</h3></div><span>{unscheduledWeekItems.length + activeWindowItems.length} 项</span></header>
+                        {#if unscheduledWeekItems.length === 0 && activeWindowItems.length === 0}
+                            <div class="xz-week-backlog-empty"><p>当前没有需要安排日期的可执行条目。</p></div>
+                        {:else}
+                            <div class="xz-week-backlog-list">
+                                {#if activeWindowItems.length > 0}
+                                    <section class="xz-week-backlog-group">
+                                        <h4><span>进行窗口</span><em>今天可推进</em></h4>
+                                        {#each activeWindowItems as item (item.id)}
+                                            <article class="xz-week-backlog-item xz-week-backlog-item--window">
+                                                <button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type} · 截止 {item.deadline ? formatInputDate(item.deadline) : "—"}</span></button>
+                                            </article>
+                                        {/each}
+                                    </section>
+                                {/if}
+                                {#if unscheduledWeekItems.length > 0}
+                                    <section class="xz-week-backlog-group">
+                                        <h4><span>尚未选择日期</span><em>{unscheduledWeekItems.length} 项</em></h4>
+                                        {#each unscheduledWeekItems as item (item.id)}
+                                            <article class="xz-week-backlog-item">
+                                                <button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type || "未分类"} · {displayStatus(item.status) || "未设置"}</span></button>
+                                                <select aria-label={`安排“${item.title}”`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekAssignment(event, item)}>
+                                                    <option value="">安排到…</option>{#each weekDays as targetDay}<option value={targetDay.key}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}
+                                                </select>
+                                            </article>
+                                        {/each}
+                                    </section>
+                                {/if}
+                            </div>
+                        {/if}
+                    </aside>
+                </div>
+            {/if}
+        </main>
+    {:else if page === "review"}
+        <main class="xz-review-page">
+            <header class="xz-review-header">
+                <div><span class="xz-section-kicker">建议 10–15 分钟</span><h2>每周整理</h2><p>按顺序处理真正需要决定的内容；没有问题的部分会自动标记为已就绪。</p></div>
+                <button class="b3-button b3-button--outline" type="button" on:click={() => void refresh()} disabled={loading}>重新检查</button>
+            </header>
+            {#if loading && !data}
+                <div class="xz-state"><span class="xz-spinner"></span><p>正在检查个人项目与事务……</p></div>
+            {:else if error && !data}
+                <div class="xz-state xz-error"><h2>暂时无法进行整理</h2><p>{error}</p><button class="b3-button" type="button" on:click={() => void refresh()}>重试</button></div>
+            {:else if data}
+                <section class="xz-review-summary" aria-label="整理概况">
+                    <div><strong>{inboxItems.length}</strong><span>收件箱</span></div>
+                    <div class:xz-review-metric--warning={reviewActiveProjects.length > 3}><strong>{reviewActiveProjects.length}<small> / 3</small></strong><span>活跃顶层项目</span></div>
+                    <div><strong>{reviewDateItems.length}</strong><span>日期待确认</span></div>
+                    <div><strong>{reviewMissingActionItems.length}</strong><span>缺少行动细则</span></div>
+                    <div class="xz-review-metric--positive"><strong>{reviewCompletedThisWeek.length}</strong><span>本周已结束</span></div>
+                </section>
+
+                <div class="xz-review-steps">
+                    <section class:xz-review-step--ready={inboxItems.length === 0} class="xz-review-step">
+                        <header><span class="xz-review-step-number">1</span><div><h3>清空收件箱</h3><p>补充类型和状态，或确认暂时放到“将来”。</p></div><em>{inboxItems.length === 0 ? "已就绪" : `${inboxItems.length} 项`}</em></header>
+                        {#if inboxItems.length > 0}<div class="xz-review-item-list">{#each inboxItems as item (item.id)}<button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type || "未分类"} · 收件箱</span></button>{/each}</div>{/if}
+                    </section>
+
+                    <section class:xz-review-step--warning={reviewActiveProjects.length > 3} class:xz-review-step--ready={reviewActiveProjects.length > 0 && reviewActiveProjects.length <= 3} class="xz-review-step">
+                        <header><span class="xz-review-step-number">2</span><div><h3>确认当前投入方向</h3><p>活跃顶层项目原则上不超过 2–3 个；长期领域不计入数量。</p></div><em>{reviewActiveProjects.length > 3 ? "需要收敛" : reviewActiveProjects.length === 0 ? "尚未选择" : "数量合适"}</em></header>
+                        {#if reviewActiveProjects.length > 0}<div class="xz-review-item-list">{#each reviewActiveProjects as item (item.id)}<button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{displayStatus(item.status)}</span></button>{/each}</div>{/if}
+                    </section>
+
+                    <section class:xz-review-step--ready={reviewDateItems.length === 0} class="xz-review-step">
+                        <header><span class="xz-review-step-number">3</span><div><h3>处理遗留日期</h3><p>先重新安排已经过去的计划日期，并确认逾期事项是否仍然有效。</p></div><em>{reviewDateItems.length === 0 ? "已就绪" : `${reviewDateItems.length} 项`}</em></header>
+                        {#if reviewDateItems.length > 0}<div class="xz-review-item-list">{#each reviewDateItems as item (item.id)}<button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span class:xz-review-item-overdue={isOverdue(item)}>{reviewDateReason(item)}</span></button>{/each}</div>{/if}
+                    </section>
+
+                    <section class:xz-review-step--ready={reviewMissingActionItems.length === 0} class="xz-review-step">
+                        <header><span class="xz-review-step-number">4</span><div><h3>让执行项可以直接开始</h3><p>日期有效后，再检查事务与想法是否写明本次行动细则。</p></div><em>{reviewMissingActionItems.length === 0 ? "已就绪" : `${reviewMissingActionItems.length} 项`}</em></header>
+                        {#if reviewMissingActionItems.length > 0}<div class="xz-review-item-list">{#each reviewMissingActionItems as item (item.id)}<button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type} · {displayStatus(item.status)}</span></button>{/each}</div>{/if}
+                    </section>
+
+                    <section class="xz-review-step xz-review-step--reflection">
+                        <header><span class="xz-review-step-number">5</span><div><h3>看一眼本周留下了什么</h3><p>这里只用于获得反馈，不评价推进速度；缓慢推进也是正常推进。</p></div><em>{reviewCompletedThisWeek.length} 项</em></header>
+                        {#if reviewCompletedThisWeek.length > 0}<div class="xz-review-item-list">{#each reviewCompletedThisWeek as item (item.id)}<button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{displayStatus(item.status)} · {formatDate(item.updatedAt)}</span></button>{/each}</div>{:else}<p class="xz-review-empty-note">本周还没有已结束条目，这不代表没有发生有效推进。</p>{/if}
+                    </section>
+                </div>
+            {/if}
         </main>
     {:else if loading}
         <main class="xz-state"><span class="xz-spinner"></span><p>正在读取个人项目数据库……</p></main>
@@ -466,62 +810,70 @@
             <aside class="xz-detail">
                 {#if selected}
                     <div class="xz-detail-header">
-                        <div><span class="xz-tag xz-tag--type">{selected.type || "未分类"}</span><h2>{selected.title}</h2></div>
-                        <div class="xz-detail-header-actions">
-                            <span class="xz-tag" data-status={displayStatus(selected.status)} title={legacyStatuses.has(selected.status) ? `数据库旧状态：${selected.status}` : undefined}>{displayStatus(selected.status) || "未设置状态"}</span>
-                            {#if isOverdue(selected)}<span class="xz-tag xz-tag--overdue">已逾期</span>{:else if isToday(selected.planDate) && !isClosed(selected)}<span class="xz-tag xz-tag--today">今日计划</span>{/if}
-                            {#if !editing}<button class="b3-button b3-button--outline" type="button" on:click={startEditing}>编辑</button>{/if}
+                        <div class="xz-detail-identity">
+                            <div class="xz-detail-title-row">
+                                <input class="xz-inline-title" aria-label="名称" bind:value={detailDraft.title} disabled={Boolean(savingInline)} on:blur={() => void saveInline("title", detailDraft.title)} on:keydown={(event) => event.key === "Enter" && event.currentTarget.blur()} />
+                                {#if selected.status !== "已完成"}
+                                    <button class="b3-button xz-complete-button" type="button" disabled={Boolean(savingInline)} on:click={() => void saveInline("status", "已完成")}>
+                                        ✓ 完成
+                                    </button>
+                                {/if}
+                            </div>
                         </div>
                     </div>
-                    {#if editing}
-                        <form class="xz-detail-form" on:submit|preventDefault={() => void submitDetail()}>
-                            <label class="xz-field xz-field--wide"><span>名称</span><input class="b3-text-field" bind:value={detailDraft.title} disabled={saving} /></label>
-                            <div class="xz-form-grid">
-                                <label class="xz-field"><span>工作项类型</span><select class="b3-select" bind:value={detailDraft.type} disabled={saving}><option value="">未分类</option>{#each data.fields.type?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
-                                <label class="xz-field"><span>状态</span><select class="b3-select" bind:value={detailDraft.status} disabled={saving}>
-                                    <option value="">未设置</option>
-                                    {#if legacyStatuses.has(detailDraft.status)}<option value={detailDraft.status}>{detailDraft.status}（旧状态）</option>{/if}
-                                    {#each statusOptions as status}<option value={status}>{status}</option>{/each}
-                                </select></label>
-                                <label class="xz-field"><span>计划日期</span><input class="b3-text-field" type="date" bind:value={detailDraft.planDate} disabled={saving} /></label>
-                                <label class="xz-field"><span>截止日期</span><input class="b3-text-field" type="date" bind:value={detailDraft.deadline} disabled={saving} /></label>
-                                <label class="xz-field"><span>预计时长（分钟）</span><input class="b3-text-field" type="number" min="0" step="1" bind:value={detailDraft.duration} disabled={saving} /></label>
-                                <label class="xz-field"><span>所需精力</span><select class="b3-select" bind:value={detailDraft.energy} disabled={saving}><option value="">未设置</option>{#each data.fields.energy?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
-                            </div>
-                            {#if data.fields.currentAction}
-                                <label class="xz-field xz-field--wide"><span>{fieldLabel(selected)}</span><textarea class="b3-text-field" rows="6" bind:value={detailDraft.currentAction} disabled={saving}></textarea></label>
-                            {:else}
-                                <div class="xz-missing-field"><strong>{fieldLabel(selected)}</strong><span>当前数据库尚无“本次行动细则”字段；代码已经支持，待数据库迁移后即可直接编辑。</span></div>
-                            {/if}
-                            <label class="xz-field xz-field--wide"><span>下一步行动</span><textarea class="b3-text-field" rows="4" bind:value={detailDraft.nextAction} disabled={saving}></textarea></label>
-                            <div class="xz-readonly-relations">
-                                <span>上层工作项：{parent?.title || "—"}</span><span>所属顶层项目：{topProject?.title || "—"}</span>
-                            </div>
-                            {#if saveError}<p class="xz-save-error" role="alert">{saveError}</p>{/if}
-                            <div class="xz-form-actions">
-                                <button class="b3-button b3-button--cancel" type="button" disabled={saving} on:click={() => resetDetailDraft(selected)}>取消</button>
-                                <button class="b3-button" type="submit" disabled={saving}>{saving ? "正在保存并复核…" : "保存到数据库"}</button>
-                            </div>
-                        </form>
-                    {:else}
-                        <dl class="xz-meta-grid">
-                            <div><dt>上层工作项</dt><dd>{parent?.title || "—"}</dd></div>
-                            <div><dt>所属顶层项目</dt><dd>{topProject?.title || "—"}</dd></div>
-                            <div><dt>计划日期</dt><dd>{formatDate(selected.planDate)}</dd></div>
-                            <div><dt>截止日期</dt><dd>{formatDate(selected.deadline)}</dd></div>
-                            <div><dt>预计时长</dt><dd>{selected.durationMinutes === null ? "—" : `${selected.durationMinutes} 分钟`}</dd></div>
-                            <div><dt>所需精力</dt><dd>{selected.energy || "—"}</dd></div>
-                        </dl>
 
-                        <section class="xz-action-card xz-action-card--primary">
-                            <h3>{fieldLabel(selected)}</h3>
-                            <p>{selected.currentAction || (data.fields.currentAction ? "尚未填写。" : "当前数据库尚无此字段；插件不会擅自新增字段。")}</p>
+                    <div class="xz-meta-grid xz-meta-grid--editable">
+                        <label><span>工作项类型</span><select class="b3-select xz-meta-type-select" aria-label="工作项类型" bind:value={detailDraft.type} disabled={Boolean(savingInline)} on:change={() => void saveInline("type", detailDraft.type)}><option value="">未分类</option>{#each data.fields.type?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
+                        <label><span>状态</span><select class="b3-select xz-meta-status-select" aria-label="状态" bind:value={detailDraft.status} disabled={Boolean(savingInline)} on:change={() => void saveInline("status", detailDraft.status)}><option value="">未设置</option>{#if legacyStatuses.has(detailDraft.status)}<option value={detailDraft.status}>{detailDraft.status}（旧状态）</option>{/if}{#each statusOptions as status}<option value={status}>{status}</option>{/each}</select></label>
+                        <label><span>上层工作项</span><select class="b3-select" bind:value={detailDraft.parent} disabled={Boolean(savingInline)} on:change={() => void saveInline("parent", detailDraft.parent)}><option value="">—</option>{#each parentCandidates as item}<option value={item.id}>{item.title}</option>{/each}</select></label>
+                        <label><span>所属顶层项目</span><select class="b3-select" bind:value={detailDraft.topProject} disabled={Boolean(savingInline)} on:change={() => void saveInline("topProject", detailDraft.topProject)}><option value="">—</option>{#each topProjectCandidates as item}<option value={item.id}>{item.title}</option>{/each}</select></label>
+                        <label><span>计划日期 {#if isToday(selected.planDate) && !isClosed(selected)}<em class="xz-date-hint xz-date-hint--today">今日</em>{/if}</span><input class="b3-text-field" type="date" bind:value={detailDraft.planDate} disabled={Boolean(savingInline)} on:change={() => void saveInline("planDate", detailDraft.planDate)} /></label>
+                        <label><span>截止日期 {#if isOverdue(selected)}<em class="xz-date-hint xz-date-hint--overdue">已逾期</em>{/if}</span><input class="b3-text-field" type="date" bind:value={detailDraft.deadline} disabled={Boolean(savingInline)} on:change={() => void saveInline("deadline", detailDraft.deadline)} /></label>
+                        <label><span>预计时长（分钟）</span><input class="b3-text-field" type="number" min="0" step="1" bind:value={detailDraft.duration} disabled={Boolean(savingInline)} on:change={() => void saveInline("duration", detailDraft.duration)} /></label>
+                        <label><span>所需精力</span><select class="b3-select" bind:value={detailDraft.energy} disabled={Boolean(savingInline)} on:change={() => void saveInline("energy", detailDraft.energy)}><option value="">—</option>{#each data.fields.energy?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
+                    </div>
+                    {#if savingInline}<p class="xz-inline-feedback">正在保存并复核……</p>{/if}
+                    {#if inlineError}<p class="xz-save-error" role="alert">{inlineError}</p>{/if}
+
+                    {#if data.fields.currentAction}
+                        <section
+                            class:xz-action-card--editing={editingAction === "currentAction"}
+                            class="xz-action-card xz-action-card--primary xz-action-card--editable"
+                            role="button"
+                            tabindex="0"
+                            on:click={() => startActionEditing("currentAction")}
+                            on:keydown={(event) => handleActionCardKeydown(event, "currentAction")}
+                        >
+                            <header><h3>{fieldLabel(selected)}</h3><span>{savingAction === "currentAction" ? "正在保存并复核…" : editingAction === "currentAction" ? "Esc 取消 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span></header>
+                            {#if editingAction === "currentAction"}
+                                <textarea use:focusOnMount class="b3-text-field xz-action-editor" rows="6" aria-label={fieldLabel(selected)} bind:value={detailDraft.currentAction} disabled={savingAction === "currentAction"} on:click|stopPropagation on:blur={() => void saveAction("currentAction")} on:keydown={(event) => handleActionKeydown(event, "currentAction")}></textarea>
+                            {:else}
+                                <p>{selected.currentAction || "尚未填写。"}</p>
+                            {/if}
+                            {#if actionErrors.currentAction}<p class="xz-action-error" role="alert">{actionErrors.currentAction}</p>{/if}
                         </section>
-                        <section class="xz-action-card">
-                            <h3>下一步行动</h3>
-                            <p>{selected.nextAction || "尚未填写明确的下一步行动。"}</p>
+                    {:else}
+                        <section class="xz-action-card xz-action-card--primary xz-action-card--missing">
+                            <header><h3>{fieldLabel(selected)}</h3></header>
+                            <p>当前数据库尚无此字段；插件不会擅自新增字段。</p>
                         </section>
                     {/if}
+                    <section
+                        class:xz-action-card--editing={editingAction === "nextAction"}
+                        class="xz-action-card xz-action-card--editable"
+                        role="button"
+                        tabindex="0"
+                        on:click={() => startActionEditing("nextAction")}
+                        on:keydown={(event) => handleActionCardKeydown(event, "nextAction")}
+                    >
+                        <header><h3>下一步行动</h3><span>{savingAction === "nextAction" ? "正在保存并复核…" : editingAction === "nextAction" ? "Esc 取消 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span></header>
+                        {#if editingAction === "nextAction"}
+                            <textarea use:focusOnMount class="b3-text-field xz-action-editor" rows="4" aria-label="下一步行动" bind:value={detailDraft.nextAction} disabled={savingAction === "nextAction"} on:click|stopPropagation on:blur={() => void saveAction("nextAction")} on:keydown={(event) => handleActionKeydown(event, "nextAction")}></textarea>
+                        {:else}
+                            <p>{selected.nextAction || "尚未填写明确的下一步行动。"}</p>
+                        {/if}
+                        {#if actionErrors.nextAction}<p class="xz-action-error" role="alert">{actionErrors.nextAction}</p>{/if}
+                    </section>
 
                     {#if selectedIssues.length > 0}
                         <section class="xz-issues"><h3>关系提示</h3>{#each selectedIssues as issue}<p>{issue.message}</p>{/each}</section>
@@ -534,7 +886,7 @@
                     {:else}
                         <p class="xz-detached-note">这是数据库独立条目，不需要建立或关联文档。</p>
                     {/if}
-                    <p class="xz-detail-note">修改会直接写入思源属性视图，并在保存后重新读取复核。</p>
+                    <p class="xz-detail-note">点击行动卡片可直接编辑；失焦自动保存，Esc 取消。修改会写入思源属性视图并重新读取复核。</p>
                 {:else}
                     <div class="xz-empty"><p>选择一个工作项查看详情。</p></div>
                 {/if}
