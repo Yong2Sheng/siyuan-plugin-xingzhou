@@ -2,7 +2,7 @@
   "name": "siyuan-plugin-xingzhou",
   "author": "Yong2Sheng",
   "url": "https://github.com/Yong2Sheng/siyuan-plugin-xingzhou",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "3.8.0",
   "backends": ["all"],
   "frontends": ["desktop", "desktop-window", "browser-desktop"],

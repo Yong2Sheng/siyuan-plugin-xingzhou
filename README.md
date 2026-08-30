@@ -2,7 +2,7 @@
 
 行舟是一个面向个人时间的思源笔记插件。它把原生属性视图保留为唯一数据源，在其上提供更适合浏览、选择和逐步展开项目的界面。
 
-> 当前版本：`0.1.0`（首个正式测试版本）
+> 当前版本：`0.1.1`（安全删除更新）
 
 [English README](README.en.md) · [中文更新日志](CHANGELOG.md) · [English Changelog](CHANGELOG.en.md)
 

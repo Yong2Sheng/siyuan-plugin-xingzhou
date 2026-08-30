@@ -4,6 +4,12 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
+None.
+
+## 0.1.1 - 2026-08-30
+
+Adds a protected work-item deletion flow on top of the first public testing release.
+
 ### Added
 
 - Added one consistent right-click menu across All, Inbox, Week, and Review work-item surfaces for deleting areas, projects, tasks, transactions, and ideas.
