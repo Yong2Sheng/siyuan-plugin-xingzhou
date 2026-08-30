@@ -4,7 +4,10 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
-None.
+### Added
+
+- Added a global “+ Capture” entry in the header, available from All, Week, Inbox, and Review, with `Cmd/Ctrl + Shift + I` support.
+- Added contextual child creation from area/project details and native context menus, prefilling the direct parent and derived top project.
 
 ## 0.2.0 - 2026-08-30
 

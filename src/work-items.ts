@@ -114,6 +114,12 @@ export type WorkItemData = {
     fields: Partial<Record<keyof typeof FIELD_NAMES, WorkItemField>>;
 };
 
+export type InboxCaptureOptions = {
+    type?: string;
+    parentId?: string;
+    topProjectId?: string;
+};
+
 export async function loadWorkItems(attributeViewId: string): Promise<WorkItemData> {
     const definition = await requestSiYuan<AttributeViewDefinition>("/api/av/getAttributeView", {
         id: attributeViewId,
@@ -205,6 +211,7 @@ export async function captureInboxItem(
     databaseBlockId: string,
     title: string,
     createItemId: () => string = createSiYuanNodeId,
+    options: InboxCaptureOptions = {},
 ): Promise<WorkItemData> {
     const normalizedTitle = title.trim();
     if (!normalizedTitle) throw new Error("请输入要记录的内容。");
@@ -230,11 +237,19 @@ export async function captureInboxItem(
     for (let attempt = 0; attempt < 3; attempt += 1) {
         data = await loadWorkItems(attributeViewId);
         created = data.items.find((item) => item.id === itemId || item.rowId === itemId);
-        if (created?.status === "收件箱") return data;
+        if (created?.status === "收件箱") break;
         if (attempt < 2) await delay(120 * (attempt + 1));
     }
     if (!created) throw new Error("思源已接受新增请求，但刷新后没有找到新条目。请打开原始数据库检查。");
-    throw new Error(`新条目已创建，但状态为“${created.status || "空"}”，未进入收件箱。请检查原生视图筛选条件。`);
+    if (created.status !== "收件箱" || !data) {
+        throw new Error(`新条目已创建，但状态为“${created.status || "空"}”，未进入收件箱。请检查原生视图筛选条件。`);
+    }
+
+    const changes: WorkItemChanges = {};
+    if (options.type) changes.type = options.type;
+    if (options.parentId) changes.parent = options.parentId;
+    if (options.topProjectId) changes.topProject = options.topProjectId;
+    return Object.keys(changes).length > 0 ? updateWorkItem(data, created, changes) : data;
 }
 
 export function findInboxViewId(definition: AttributeViewDefinition): string {

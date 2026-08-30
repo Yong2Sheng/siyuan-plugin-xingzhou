@@ -57,6 +57,52 @@ describe("XingzhouApp", () => {
         expect(document.body.textContent).not.toContain("这个页面仍在规划中");
     });
 
+    it("提供全局快速记录，并能在长期领域下上下文创建顶层项目", async () => {
+        const domain = {
+            id: "domain", rowId: "domain", title: "写小说", documentId: null, detached: true,
+            type: "长期领域", status: "重点投入", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: null, noDeadline: false, durationMinutes: null, energy: "", updatedAt: Date.now(),
+        };
+        const baseData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [domain], missingFields: [], fields: {},
+        };
+        const project = {
+            ...domain, id: "project", rowId: "project", title: "完成第一卷", type: "项目", status: "收件箱", parentIds: [domain.id],
+        };
+        const captureInbox = vi.fn()
+            .mockResolvedValueOnce(baseData)
+            .mockResolvedValueOnce({ ...baseData, items: [domain, project] });
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox, saveItem: vi.fn(), deleteItem: vi.fn(),
+                openDocument: vi.fn(), openDatabase: vi.fn(),
+            },
+        });
+
+        (document.querySelector(".xz-global-capture-button") as HTMLButtonElement).click();
+        await tick();
+        let input = document.querySelector("#xz-quick-capture-input") as HTMLInputElement;
+        input.value = "随手记下的想法";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        (document.querySelector(".xz-quick-capture-dialog form") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        await vi.waitFor(() => expect(captureInbox).toHaveBeenNthCalledWith(1, "随手记下的想法", undefined));
+        await vi.waitFor(() => expect(document.querySelector(".xz-add-child-button"), document.body.innerHTML).not.toBeNull());
+
+        (document.querySelector(".xz-add-child-button") as HTMLButtonElement).click();
+        await tick();
+        expect(document.querySelector(".xz-quick-capture-dialog")?.textContent).toContain("添加到“写小说”");
+        input = document.querySelector("#xz-quick-capture-input") as HTMLInputElement;
+        input.value = "完成第一卷";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        (document.querySelector(".xz-quick-capture-dialog form") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        await vi.waitFor(() => expect(captureInbox).toHaveBeenNthCalledWith(2, "完成第一卷", {
+            type: "项目", parentId: "domain", topProjectId: "",
+        }));
+        await vi.waitFor(() => expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("完成第一卷"));
+    });
+
     it("从收件箱查看独立条目时精确高亮，并允许直接编辑数据库字段", async () => {
         const item = {
             id: "item-1", rowId: "item-1", title: "清理房间中的垃圾", documentId: null, detached: true,

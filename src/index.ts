@@ -2,7 +2,7 @@ import { Menu, openTab, Plugin, Setting, showMessage, type Custom, type Tab } fr
 import XingzhouApp from "./XingzhouApp.svelte";
 import { DEFAULT_SETTINGS, normalizeSettings, type XingzhouSettings } from "./config";
 import { getXingzhouTabId, XINGZHOU_TAB_TYPE } from "./tab-id";
-import { captureInboxItem, deleteWorkItem, loadWorkItems, updateWorkItem } from "./work-items";
+import { captureInboxItem, deleteWorkItem, loadWorkItems, updateWorkItem, type InboxCaptureOptions } from "./work-items";
 import "./index.scss";
 
 const SETTINGS_FILE = "settings.json";
@@ -83,17 +83,27 @@ export default class XingzhouPlugin extends Plugin {
                         target: mount,
                         props: {
                             load: () => loadWorkItems(plugin.settings.attributeViewId),
-                            captureInbox: (title: string) => captureInboxItem(
+                            captureInbox: (title: string, options?: InboxCaptureOptions) => captureInboxItem(
                                 plugin.settings.attributeViewId,
                                 plugin.settings.databaseBlockId,
                                 title,
+                                undefined,
+                                options,
                             ),
                             saveItem: updateWorkItem,
                             deleteItem: deleteWorkItem,
-                            openItemMenu: (event: MouseEvent, onDelete: () => void) => {
+                            openItemMenu: (event: MouseEvent, onDelete: () => void, addChild?: { label: string; onClick: () => void }) => {
                                 event.preventDefault();
                                 event.stopPropagation();
                                 const menu = new Menu("xingzhou-work-item-actions-menu");
+                                if (addChild) {
+                                    menu.addItem({
+                                        icon: "iconAdd",
+                                        label: addChild.label,
+                                        click: addChild.onClick,
+                                    });
+                                    menu.addSeparator();
+                                }
                                 menu.addItem({
                                     icon: "iconTrashcan",
                                     label: "删除工作项…",

@@ -67,6 +67,7 @@
 .xz-header h1 { margin: 2px 0 0; font-size: 26px; letter-spacing: .12em; }
 .xz-eyebrow { color: var(--xingzhou-muted); font-size: 12px; letter-spacing: .12em; }
 .xz-header-actions { display: flex; gap: 10px; align-items: center; }
+.xz-quick-capture-notice { max-width: 320px; overflow: hidden; color: var(--b3-theme-success); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .xz-data-source {
     padding: 2px 7px;
     border-radius: 999px;
@@ -75,6 +76,7 @@
     font-size: 11px;
 }
 .xz-header .b3-button { display: inline-flex; gap: 6px; align-items: center; }
+.xz-global-capture-button { color: var(--xingzhou-primary); border-color: color-mix(in srgb, var(--xingzhou-primary) 48%, var(--xingzhou-border)); }
 
 .xz-main-nav {
     display: flex;
@@ -268,7 +270,10 @@
 .xz-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .xz-detail-header h2 { margin: 9px 0 0; font-size: 23px; line-height: 1.3; }
 .xz-detail-identity { min-width: 0; flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
+.xz-detail-role-row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .xz-detail-role { display: inline-flex; padding: 3px 8px; border-radius: 999px; color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-size: 10px; font-weight: 600; }
+.xz-add-child-button { padding: 3px 7px; border: 0; border-radius: var(--xingzhou-radius); color: var(--xingzhou-primary); background: transparent; font-size: 10px; cursor: pointer; }
+.xz-add-child-button:hover { background: var(--xingzhou-primary-light); }
 .xz-detail-header-actions { display: flex; align-items: center; gap: 8px; }
 .xz-detail-header-actions .b3-button { padding: 4px 9px; font-size: 12px; }
 .xz-action-edit-toggle { min-width: 9.5em; justify-content: center; white-space: nowrap; }
@@ -547,7 +552,8 @@
     background: color-mix(in srgb, var(--xingzhou-text) 28%, transparent);
     backdrop-filter: blur(2px);
 }
-.xz-delete-dialog {
+.xz-delete-dialog,
+.xz-quick-capture-dialog {
     box-sizing: border-box;
     width: min(100%, 520px);
     max-height: min(720px, calc(100vh - 48px));
@@ -559,6 +565,15 @@
     background: var(--xingzhou-panel);
     box-shadow: 0 16px 48px color-mix(in srgb, var(--xingzhou-text) 28%, transparent);
 }
+.xz-quick-capture-dialog h2 { margin: 7px 0 10px; font-size: 21px; line-height: 1.4; }
+.xz-quick-capture-dialog > p { margin: 0 0 18px; color: var(--xingzhou-muted); line-height: 1.65; }
+.xz-quick-capture-dialog form { display: flex; flex-direction: column; gap: 8px; }
+.xz-quick-capture-dialog form > label { margin-top: 4px; color: var(--xingzhou-muted); font-size: 11px; }
+.xz-quick-capture-dialog .b3-text-field,
+.xz-quick-capture-dialog .b3-select { box-sizing: border-box; width: 100%; }
+.xz-quick-capture-parent { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 5px; padding: 9px 11px; border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); font-size: 11px; }
+.xz-quick-capture-parent strong { overflow: hidden; color: var(--xingzhou-text); text-overflow: ellipsis; white-space: nowrap; }
+.xz-quick-capture-dialog > small { display: block; margin-top: 14px; color: var(--xingzhou-muted); text-align: center; font-size: 10px; }
 .xz-delete-dialog h2 { margin: 7px 0 14px; font-size: 21px; line-height: 1.4; }
 .xz-delete-dialog > p { margin: 0 0 12px; color: var(--xingzhou-muted); line-height: 1.65; }
 .xz-delete-dialog .xz-delete-note { padding: 10px 12px; border-radius: var(--xingzhou-radius); background: var(--xingzhou-surface-light); }
@@ -577,6 +592,7 @@
 @keyframes xz-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 980px) {
+    .xz-quick-capture-notice, .xz-data-source { display: none; }
     .xz-workspace { grid-template-columns: 180px minmax(250px, 1fr); }
     .xz-detail { grid-column: 1 / -1; }
     .xz-secondary-bar { align-items: flex-start; flex-direction: column; }

@@ -26,6 +26,8 @@ Xingzhou is a SiYuan plugin for managing personal projects with low friction. A 
 - Role-aware detail layouts for areas, top-level projects, subprojects, tasks, transactions, and ideas, hiding execution-only fields from non-executable roles.
 - Derived, read-only top-project display that updates together with explicit direct-parent changes.
 - Three-state deadlines: Pending confirmation, None, or a concrete date.
+- Global header capture with `Cmd/Ctrl + Shift + I`, without switching to Inbox first.
+- Contextual child creation from an area or project with direct parent and derived top project prefilled.
 - Title-level completion control that disappears after completion while status remains the single lifecycle source of truth.
 - Click-to-edit current-action and next-action cards with blur-to-save, Escape to cancel, and Cmd/Ctrl+Enter to save.
 - Setting a plan date can move Inbox/Ready items to Planned, but dates never pretend that work has actually started.
