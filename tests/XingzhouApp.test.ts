@@ -185,9 +185,12 @@ describe("XingzhouApp", () => {
         const unscheduledProject = {
             ...unscheduled, id: "project", rowId: "project", title: "不应进入待安排的项目", type: "项目",
         };
+        const completed = {
+            ...scheduled, id: "completed-week", rowId: "completed-week", title: "本周已完成的事务", status: "已完成",
+        };
         const workItemData = {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
-            items: [scheduled, unscheduled, activeWindow, unscheduledProject], missingFields: [],
+            items: [scheduled, unscheduled, activeWindow, unscheduledProject, completed], missingFields: [],
             fields: {
                 title: { id: "title", name: "工作项", type: "block", options: [] },
                 status: { id: "status", name: "状态", type: "select", options: [{ name: "已计划" }] },
@@ -216,6 +219,7 @@ describe("XingzhouApp", () => {
         expect(document.body.textContent).toContain("周一");
         expect(document.body.textContent).toContain("周日");
         expect(document.querySelector(".xz-week-board")?.textContent).toContain("今天处理合同");
+        expect(document.querySelector(".xz-week-board")?.textContent).not.toContain("本周已完成的事务");
         expect(document.querySelector(".xz-week-backlog")?.textContent).toContain("整理书架");
         expect(document.querySelector(".xz-week-backlog")?.textContent).toContain("办理有效期内的事务");
         expect(document.querySelector(".xz-week-backlog")?.textContent).not.toContain("不应进入待安排的项目");

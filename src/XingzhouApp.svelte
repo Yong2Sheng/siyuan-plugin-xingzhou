@@ -24,7 +24,7 @@
     const itemFilters: Array<{ id: ItemFilter; label: string }> = [
         { id: "all", label: "全部" },
         { id: "active", label: "活跃项目" },
-        { id: "future", label: "将来／也许" },
+        { id: "future", label: "将来" },
         { id: "closed", label: "已结束" },
     ];
     const statusOptions = [
@@ -339,14 +339,14 @@
         const end = new Date(start);
         end.setDate(end.getDate() + 7);
         for (const item of items) {
-            if (!item.planDate || item.planDate < start || item.planDate >= end.getTime()) continue;
+            if (isClosed(item) || !item.planDate || item.planDate < start || item.planDate >= end.getTime()) continue;
             const key = formatInputDate(item.planDate);
             const existing = result.get(key) ?? [];
             existing.push(item);
             result.set(key, existing);
         }
         for (const dayItems of result.values()) {
-            dayItems.sort((a, b) => Number(isClosed(a)) - Number(isClosed(b)) || a.title.localeCompare(b.title, "zh-CN"));
+            dayItems.sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
         }
         return result;
     }

@@ -2,7 +2,7 @@
 
 Xingzhou is a SiYuan plugin for managing personal projects with low friction. A native Attribute View remains the single source of truth; the plugin adds a focused interface for browsing and progressively expanding the work that currently needs attention.
 
-> Current version: `0.1.0` (early test release; `main` includes later unreleased iterations)
+> Current version: `0.1.0` (first public testing release)
 
 [中文说明](README.md) · [中文更新日志](CHANGELOG.md) · [English Changelog](CHANGELOG.en.md)
 
@@ -39,6 +39,8 @@ Xingzhou is a SiYuan plugin for managing personal projects with low friction. A 
 
 This release writes only after explicit capture, editing, scheduling, unscheduling, or completion actions. It never adds or removes database fields, creates documents automatically, or auto-repairs relations.
 
+A pre-release audit against the design report found roughly **94%** coverage of the first-release requirements. Remaining work is enhancement-only: persisted tree/default-page preferences, drag-and-drop scheduling, concurrent-edit conflict feedback, precise native-row navigation, automatic document creation, and a hierarchy widget. None of these gaps blocks the capture–review–schedule–execute–reflect loop.
+
 ### Current page status
 
 | Page | Status |
@@ -69,9 +71,9 @@ The production build creates `dist/` and an installable `package.zip`.
 
 Xingzhou has no remote service. It accesses only the configured Attribute View through SiYuan’s local API and writes only after explicit capture, detail editing, scheduling, unscheduling, or completion actions. It stores only binding IDs in plugin-private data and is disabled in Publish mode.
 
-## Database migration note
+## Database schema note
 
-The code supports editable current-action details and the simplified status model, but it never changes the database schema automatically. Existing databases still need a separate `本次行动细则` text field and an explicit migration of legacy status options and native view filters.
+Xingzhou never changes the database schema automatically. Before first use, ensure that the target Attribute View contains the fields you intend to use, especially the `本次行动细则` text field. Legacy statuses remain readable, but moving gradually to the current status set and reviewing native view filters is recommended.
 
 ## License
 
