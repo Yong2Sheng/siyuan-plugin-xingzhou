@@ -4,7 +4,15 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
-None.
+### Added
+
+- Added one consistent right-click menu across All, Inbox, Week, and Review work-item surfaces for deleting areas, projects, tasks, transactions, and ideas.
+- Added a second confirmation with explicit warnings when descendants or top-project references remain.
+
+### Safety
+
+- Deletion removes only the target Attribute View row. A bound SiYuan document is merely unbound and is never deleted.
+- Descendants are not deleted recursively, relation references are not silently rewritten, and the Attribute View is reloaded to verify every deletion.
 
 ## 0.1.0 - 2026-08-30
 

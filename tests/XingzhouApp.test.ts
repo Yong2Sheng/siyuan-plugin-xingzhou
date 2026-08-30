@@ -25,6 +25,7 @@ describe("XingzhouApp", () => {
                 }),
                 captureInbox: vi.fn(),
                 saveItem: vi.fn(),
+                deleteItem: vi.fn(),
                 openDocument: vi.fn(),
                 openDatabase: vi.fn(),
             },
@@ -41,6 +42,7 @@ describe("XingzhouApp", () => {
                 load: vi.fn(),
                 captureInbox: vi.fn(),
                 saveItem: vi.fn(),
+                deleteItem: vi.fn(),
                 openDocument: vi.fn(),
                 openDatabase: vi.fn(),
             },
@@ -82,7 +84,7 @@ describe("XingzhouApp", () => {
             target: document.body,
             props: {
                 load: vi.fn(() => new Promise<never>(() => undefined)),
-                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, openDocument: vi.fn(), openDatabase: vi.fn(),
+                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
             },
         });
         [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
@@ -202,7 +204,7 @@ describe("XingzhouApp", () => {
             target: document.body,
             props: {
                 load: vi.fn(() => new Promise<never>(() => undefined)),
-                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, openDocument: vi.fn(), openDatabase: vi.fn(),
+                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
             },
         });
         [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
@@ -230,6 +232,57 @@ describe("XingzhouApp", () => {
         assignment.dispatchEvent(new Event("change", { bubbles: true }));
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
         expect(saveItem.mock.calls[0][2]).toEqual({ planDate: targetDate, status: "已计划" });
+    });
+
+    it("在任意工作项入口右键可安全删除数据库行，并提示保留下级与关联文档", async () => {
+        const domain = {
+            id: "domain", rowId: "row-domain", title: "写小说", documentId: "domain-doc", detached: false,
+            type: "长期领域", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: null, durationMinutes: null, energy: "", updatedAt: Date.now(),
+        };
+        const child = {
+            ...domain, id: "child", rowId: "row-child", title: "世界观构建", documentId: null, detached: true,
+            type: "项目", parentIds: [domain.id], topProjectIds: [domain.id],
+        };
+        const workItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [domain, child], missingFields: [], fields: {},
+        };
+        const deleteItem = vi.fn().mockResolvedValue({ ...workItemData, items: [child] });
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(), deleteItem,
+                openDocument: vi.fn(), openDatabase: vi.fn(),
+            },
+        });
+
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
+        await tick();
+        const input = document.querySelector("#xz-inbox-input") as HTMLInputElement;
+        input.value = "初始化删除测试";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await tick();
+        (document.querySelector(".xz-capture-card") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        await vi.waitFor(() => expect(document.body.textContent).toContain("已加入收件箱：初始化删除测试"));
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "全部")?.click();
+        await tick();
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="domain"]'), document.body.innerHTML).not.toBeNull());
+        (document.querySelector('[data-work-item-id="domain"]') as HTMLElement).dispatchEvent(new MouseEvent("contextmenu", {
+            bubbles: true, cancelable: true, clientX: 120, clientY: 160,
+        }));
+        await tick();
+        expect(document.querySelector('[role="menu"]')?.textContent).toContain("删除工作项");
+
+        ([...document.querySelectorAll("button")].find((button) => button.textContent?.includes("删除工作项")) as HTMLButtonElement).click();
+        await tick();
+        expect(document.querySelector('[role="dialog"]')?.textContent).toContain("关联的思源文档不会被删除");
+        expect(document.querySelector('[role="dialog"]')?.textContent).toContain("1 个下级工作项");
+        expect(document.querySelector('[role="dialog"]')?.textContent).toContain("1 个工作项把它设为所属顶层项目");
+
+        ([...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "确认删除") as HTMLButtonElement).click();
+        await vi.waitFor(() => expect(deleteItem).toHaveBeenCalledWith(workItemData, domain));
+        await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
     });
 
     it("整理页根据真实数据生成周度检查，并能跳转到问题条目", async () => {
@@ -260,7 +313,7 @@ describe("XingzhouApp", () => {
             target: document.body,
             props: {
                 load: vi.fn(() => new Promise<never>(() => undefined)),
-                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
+                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
             },
         });
         [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();

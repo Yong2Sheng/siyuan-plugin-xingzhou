@@ -33,11 +33,12 @@ Xingzhou is a SiYuan plugin for managing personal projects with low friction. A 
 - Review prioritization ensures each item appears in only one highest-priority step per review pass.
 - Opens linked SiYuan documents and the native database block.
 - Warns about self-parenting, multiple parents, missing parents, cycles, and top-project mismatches.
+- Opens a work-item menu by right-clicking list, tree, card, and detail-title surfaces, then removes the target Attribute View row only after a second confirmation.
 - Loading, empty, error, and missing-optional-field states.
 - SiYuan theme token and dark-mode support.
 - Configurable Attribute View ID and database block ID.
 
-This release writes only after explicit capture, editing, scheduling, unscheduling, or completion actions. It never adds or removes database fields, creates documents automatically, or auto-repairs relations.
+This release writes only after explicit capture, editing, scheduling, unscheduling, completion, or confirmed deletion actions. It never adds or removes database fields, creates documents automatically, or auto-repairs relations. Deleting a bound row keeps its SiYuan document, descendants are never deleted recursively, and remaining relation references are called out before confirmation.
 
 A pre-release audit against the design report found roughly **94%** coverage of the first-release requirements. Remaining work is enhancement-only: persisted tree/default-page preferences, drag-and-drop scheduling, concurrent-edit conflict feedback, precise native-row navigation, automatic document creation, and a hierarchy widget. None of these gaps blocks the capture–review–schedule–execute–reflect loop.
 
@@ -69,7 +70,7 @@ The production build creates `dist/` and an installable `package.zip`.
 
 ## Data and privacy
 
-Xingzhou has no remote service. It accesses only the configured Attribute View through SiYuan’s local API and writes only after explicit capture, detail editing, scheduling, unscheduling, or completion actions. It stores only binding IDs in plugin-private data and is disabled in Publish mode.
+Xingzhou has no remote service. It accesses only the configured Attribute View through SiYuan’s local API and writes only after explicit capture, detail editing, scheduling, unscheduling, completion, or confirmed deletion actions. It stores only binding IDs in plugin-private data and is disabled in Publish mode.
 
 ## Database schema note
 

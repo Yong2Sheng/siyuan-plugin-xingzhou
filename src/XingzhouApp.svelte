@@ -7,6 +7,7 @@
     export let load: () => Promise<WorkItemData>;
     export let captureInbox: (title: string) => Promise<WorkItemData>;
     export let saveItem: (data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData>;
+    export let deleteItem: (data: WorkItemData, item: WorkItem) => Promise<WorkItemData>;
     export let openDocument: (blockId: string) => Promise<void>;
     export let openDatabase: () => Promise<void>;
 
@@ -14,6 +15,7 @@
     type ItemFilter = "all" | "active" | "future" | "closed";
     type WeekDay = { timestamp: number; key: string; label: string; dateLabel: string; isToday: boolean };
     type ActionField = "currentAction" | "nextAction";
+    type ItemContextMenu = { itemId: string; x: number; y: number };
 
     const mainPages: Array<{ id: MainPage; label: string }> = [
         { id: "all", label: "全部" },
@@ -55,10 +57,25 @@
     let savingInline: string | null = null;
     let actionErrors: Record<ActionField, string> = { currentAction: "", nextAction: "" };
     let inlineError = "";
+    let contextMenu: ItemContextMenu | null = null;
+    let contextItem: WorkItem | null = null;
+    let deleteTarget: WorkItem | null = null;
+    let deleteDescendantCount = 0;
+    let deleteTopReferenceCount = 0;
+    let deleting = false;
+    let deleteError = "";
     let draftSourceId: string | null = null;
     let detailDraft = emptyDetailDraft();
 
     $: selected = selectedId ? tree.byId.get(selectedId) ?? null : null;
+    $: contextItem = contextMenu ? tree.byId.get(contextMenu.itemId) ?? null : null;
+    $: deleteDescendantCount = deleteTarget ? Math.max(0, collectDescendantIds(deleteTarget.id, tree).size - 1) : 0;
+    $: {
+        const deleteTargetId = deleteTarget?.id;
+        deleteTopReferenceCount = deleteTargetId
+            ? (data?.items ?? []).filter((item) => item.id !== deleteTargetId && item.topProjectIds.includes(deleteTargetId)).length
+            : 0;
+    }
     $: domains = data?.items.filter((item) => item.type === "长期领域") ?? [];
     $: independentRoots = tree.roots.filter((item) => item.type !== "长期领域");
     $: {
@@ -142,6 +159,64 @@
             parentId = tree.byId.get(parentId)?.parentIds[0];
         }
         expandedIds = next;
+    }
+
+    function handleContextMenu(event: MouseEvent) {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        if (!target.closest(".xz-app")) return;
+        if (target.closest("input, textarea, select, [contenteditable='true']")) return;
+        const itemElement = target.closest<HTMLElement>("[data-work-item-id]");
+        const itemId = itemElement?.dataset.workItemId;
+        if (!itemId || !tree.byId.has(itemId)) {
+            contextMenu = null;
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        contextMenu = {
+            itemId,
+            x: Math.max(8, Math.min(event.clientX, window.innerWidth - 232)),
+            y: Math.max(8, Math.min(event.clientY, window.innerHeight - 76)),
+        };
+    }
+
+    function handleWindowClick(event: MouseEvent) {
+        const target = event.target;
+        if (contextMenu && (!(target instanceof Element) || !target.closest(".xz-context-menu"))) contextMenu = null;
+    }
+
+    function handleWindowKeydown(event: KeyboardEvent) {
+        if (event.key !== "Escape") return;
+        contextMenu = null;
+        if (deleteTarget && !deleting) {
+            deleteTarget = null;
+            deleteError = "";
+        }
+    }
+
+    function requestDelete(item: WorkItem) {
+        contextMenu = null;
+        deleteTarget = item;
+        deleteError = "";
+    }
+
+    async function confirmDelete() {
+        if (!data || !deleteTarget || deleting) return;
+        const target = deleteTarget;
+        deleting = true;
+        deleteError = "";
+        try {
+            const refreshed = await deleteItem(data, target);
+            if (scope === target.id) scope = "all";
+            if (selectedId === target.id) selectedId = null;
+            applyData(refreshed);
+            deleteTarget = null;
+        } catch (caught) {
+            deleteError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            deleting = false;
+        }
     }
 
     function emptyDetailDraft() {
@@ -523,6 +598,8 @@
     }
 </script>
 
+<svelte:window on:click={handleWindowClick} on:contextmenu={handleContextMenu} on:keydown={handleWindowKeydown} on:resize={() => contextMenu = null} />
+
 <div class="xz-app">
     <header class="xz-header">
         <div>
@@ -591,7 +668,7 @@
                 {:else}
                     <div class="xz-inbox-list">
                         {#each inboxItems as item (item.id)}
-                            <article class="xz-inbox-item">
+                            <article class="xz-inbox-item" data-work-item-id={item.id}>
                                 <button class="xz-inbox-item-main" type="button" on:click={() => revealInboxItem(item)}>
                                     <span class="xz-inbox-item-title">{item.title}</span>
                                     <span class="xz-inbox-item-meta">{item.type || "未分类"} · {item.updatedAt ? formatDate(item.updatedAt) : "刚刚捕获"}</span>
@@ -634,7 +711,7 @@
                                         <p class="xz-week-day-empty">暂无安排</p>
                                     {:else}
                                         {#each weekItemsByDate.get(day.key) ?? [] as item (item.id)}
-                                            <article class:xz-week-item--closed={isClosed(item)} class="xz-week-item">
+                                            <article class:xz-week-item--closed={isClosed(item)} class="xz-week-item" data-work-item-id={item.id}>
                                                 <button class="xz-week-item-title" type="button" on:click={() => revealInboxItem(item)}>{item.title}</button>
                                                 <div class="xz-week-item-meta"><span>{displayStatus(item.status) || "未设置"}</span>{#if item.durationMinutes !== null}<span>{item.durationMinutes} 分钟</span>{/if}{#if item.energy}<span>{item.energy}精力</span>{/if}</div>
                                                 <div class="xz-week-item-actions">
@@ -661,7 +738,7 @@
                                     <section class="xz-week-backlog-group">
                                         <h4><span>进行窗口</span><em>今天可推进</em></h4>
                                         {#each activeWindowItems as item (item.id)}
-                                            <article class="xz-week-backlog-item xz-week-backlog-item--window">
+                                            <article class="xz-week-backlog-item xz-week-backlog-item--window" data-work-item-id={item.id}>
                                                 <button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type} · 截止 {item.deadline ? formatInputDate(item.deadline) : "—"}</span></button>
                                             </article>
                                         {/each}
@@ -671,7 +748,7 @@
                                     <section class="xz-week-backlog-group">
                                         <h4><span>尚未选择日期</span><em>{unscheduledWeekItems.length} 项</em></h4>
                                         {#each unscheduledWeekItems as item (item.id)}
-                                            <article class="xz-week-backlog-item">
+                                            <article class="xz-week-backlog-item" data-work-item-id={item.id}>
                                                 <button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type || "未分类"} · {displayStatus(item.status) || "未设置"}</span></button>
                                                 <select aria-label={`安排“${item.title}”`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekAssignment(event, item)}>
                                                     <option value="">安排到…</option>{#each weekDays as targetDay}<option value={targetDay.key}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}
@@ -708,27 +785,27 @@
                 <div class="xz-review-steps">
                     <section class:xz-review-step--ready={inboxItems.length === 0} class="xz-review-step">
                         <header><span class="xz-review-step-number">1</span><div><h3>清空收件箱</h3><p>补充类型和状态，或确认暂时放到“将来”。</p></div><em>{inboxItems.length === 0 ? "已就绪" : `${inboxItems.length} 项`}</em></header>
-                        {#if inboxItems.length > 0}<div class="xz-review-item-list">{#each inboxItems as item (item.id)}<button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type || "未分类"} · 收件箱</span></button>{/each}</div>{/if}
+                        {#if inboxItems.length > 0}<div class="xz-review-item-list">{#each inboxItems as item (item.id)}<button type="button" data-work-item-id={item.id} on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type || "未分类"} · 收件箱</span></button>{/each}</div>{/if}
                     </section>
 
                     <section class:xz-review-step--warning={reviewActiveProjects.length > 3} class:xz-review-step--ready={reviewActiveProjects.length > 0 && reviewActiveProjects.length <= 3} class="xz-review-step">
                         <header><span class="xz-review-step-number">2</span><div><h3>确认当前投入方向</h3><p>活跃顶层项目原则上不超过 2–3 个；长期领域不计入数量。</p></div><em>{reviewActiveProjects.length > 3 ? "需要收敛" : reviewActiveProjects.length === 0 ? "尚未选择" : "数量合适"}</em></header>
-                        {#if reviewActiveProjects.length > 0}<div class="xz-review-item-list">{#each reviewActiveProjects as item (item.id)}<button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{displayStatus(item.status)}</span></button>{/each}</div>{/if}
+                        {#if reviewActiveProjects.length > 0}<div class="xz-review-item-list">{#each reviewActiveProjects as item (item.id)}<button type="button" data-work-item-id={item.id} on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{displayStatus(item.status)}</span></button>{/each}</div>{/if}
                     </section>
 
                     <section class:xz-review-step--ready={reviewDateItems.length === 0} class="xz-review-step">
                         <header><span class="xz-review-step-number">3</span><div><h3>处理遗留日期</h3><p>先重新安排已经过去的计划日期，并确认逾期事项是否仍然有效。</p></div><em>{reviewDateItems.length === 0 ? "已就绪" : `${reviewDateItems.length} 项`}</em></header>
-                        {#if reviewDateItems.length > 0}<div class="xz-review-item-list">{#each reviewDateItems as item (item.id)}<button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span class:xz-review-item-overdue={isOverdue(item)}>{reviewDateReason(item)}</span></button>{/each}</div>{/if}
+                        {#if reviewDateItems.length > 0}<div class="xz-review-item-list">{#each reviewDateItems as item (item.id)}<button type="button" data-work-item-id={item.id} on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span class:xz-review-item-overdue={isOverdue(item)}>{reviewDateReason(item)}</span></button>{/each}</div>{/if}
                     </section>
 
                     <section class:xz-review-step--ready={reviewMissingActionItems.length === 0} class="xz-review-step">
                         <header><span class="xz-review-step-number">4</span><div><h3>让执行项可以直接开始</h3><p>日期有效后，再检查事务与想法是否写明本次行动细则。</p></div><em>{reviewMissingActionItems.length === 0 ? "已就绪" : `${reviewMissingActionItems.length} 项`}</em></header>
-                        {#if reviewMissingActionItems.length > 0}<div class="xz-review-item-list">{#each reviewMissingActionItems as item (item.id)}<button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type} · {displayStatus(item.status)}</span></button>{/each}</div>{/if}
+                        {#if reviewMissingActionItems.length > 0}<div class="xz-review-item-list">{#each reviewMissingActionItems as item (item.id)}<button type="button" data-work-item-id={item.id} on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type} · {displayStatus(item.status)}</span></button>{/each}</div>{/if}
                     </section>
 
                     <section class="xz-review-step xz-review-step--reflection">
                         <header><span class="xz-review-step-number">5</span><div><h3>看一眼本周留下了什么</h3><p>这里只用于获得反馈，不评价推进速度；缓慢推进也是正常推进。</p></div><em>{reviewCompletedThisWeek.length} 项</em></header>
-                        {#if reviewCompletedThisWeek.length > 0}<div class="xz-review-item-list">{#each reviewCompletedThisWeek as item (item.id)}<button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{displayStatus(item.status)} · {formatDate(item.updatedAt)}</span></button>{/each}</div>{:else}<p class="xz-review-empty-note">本周还没有已结束条目，这不代表没有发生有效推进。</p>{/if}
+                        {#if reviewCompletedThisWeek.length > 0}<div class="xz-review-item-list">{#each reviewCompletedThisWeek as item (item.id)}<button type="button" data-work-item-id={item.id} on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{displayStatus(item.status)} · {formatDate(item.updatedAt)}</span></button>{/each}</div>{:else}<p class="xz-review-empty-note">本周还没有已结束条目，这不代表没有发生有效推进。</p>{/if}
                     </section>
                 </div>
             {/if}
@@ -767,7 +844,7 @@
                     <h2>长期领域</h2>
                     <button class:active={scope === "all"} class="xz-scope-button" type="button" on:click={() => scope = "all"}>全部领域与工作项</button>
                     {#each domains as domain (domain.id)}
-                        <button class:active={scope === domain.id} class="xz-scope-button" type="button" on:click={() => { scope = domain.id; selectedId = domain.id; }}>
+                        <button class:active={scope === domain.id} class="xz-scope-button" type="button" data-work-item-id={domain.id} on:click={() => { scope = domain.id; selectedId = domain.id; }}>
                             <span>{domain.title}</span><small>{domain.status || "未设置"}</small>
                         </button>
                     {/each}
@@ -778,7 +855,7 @@
                         <span>全部</span><small>{independentRoots.length}</small>
                     </button>
                     {#each independentRoots as item (item.id)}
-                        <button class:active={scope === item.id} class="xz-scope-button xz-scope-button--item" type="button" on:click={() => { scope = item.id; selectedId = item.id; }}>
+                        <button class:active={scope === item.id} class="xz-scope-button xz-scope-button--item" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
                             <span>{item.title}</span><small>{item.status || "未设置"}</small>
                         </button>
                     {/each}
@@ -811,7 +888,7 @@
                 {#if selected}
                     <div class="xz-detail-header">
                         <div class="xz-detail-identity">
-                            <div class="xz-detail-title-row">
+                            <div class="xz-detail-title-row" data-work-item-id={selected.id}>
                                 <input class="xz-inline-title" aria-label="名称" bind:value={detailDraft.title} disabled={Boolean(savingInline)} on:blur={() => void saveInline("title", detailDraft.title)} on:keydown={(event) => event.key === "Enter" && event.currentTarget.blur()} />
                                 {#if selected.status !== "已完成"}
                                     <button class="b3-button xz-complete-button" type="button" disabled={Boolean(savingInline)} on:click={() => void saveInline("status", "已完成")}>
@@ -892,5 +969,45 @@
                 {/if}
             </aside>
         </main>
+    {/if}
+
+    {#if contextMenu && contextItem}
+        <div
+            class="xz-context-menu"
+            role="menu"
+            tabindex="-1"
+            aria-label={`${contextItem.title}的操作菜单`}
+            style={`left:${contextMenu.x}px;top:${contextMenu.y}px`}
+        >
+            <button class="xz-context-menu-danger" type="button" role="menuitem" on:click={() => requestDelete(contextItem)}>
+                删除工作项…
+            </button>
+        </div>
+    {/if}
+
+    {#if deleteTarget}
+        <div class="xz-dialog-backdrop" role="presentation" on:click|self={() => { if (!deleting) { deleteTarget = null; deleteError = ""; } }}>
+            <section class="xz-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="xz-delete-title">
+                <span class="xz-section-kicker">不可撤销的数据库操作</span>
+                <h2 id="xz-delete-title">删除“{deleteTarget.title}”？</h2>
+                <p>这个工作项将从“行舟”绑定的思源属性视图中移除。</p>
+                {#if deleteTarget.documentId}
+                    <p class="xz-delete-note">关联的思源文档不会被删除，只会解除它与当前数据库的绑定。</p>
+                {:else}
+                    <p class="xz-delete-note">这是数据库独立条目；删除后，其名称和属性不会保留在当前数据库中。</p>
+                {/if}
+                {#if deleteDescendantCount > 0}
+                    <p class="xz-delete-warning">检测到 {deleteDescendantCount} 个下级工作项。它们不会被级联删除，但会暂时保留指向已删除父项的关系，需要之后重新整理。</p>
+                {/if}
+                {#if deleteTopReferenceCount > 0}
+                    <p class="xz-delete-warning">另有 {deleteTopReferenceCount} 个工作项把它设为所属顶层项目；这些引用不会自动改写。</p>
+                {/if}
+                {#if deleteError}<p class="xz-save-error" role="alert">{deleteError}</p>{/if}
+                <div class="xz-delete-actions">
+                    <button class="b3-button b3-button--outline" type="button" disabled={deleting} on:click={() => { deleteTarget = null; deleteError = ""; }}>取消</button>
+                    <button class="b3-button xz-danger-button" type="button" disabled={deleting} on:click={() => void confirmDelete()}>{deleting ? "正在删除并复核…" : "确认删除"}</button>
+                </div>
+            </section>
+        </div>
     {/if}
 </div>

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { requestSiYuan } from "../src/siyuan-api";
-import { captureInboxItem, updateWorkItem, type AttributeViewDefinition, type RenderedAttributeView, type WorkItemData } from "../src/work-items";
+import { captureInboxItem, deleteWorkItem, updateWorkItem, type AttributeViewDefinition, type RenderedAttributeView, type WorkItemData } from "../src/work-items";
 
 vi.mock("../src/siyuan-api", () => ({
     requestSiYuan: vi.fn(),
@@ -145,5 +145,35 @@ describe("captureInboxItem", () => {
             keyID: "parent", itemID: "item-1", value: { type: "relation", relation: { blockIDs: ["project-1"], contents: [] } },
         }));
         expect(result.items[0]).toMatchObject({ status: "待开始", currentAction: "收集各房间垃圾并更换垃圾袋", nextAction: "拿垃圾袋装好并带下楼", parentIds: ["project-1"] });
+    });
+
+    it("删除工作项时使用属性视图行 ID，并在重新读取后确认条目消失", async () => {
+        const item = {
+            id: "source-block", rowId: "row-item", title: "一次性事务", documentId: "source-block", detached: false,
+            type: "事务", status: "待开始", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: null, durationMinutes: null, energy: "", updatedAt: null,
+        };
+        const data: WorkItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view", items: [item], missingFields: [], fields: {},
+        };
+        const definition: AttributeViewDefinition = {
+            av: { id: "av-id", name: "测试数据库", views: [{ id: "all-view", name: "全部工作项", type: "table" }] },
+        };
+        const rendered: RenderedAttributeView = {
+            id: "av-id", name: "测试数据库", viewID: "all-view", viewType: "table", views: definition.av?.views ?? [],
+            view: { columns: [{ id: "title", name: "工作项", type: "block" }], rows: [] },
+        };
+        requestMock
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(definition)
+            .mockResolvedValueOnce(rendered);
+
+        const result = await deleteWorkItem(data, item);
+
+        expect(requestMock).toHaveBeenNthCalledWith(1, "/api/av/removeAttributeViewBlocks", {
+            avID: "av-id",
+            srcIDs: ["row-item"],
+        });
+        expect(result.items).toEqual([]);
     });
 });

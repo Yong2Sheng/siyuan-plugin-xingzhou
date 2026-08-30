@@ -167,6 +167,22 @@ export async function updateWorkItem(
     return refreshed;
 }
 
+export async function deleteWorkItem(
+    data: WorkItemData,
+    item: WorkItem,
+): Promise<WorkItemData> {
+    await requestSiYuan<null>("/api/av/removeAttributeViewBlocks", {
+        avID: data.attributeViewId,
+        srcIDs: [item.rowId],
+    });
+
+    const refreshed = await loadWorkItems(data.attributeViewId);
+    if (refreshed.items.some((candidate) => candidate.rowId === item.rowId)) {
+        throw new Error("思源已接受删除请求，但复核时仍然找到了该条目。请打开原始数据库检查。");
+    }
+    return refreshed;
+}
+
 export type InboxCapturePayload = {
     avID: string;
     blockID: string;

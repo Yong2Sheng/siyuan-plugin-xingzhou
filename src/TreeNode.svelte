@@ -19,7 +19,7 @@
     $: expanded = expandedIds.has(item.id);
 </script>
 
-<div class="xz-tree-node" data-depth={depth}>
+<div class="xz-tree-node" data-depth={depth} data-work-item-id={item.id}>
     <div class:selected={selectedId === item.id} class="xz-tree-row" style={`--xz-depth:${depth}`}>
         {#if children.length > 0}
             <button
