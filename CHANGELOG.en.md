@@ -4,6 +4,12 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
+None.
+
+## 0.3.0 - 2026-08-31
+
+This release turns creation, hierarchy recognition, and completion into a clearer workflow that feels native to SiYuan.
+
 ### Added
 
 - Added a global “+ Add” entry in the header, available from All, Week, Inbox, and Review, with `Cmd/Ctrl + Shift + I` support.
