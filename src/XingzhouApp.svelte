@@ -1,8 +1,10 @@
 <script lang="ts">
-    import { onMount, tick } from "svelte";
+    import { onMount } from "svelte";
+    import type { CaptureDialogMode, CaptureDialogRequest, CaptureDialogValues } from "./capture-dialog";
+    import RoleBadge from "./RoleBadge.svelte";
     import TreeNode from "./TreeNode.svelte";
     import { buildWorkItemTree, collectDescendantIds, hasActiveDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
-    import { deriveTopProjectId, getWorkItemProfile, needsDeadlineDecision } from "./work-item-role";
+    import { deriveTopProjectId, getWorkItemProfile, needsDeadlineDecision, WORK_ITEM_ROLE_LEGEND } from "./work-item-role";
     import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
 
     export let load: () => Promise<WorkItemData>;
@@ -10,6 +12,7 @@
     export let saveItem: (data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData>;
     export let deleteItem: (data: WorkItemData, item: WorkItem) => Promise<WorkItemData>;
     export let openItemMenu: (event: MouseEvent, onDelete: () => void, addChild?: { label: string; onClick: () => void }) => void = (_event, onDelete) => onDelete();
+    export let openCaptureDialog: (request: CaptureDialogRequest) => void = () => undefined;
     export let openDocument: (blockId: string) => Promise<void>;
     export let openDatabase: () => Promise<void>;
 
@@ -17,7 +20,7 @@
     type ItemFilter = "all" | "active" | "future" | "closed";
     type WeekDay = { timestamp: number; key: string; label: string; dateLabel: string; isToday: boolean };
     type ActionField = "currentAction" | "nextAction";
-    type QuickCaptureMode = "global" | "child" | "areaOrIdea" | "topProject" | "transaction";
+    type CompletionUndo = { rowId: string; title: string; status: string };
 
     const mainPages: Array<{ id: MainPage; label: string }> = [
         { id: "all", label: "全部" },
@@ -48,13 +51,6 @@
     let capturing = false;
     let captureError = "";
     let captureMessage = "";
-    let quickCaptureOpen = false;
-    let quickCaptureMode: QuickCaptureMode = "global";
-    let quickCaptureTitle = "";
-    let quickCaptureParent: WorkItem | null = null;
-    let quickCaptureType = "事务";
-    let quickCaptureAreaId = "";
-    let quickCaptureError = "";
     let quickCaptureNotice = "";
     let weekStart = startOfWeek(Date.now());
     let weekSavingIds = new Set<string>();
@@ -62,6 +58,9 @@
     let editingAction: ActionField | null = null;
     let savingAction: ActionField | null = null;
     let savingInline: string | null = null;
+    let completionUndo: CompletionUndo | null = null;
+    let completionUndoTimer: ReturnType<typeof setTimeout> | null = null;
+    let undoingCompletion = false;
     let actionErrors: Record<ActionField, string> = { currentAction: "", nextAction: "" };
     let inlineError = "";
     let deleteTarget: WorkItem | null = null;
@@ -117,7 +116,10 @@
     $: reviewCompletedThisWeek = getReviewCompletedThisWeek(data?.items ?? []);
     $: if (selected && selected.id !== draftSourceId) resetDetailDraft(selected);
 
-    onMount(() => { void refresh(); });
+    onMount(() => {
+        void refresh();
+        return () => clearCompletionUndo();
+    });
 
     async function refresh() {
         loading = true;
@@ -164,83 +166,64 @@
         return item.type === "长期领域" || item.type === "项目";
     }
 
-    async function openQuickCapture(parent: WorkItem | null = null) {
-        quickCaptureMode = parent ? "child" : "global";
-        quickCaptureParent = parent;
-        quickCaptureType = parent?.type === "长期领域" ? "项目" : parent ? "事务" : "事务";
-        quickCaptureAreaId = "";
-        quickCaptureTitle = "";
-        quickCaptureError = "";
-        quickCaptureOpen = true;
-        await tick();
-        document.querySelector<HTMLInputElement>("#xz-quick-capture-input")?.focus();
+    function openQuickCapture(parent: WorkItem | null = null) {
+        const mode: CaptureDialogMode = parent ? "child" : "global";
+        openCaptureDialog({
+            mode,
+            parent: parent ? { id: parent.id, title: parent.title, type: parent.type } : undefined,
+            areas: longTermAreas.map(({ id, title, type }) => ({ id, title, type })),
+            onSubmit: (values) => submitQuickCapture(mode, parent, values),
+        });
     }
 
-    async function openSidebarCapture(mode: Exclude<QuickCaptureMode, "global" | "child">) {
-        quickCaptureMode = mode;
-        quickCaptureParent = null;
-        quickCaptureType = mode === "areaOrIdea" ? "长期领域" : mode === "topProject" ? "项目" : "事务";
-        quickCaptureAreaId = "";
-        quickCaptureTitle = "";
-        quickCaptureError = "";
-        quickCaptureOpen = true;
-        await tick();
-        document.querySelector<HTMLInputElement>("#xz-quick-capture-input")?.focus();
+    function openSidebarCapture(mode: Exclude<CaptureDialogMode, "global" | "child">) {
+        openCaptureDialog({
+            mode,
+            areas: longTermAreas.map(({ id, title, type }) => ({ id, title, type })),
+            onSubmit: (values) => submitQuickCapture(mode, null, values),
+        });
     }
 
-    function closeQuickCapture() {
-        if (capturing) return;
-        quickCaptureOpen = false;
-        quickCaptureMode = "global";
-        quickCaptureParent = null;
-        quickCaptureAreaId = "";
-        quickCaptureError = "";
-    }
-
-    async function submitQuickCapture() {
-        const title = quickCaptureTitle.trim();
-        if (!title || capturing) return;
+    async function submitQuickCapture(mode: CaptureDialogMode, parent: WorkItem | null, values: CaptureDialogValues): Promise<void> {
+        const title = values.title.trim();
+        if (!title) throw new Error("请先填写名称。");
+        if (capturing) throw new Error("另一项内容仍在保存，请稍候再试。");
         const previousIds = new Set(data?.items.map((item) => item.id) ?? []);
         let options: InboxCaptureOptions | undefined;
-        if (quickCaptureMode === "child" && quickCaptureParent) {
+        if (mode === "child" && parent) {
             options = {
-                type: quickCaptureType,
-                parentId: quickCaptureParent.id,
-                topProjectId: quickCaptureParent.type === "项目" ? deriveTopProjectId(quickCaptureParent.id, tree) : "",
+                type: values.type ?? (parent.type === "长期领域" ? "项目" : "事务"),
+                parentId: parent.id,
+                topProjectId: parent.type === "项目" ? deriveTopProjectId(parent.id, tree) : "",
             };
-        } else if (quickCaptureMode === "areaOrIdea") {
-            options = { type: quickCaptureType, status: quickCaptureType === "长期领域" ? "将来" : "收件箱" };
-        } else if (quickCaptureMode === "topProject") {
-            options = { type: "项目", status: "待开始", parentId: quickCaptureAreaId };
-        } else if (quickCaptureMode === "transaction") {
+        } else if (mode === "areaOrIdea") {
+            const type = values.type ?? "长期领域";
+            options = { type, status: type === "长期领域" ? "将来" : "收件箱" };
+        } else if (mode === "topProject") {
+            options = { type: "项目", status: "待开始", parentId: values.areaId ?? "" };
+        } else if (mode === "transaction") {
             options = { type: "事务", status: "收件箱" };
         }
         capturing = true;
-        quickCaptureError = "";
         try {
             const refreshed = await captureInbox(title, options);
             applyData(refreshed);
             const created = refreshed.items.find((item) => !previousIds.has(item.id));
-            quickCaptureNotice = quickCaptureMode === "child" && quickCaptureParent
-                ? `已在“${quickCaptureParent.title}”下创建：${title}`
-                : quickCaptureMode === "global" ? `已加入收件箱：${title}` : `已创建：${title}`;
-            quickCaptureOpen = false;
-            quickCaptureMode = "global";
-            quickCaptureParent = null;
-            quickCaptureAreaId = "";
-            quickCaptureTitle = "";
-            if (created && options) revealInboxItem(created);
-        } catch (caught) {
-            quickCaptureError = caught instanceof Error ? caught.message : String(caught);
+            quickCaptureNotice = mode === "child" && parent
+                ? `已在“${parent.title}”下创建：${title}`
+                : mode === "global" ? `已加入收件箱：${title}` : `已创建：${title}`;
+            if (created && options) revealInboxItem(created, true);
         } finally {
             capturing = false;
         }
     }
 
-    function revealInboxItem(item: WorkItem) {
+    function revealInboxItem(item: WorkItem, preserveCurrentScope = false) {
         page = "all";
         filter = "all";
-        scope = item.parentIds[0] || item.id;
+        if (!preserveCurrentScope || !isInsideScope(item, scope)) {
+            scope = item.parentIds[0] || item.id;
+        }
         selectedId = item.id;
         const next = new Set(expandedIds);
         const seen = new Set<string>();
@@ -251,6 +234,18 @@
             parentId = tree.byId.get(parentId)?.parentIds[0];
         }
         expandedIds = next;
+    }
+
+    function isInsideScope(item: WorkItem, scopeId: "all" | string): boolean {
+        if (scopeId === "all") return true;
+        const seen = new Set<string>();
+        let current: WorkItem | undefined = item;
+        while (current && !seen.has(current.id)) {
+            if (current.id === scopeId) return true;
+            seen.add(current.id);
+            current = current.parentIds[0] ? tree.byId.get(current.parentIds[0]) : undefined;
+        }
+        return false;
     }
 
     function handleContextMenu(event: MouseEvent) {
@@ -275,14 +270,10 @@
     function handleWindowKeydown(event: KeyboardEvent) {
         if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "i") {
             event.preventDefault();
-            void openQuickCapture();
+            openQuickCapture();
             return;
         }
         if (event.key !== "Escape") return;
-        if (quickCaptureOpen && !capturing) {
-            closeQuickCapture();
-            return;
-        }
         if (deleteTarget && !deleting) {
             deleteTarget = null;
             deleteError = "";
@@ -461,6 +452,51 @@
         } finally {
             savingInline = null;
         }
+    }
+
+    async function markSelectedComplete() {
+        if (!selected || savingInline) return;
+        const previous = { rowId: selected.rowId, title: selected.title, status: selected.status };
+        await saveInline("status", "已完成");
+        const updated = data?.items.find((item) => item.rowId === previous.rowId);
+        if (updated?.status !== "已完成") return;
+        clearCompletionUndo();
+        completionUndo = previous;
+        completionUndoTimer = setTimeout(clearCompletionUndo, 8000);
+    }
+
+    async function undoCompletion() {
+        if (!data || !completionUndo || savingInline || undoingCompletion) return;
+        const snapshot = completionUndo;
+        const item = data.items.find((candidate) => candidate.rowId === snapshot.rowId);
+        if (!item) {
+            clearCompletionUndo();
+            return;
+        }
+        undoingCompletion = true;
+        savingInline = "status";
+        inlineError = "";
+        try {
+            const refreshed = await saveItem(data, item, { status: snapshot.status || null });
+            applyData(refreshed);
+            const restored = refreshed.items.find((candidate) => candidate.rowId === snapshot.rowId);
+            if (restored) {
+                selectedId = restored.id;
+                resetDetailDraft(restored);
+            }
+            clearCompletionUndo();
+        } catch (caught) {
+            inlineError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            savingInline = null;
+            undoingCompletion = false;
+        }
+    }
+
+    function clearCompletionUndo() {
+        if (completionUndoTimer) clearTimeout(completionUndoTimer);
+        completionUndoTimer = null;
+        completionUndo = null;
     }
 
     async function saveDeadlineMode(mode: string) {
@@ -1066,7 +1102,12 @@
             </aside>
 
             <section class="xz-tree-panel">
-                <div class="xz-panel-heading"><div><span>层级浏览</span><small>{filter === "active" ? "只展开活跃路径" : "当前筛选默认完整展开"}</small></div></div>
+                <div class="xz-panel-heading">
+                    <div><span>层级浏览</span><small>{filter === "active" ? "只展开活跃路径" : "当前筛选默认完整展开"}</small></div>
+                    <div class="xz-role-legend" aria-label="层级颜色含义">
+                        {#each WORK_ITEM_ROLE_LEGEND as role}<RoleBadge {role} compact />{/each}
+                    </div>
+                </div>
                 <div class="xz-tree-scroll">
                     {#if visibleRoots.length === 0}
                         <div class="xz-empty"><p>当前范围没有符合条件的工作项。</p></div>
@@ -1091,20 +1132,22 @@
                     <div class="xz-detail-header">
                         <div class="xz-detail-identity">
                             <div class="xz-detail-role-row">
-                                {#if selectedProfile}<span class="xz-detail-role">{selectedProfile.label}</span>{/if}
-                                {#if canAddChild(selected)}
-                                    <button class="xz-add-child-button" type="button" on:click={() => void openQuickCapture(selected)}>
-                                        ＋ {selected.type === "长期领域" ? "添加顶层项目" : "添加下级"}
-                                    </button>
-                                {/if}
+                                {#if selectedProfile}<RoleBadge role={selectedProfile.role} />{/if}
+                                <div class="xz-detail-role-actions">
+                                    {#if canAddChild(selected)}
+                                        <button class="xz-add-child-button" type="button" on:click={() => void openQuickCapture(selected)}>
+                                            ＋ {selected.type === "长期领域" ? "添加顶层项目" : "添加下级"}
+                                        </button>
+                                    {/if}
+                                    {#if selectedProfile?.showComplete && !isClosed(selected)}
+                                        <button class="xz-complete-button" type="button" title="将状态改为已完成" disabled={Boolean(savingInline)} on:click={() => void markSelectedComplete()}>
+                                            ✓ 标记为完成
+                                        </button>
+                                    {/if}
+                                </div>
                             </div>
                             <div class="xz-detail-title-row" data-work-item-id={selected.id}>
                                 <input class="xz-inline-title" aria-label="名称" bind:value={detailDraft.title} disabled={Boolean(savingInline)} on:blur={() => void saveInline("title", detailDraft.title)} on:keydown={(event) => event.key === "Enter" && event.currentTarget.blur()} />
-                                {#if selectedProfile?.showComplete && !isClosed(selected)}
-                                    <button class="b3-button xz-complete-button" type="button" disabled={Boolean(savingInline)} on:click={() => void saveInline("status", "已完成")}>
-                                        ✓ 完成
-                                    </button>
-                                {/if}
                             </div>
                         </div>
                     </div>
@@ -1194,58 +1237,10 @@
         </main>
     {/if}
 
-    {#if quickCaptureOpen}
-        <div class="xz-dialog-backdrop" role="presentation" on:click|self={closeQuickCapture}>
-            <section class="xz-quick-capture-dialog" role="dialog" aria-modal="true" aria-labelledby="xz-quick-capture-title">
-                <span class="xz-section-kicker">{quickCaptureMode === "child" ? "上下文新建" : quickCaptureMode === "global" ? "快速添加" : "分类添加"}</span>
-                <h2 id="xz-quick-capture-title">{quickCaptureMode === "child" && quickCaptureParent
-                    ? `添加到“${quickCaptureParent.title}”`
-                    : quickCaptureMode === "areaOrIdea" ? "添加长期领域或想法"
-                    : quickCaptureMode === "topProject" ? "添加顶层项目"
-                    : quickCaptureMode === "transaction" ? "添加独立事务"
-                    : "添加到收件箱"}</h2>
-                <p>{quickCaptureMode === "child"
-                    ? "上层工作项已经自动带入；新条目仍从收件箱状态开始，之后可以继续整理。"
-                    : quickCaptureMode === "areaOrIdea" ? "选择这是持续关注的长期领域，还是暂时独立保存的想法。"
-                    : quickCaptureMode === "topProject" ? "直接建立顶层项目；如果它属于某个长期领域，可以在这里一并选择。"
-                    : quickCaptureMode === "transaction" ? "直接建立一个没有上层工作项的独立事务。"
-                    : "这里只需要一个名称；类型、层级和日期可以稍后再补。"}</p>
-                <form on:submit|preventDefault={() => void submitQuickCapture()}>
-                    <label for="xz-quick-capture-input">名称</label>
-                    <input id="xz-quick-capture-input" class="b3-text-field" type="text" bind:value={quickCaptureTitle} autocomplete="off" disabled={capturing} placeholder="现在想到什么？" />
-                    {#if quickCaptureMode === "child" && quickCaptureParent}
-                        <label for="xz-quick-capture-type">工作项类型</label>
-                        <select id="xz-quick-capture-type" class="b3-select" bind:value={quickCaptureType} disabled={capturing}>
-                            <option value="项目">项目</option>
-                            <option value="任务">任务</option>
-                            <option value="事务">事务</option>
-                            <option value="想法">想法</option>
-                        </select>
-                        <div class="xz-quick-capture-parent"><span>上层工作项</span><strong>{quickCaptureParent.title}</strong></div>
-                    {:else if quickCaptureMode === "areaOrIdea"}
-                        <label for="xz-quick-capture-type">工作项类型</label>
-                        <select id="xz-quick-capture-type" class="b3-select" bind:value={quickCaptureType} disabled={capturing}>
-                            <option value="长期领域">长期领域</option>
-                            <option value="想法">想法</option>
-                        </select>
-                    {:else if quickCaptureMode === "topProject"}
-                        <div class="xz-quick-capture-parent"><span>工作项类型</span><strong>项目</strong></div>
-                        <label for="xz-quick-capture-area">所属长期领域（可选）</label>
-                        <select id="xz-quick-capture-area" class="b3-select" bind:value={quickCaptureAreaId} disabled={capturing}>
-                            <option value="">不指定</option>
-                            {#each longTermAreas as area}<option value={area.id}>{area.title}</option>{/each}
-                        </select>
-                    {:else if quickCaptureMode === "transaction"}
-                        <div class="xz-quick-capture-parent"><span>工作项类型</span><strong>事务</strong></div>
-                    {/if}
-                    {#if quickCaptureError}<p class="xz-save-error" role="alert">{quickCaptureError}</p>{/if}
-                    <div class="xz-delete-actions">
-                        <button class="b3-button b3-button--outline" type="button" disabled={capturing} on:click={closeQuickCapture}>取消</button>
-                        <button class="b3-button" type="submit" disabled={capturing || !quickCaptureTitle.trim()}>{capturing ? "正在保存并复核…" : quickCaptureMode === "child" ? "创建下级" : quickCaptureMode === "global" ? "加入收件箱" : "创建"}</button>
-                    </div>
-                </form>
-                {#if quickCaptureMode === "global"}<small>快捷键：⌘/Ctrl + Shift + I</small>{/if}
-            </section>
+    {#if completionUndo}
+        <div class="xz-completion-undo" role="status" aria-live="polite">
+            <span>已将“{completionUndo.title}”标记为完成</span>
+            <button type="button" disabled={undoingCompletion} on:click={() => void undoCompletion()}>{undoingCompletion ? "正在撤销…" : "撤销"}</button>
         </div>
     {/if}
 

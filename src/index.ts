@@ -1,5 +1,6 @@
-import { Menu, openTab, Plugin, Setting, showMessage, type Custom, type Tab } from "siyuan";
+import { Dialog, Menu, openTab, Plugin, Setting, showMessage, type Custom, type Tab } from "siyuan";
 import XingzhouApp from "./XingzhouApp.svelte";
+import { showCaptureDialog, type CaptureDialogRequest } from "./capture-dialog";
 import { DEFAULT_SETTINGS, normalizeSettings, type XingzhouSettings } from "./config";
 import { getXingzhouTabId, XINGZHOU_TAB_TYPE } from "./tab-id";
 import { captureInboxItem, deleteWorkItem, loadWorkItems, updateWorkItem, type InboxCaptureOptions } from "./work-items";
@@ -27,6 +28,7 @@ type AppInstance = {
 export default class XingzhouPlugin extends Plugin {
     private settings: XingzhouSettings = { ...DEFAULT_SETTINGS };
     private readonly instances = new Map<Custom, AppInstance>();
+    private readonly dialogs = new Set<Dialog>();
     private currentTab?: Tab;
     private opening?: Promise<Tab>;
     private topBar?: HTMLElement;
@@ -54,6 +56,8 @@ export default class XingzhouPlugin extends Plugin {
         this.topBar = undefined;
         for (const instance of this.instances.values()) instance.component.$destroy();
         this.instances.clear();
+        for (const dialog of this.dialogs) dialog.destroy();
+        this.dialogs.clear();
         this.currentTab?.close();
         this.currentTab = undefined;
     }
@@ -92,6 +96,14 @@ export default class XingzhouPlugin extends Plugin {
                             ),
                             saveItem: updateWorkItem,
                             deleteItem: deleteWorkItem,
+                            openCaptureDialog: (request: CaptureDialogRequest) => {
+                                let dialog!: Dialog;
+                                dialog = showCaptureDialog({
+                                    ...request,
+                                    onDestroy: () => plugin.dialogs.delete(dialog),
+                                });
+                                plugin.dialogs.add(dialog);
+                            },
                             openItemMenu: (event: MouseEvent, onDelete: () => void, addChild?: { label: string; onClick: () => void }) => {
                                 event.preventDefault();
                                 event.stopPropagation();

@@ -30,7 +30,9 @@ Xingzhou is a SiYuan plugin for managing personal projects with low friction. A 
 - Global header capture with `Cmd/Ctrl + Shift + I`, without switching to Inbox first.
 - Compact `+` actions in Areas & Ideas, Top-level Projects, and Independent Transactions, prefilling applicable type, status, and hierarchy.
 - Contextual child creation from an area or project with direct parent and derived top project prefilled.
-- Title-level completion control that disappears after completion while status remains the single lifecycle source of truth.
+- Native SiYuan creation dialogs. The database stores one Project type; Xingzhou derives top-level or subproject roles from the direct parent, with no extra project layer between them.
+- One shared colored text-badge system across the hierarchy legend, middle tree, and detail pane for areas, top-level projects, subprojects, tasks, transactions, and ideas.
+- A “Mark as completed” action separated from title editing, disappearing after completion and offering a short Undo window while status remains the single lifecycle source of truth.
 - Click-to-edit current-action and next-action cards with blur-to-save, Escape to cancel, and Cmd/Ctrl+Enter to save.
 - Setting a plan date can move Inbox/Ready items to Planned, but dates never pretend that work has actually started.
 - Derived Today and Overdue badges that do not overwrite lifecycle status.

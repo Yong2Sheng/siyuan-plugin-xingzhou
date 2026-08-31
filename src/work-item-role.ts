@@ -3,6 +3,18 @@ import type { WorkItemTree } from "./tree";
 
 export type WorkItemRole = "domain" | "topProject" | "subproject" | "task" | "transaction" | "idea" | "unclassified";
 
+export const WORK_ITEM_ROLE_META: Record<WorkItemRole, { label: string }> = {
+    domain: { label: "长期领域" },
+    topProject: { label: "顶层项目" },
+    subproject: { label: "子项目" },
+    task: { label: "任务" },
+    transaction: { label: "事务" },
+    idea: { label: "想法" },
+    unclassified: { label: "未分类" },
+};
+
+export const WORK_ITEM_ROLE_LEGEND: WorkItemRole[] = ["domain", "topProject", "subproject", "task", "transaction", "idea"];
+
 export type WorkItemProfile = {
     role: WorkItemRole;
     label: string;
@@ -38,32 +50,32 @@ export function getWorkItemRole(item: WorkItem, tree: WorkItemTree): WorkItemRol
 export function getWorkItemProfile(item: WorkItem, tree: WorkItemTree): WorkItemProfile {
     const role = getWorkItemRole(item, tree);
     if (role === "domain") return {
-        role, label: "长期领域", statusLabel: "投入状态", statuses: DOMAIN_STATUSES,
+        role, label: WORK_ITEM_ROLE_META[role].label, statusLabel: "投入状态", statuses: DOMAIN_STATUSES,
         parentLabel: "", showParent: false, showTopProject: false, showPlanDate: false, showDeadline: false,
         showExecutionCost: false, showNextAction: false, showComplete: false, actionLabel: "领域说明／当前关注方向",
     };
     if (role === "topProject") return {
-        role, label: "顶层项目", statusLabel: "项目状态", statuses: PROJECT_STATUSES,
+        role, label: WORK_ITEM_ROLE_META[role].label, statusLabel: "项目状态", statuses: PROJECT_STATUSES,
         parentLabel: "所属领域", showParent: true, showTopProject: false, showPlanDate: false, showDeadline: true,
         showExecutionCost: false, showNextAction: true, showComplete: true, actionLabel: "项目目标／当前阶段",
     };
     if (role === "subproject") return {
-        role, label: "子项目", statusLabel: "项目状态", statuses: PROJECT_STATUSES,
+        role, label: WORK_ITEM_ROLE_META[role].label, statusLabel: "项目状态", statuses: PROJECT_STATUSES,
         parentLabel: "上层项目", showParent: true, showTopProject: true, showPlanDate: false, showDeadline: true,
         showExecutionCost: false, showNextAction: true, showComplete: true, actionLabel: "项目目标／当前阶段",
     };
     if (role === "task") return {
-        role, label: "任务", statusLabel: "任务状态", statuses: PROJECT_STATUSES,
+        role, label: WORK_ITEM_ROLE_META[role].label, statusLabel: "任务状态", statuses: PROJECT_STATUSES,
         parentLabel: "上层工作项", showParent: true, showTopProject: true, showPlanDate: false, showDeadline: true,
         showExecutionCost: false, showNextAction: true, showComplete: true, actionLabel: "完成标准／任务说明",
     };
     if (role === "transaction" || role === "idea") return {
-        role, label: role === "transaction" ? "事务" : "想法", statusLabel: "执行状态", statuses: EXECUTION_STATUSES,
+        role, label: WORK_ITEM_ROLE_META[role].label, statusLabel: "执行状态", statuses: EXECUTION_STATUSES,
         parentLabel: "上层工作项", showParent: true, showTopProject: true, showPlanDate: true, showDeadline: true,
         showExecutionCost: true, showNextAction: true, showComplete: true, actionLabel: role === "idea" ? "想法说明／准备如何验证" : "本次行动细则",
     };
     return {
-        role, label: "未分类", statusLabel: "状态", statuses: EXECUTION_STATUSES,
+        role, label: WORK_ITEM_ROLE_META[role].label, statusLabel: "状态", statuses: EXECUTION_STATUSES,
         parentLabel: "上层工作项", showParent: true, showTopProject: false, showPlanDate: false, showDeadline: false,
         showExecutionCost: false, showNextAction: false, showComplete: false, actionLabel: "补充说明",
     };

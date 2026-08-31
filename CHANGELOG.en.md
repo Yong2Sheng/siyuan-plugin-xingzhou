@@ -14,6 +14,14 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 - Removed the redundant all-items sidebar entry and grouped All-page navigation into Areas & Ideas, Top-level Projects, and Independent Transactions, with an uncategorized fallback when needed.
 - Made All expand the full hierarchy by default, while Active Projects exposes executable items along active paths.
+- Replaced the custom creation overlay with SiYuan's native `Dialog`, removing the GPU-heavy live backdrop blur and inheriting native form, button, theme, and window behavior.
+- Replaced the misleading project-only selector in Top-level Project creation with an explicit distinction between the top-level role and the underlying Project database type.
+- Replaced redundant hierarchy dots with colored text role badges, sharing one label and palette across the hierarchy legend, middle tree, and detail pane.
+- Moved the completion shortcut into the role row, renamed it to “Mark as completed,” and restyled it as a soft green secondary action so it cannot be mistaken for title-edit confirmation; an eight-second Undo action follows completion.
+
+### Fixed
+
+- Kept the current area or project scope after creating a descendant inside it, instead of forcing navigation to the new item's direct parent.
 
 ## 0.2.0 - 2026-08-30
 
