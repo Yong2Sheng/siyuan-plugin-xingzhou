@@ -2,8 +2,10 @@
     import { onMount } from "svelte";
     import type { CaptureDialogMode, CaptureDialogRequest, CaptureDialogValues } from "./capture-dialog";
     import RoleBadge from "./RoleBadge.svelte";
+    import { getAutomaticHierarchyStatusChanges } from "./status-hierarchy";
+    import { automaticStatusForPlanDate } from "./status-schedule";
     import TreeNode from "./TreeNode.svelte";
-    import { buildWorkItemTree, collectDescendantIds, hasActiveDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
+    import { buildWorkItemTree, collectDescendantIds, hasActiveDescendant, hasOngoingDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
     import { deriveTopProjectId, getWorkItemProfile, needsDeadlineDecision, WORK_ITEM_ROLE_LEGEND } from "./work-item-role";
     import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
 
@@ -34,7 +36,7 @@
         { id: "future", label: "将来" },
         { id: "closed", label: "已结束" },
     ];
-    const legacyStatuses = new Set(["规划中", "活跃", "等待", "将来／也许"]);
+    const legacyStatuses = new Set(["规划中", "活跃", "等待", "将来／也许", "已计划"]);
 
     let page: MainPage = "all";
     let filter: ItemFilter = "all";
@@ -60,6 +62,7 @@
     let savingInline: string | null = null;
     let completionUndo: CompletionUndo | null = null;
     let completionUndoTimer: ReturnType<typeof setTimeout> | null = null;
+    let temporalRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     let undoingCompletion = false;
     let actionErrors: Record<ActionField, string> = { currentAction: "", nextAction: "" };
     let inlineError = "";
@@ -107,9 +110,10 @@
         .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     $: weekDays = buildWeekDays(weekStart);
     $: weekItemsByDate = groupWeekItems(data?.items ?? [], weekStart);
+    $: scheduledWeekIds = new Set([...weekItemsByDate.values()].flatMap((items) => items.map((item) => item.id)));
     $: scheduledWeekCount = [...weekItemsByDate.values()].reduce((count, items) => count + items.length, 0);
     $: unscheduledWeekItems = getUnscheduledWeekItems(data?.items ?? []);
-    $: activeWindowItems = getActiveWindowItems(data?.items ?? []);
+    $: activeWindowItems = getActiveWindowItems(data?.items ?? [], scheduledWeekIds);
     $: reviewActiveProjects = getReviewActiveProjects(data?.items ?? []);
     $: reviewDateItems = getReviewDateItems(data?.items ?? []);
     $: reviewMissingActionItems = getReviewMissingActionItems(data?.items ?? [], new Set(reviewDateItems.map((item) => item.id)));
@@ -118,19 +122,54 @@
 
     onMount(() => {
         void refresh();
-        return () => clearCompletionUndo();
+        scheduleTemporalRefresh();
+        return () => {
+            clearCompletionUndo();
+            if (temporalRefreshTimer) clearTimeout(temporalRefreshTimer);
+        };
     });
 
     async function refresh() {
         loading = true;
         error = "";
         try {
-            applyData(await load());
+            const loaded = await load();
+            applyData(loaded);
+            try {
+                applyData(await reconcileAutomaticStatuses(loaded));
+            } catch (caught) {
+                inlineError = `日期状态自动更新失败：${caught instanceof Error ? caught.message : String(caught)}`;
+            }
         } catch (caught) {
             error = caught instanceof Error ? caught.message : String(caught);
         } finally {
             loading = false;
         }
+    }
+
+    async function reconcileAutomaticStatuses(loaded: WorkItemData): Promise<WorkItemData> {
+        if (!loaded.fields.status) return loaded;
+        let current = loaded;
+        for (const original of loaded.items) {
+            const targetStatus = automaticStatusForPlanDate(original.status, formatInputDate(original.planDate), formatInputDate(Date.now()));
+            if (!targetStatus || targetStatus === original.status) continue;
+            const currentItem = current.items.find((item) => item.rowId === original.rowId);
+            if (currentItem) current = await saveItem(current, currentItem, { status: targetStatus });
+        }
+        for (const change of getAutomaticHierarchyStatusChanges(current.items)) {
+            const currentItem = current.items.find((item) => item.rowId === change.rowId);
+            if (currentItem && currentItem.status !== change.status) current = await saveItem(current, currentItem, { status: change.status });
+        }
+        return current;
+    }
+
+    function scheduleTemporalRefresh() {
+        const nextMidnight = new Date();
+        nextMidnight.setHours(24, 0, 1, 0);
+        temporalRefreshTimer = setTimeout(async () => {
+            await refresh();
+            scheduleTemporalRefresh();
+        }, Math.max(1000, nextMidnight.getTime() - Date.now()));
     }
 
     function applyData(nextData: WorkItemData) {
@@ -193,16 +232,17 @@
         if (mode === "child" && parent) {
             options = {
                 type: values.type ?? (parent.type === "长期领域" ? "项目" : "事务"),
+                status: "待开始",
                 parentId: parent.id,
                 topProjectId: parent.type === "项目" ? deriveTopProjectId(parent.id, tree) : "",
             };
         } else if (mode === "areaOrIdea") {
             const type = values.type ?? "长期领域";
-            options = { type, status: type === "长期领域" ? "将来" : "收件箱" };
+            options = { type, status: type === "长期领域" ? "将来" : "待开始" };
         } else if (mode === "topProject") {
             options = { type: "项目", status: "待开始", parentId: values.areaId ?? "" };
         } else if (mode === "transaction") {
-            options = { type: "事务", status: "收件箱" };
+            options = { type: "事务", status: "待开始" };
         }
         capturing = true;
         try {
@@ -432,14 +472,17 @@
             }
         }
         if (role === "planDate") {
-            if (value && (selected.status === "收件箱" || selected.status === "待开始")) changes.status = "已计划";
-            if (!value && selected.status === "已计划") changes.status = "待开始";
+            const targetStatus = automaticStatusForPlanDate(selected.status, value, formatInputDate(Date.now()));
+            if (targetStatus && targetStatus !== selected.status) changes.status = targetStatus;
         }
         savingInline = role;
         inlineError = "";
         try {
             const selectedRowId = selected.rowId;
-            applyData(await saveItem(data, selected, changes));
+            const refreshed = await saveItem(data, selected, changes);
+            applyData(role === "status" || role === "type" || role === "parent" || role === "planDate"
+                ? await reconcileAutomaticStatuses(refreshed)
+                : refreshed);
             const updated = data?.items.find((item) => item.rowId === selectedRowId);
             if (updated) {
                 selectedId = updated.id;
@@ -554,7 +597,7 @@
         weekSavingIds = new Set(weekSavingIds).add(item.id);
         weekError = "";
         try {
-            applyData(await saveItem(data, item, changes));
+            applyData(await reconcileAutomaticStatuses(await saveItem(data, item, changes)));
         } catch (caught) {
             weekError = caught instanceof Error ? caught.message : String(caught);
         } finally {
@@ -566,8 +609,8 @@
 
     async function assignWeekDate(item: WorkItem, dateKey: string) {
         const changes: WorkItemChanges = { planDate: dateKey || null };
-        if (dateKey && (item.status === "收件箱" || item.status === "待开始")) changes.status = "已计划";
-        if (!dateKey && item.status === "已计划") changes.status = "待开始";
+        const targetStatus = automaticStatusForPlanDate(item.status, dateKey, formatInputDate(Date.now()));
+        if (targetStatus && targetStatus !== item.status) changes.status = targetStatus;
         await updateWeekItem(item, changes);
     }
 
@@ -625,12 +668,12 @@
             .sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
     }
 
-    function getActiveWindowItems(items: WorkItem[]): WorkItem[] {
+    function getActiveWindowItems(items: WorkItem[], scheduledIds: Set<string>): WorkItem[] {
         const excludedStatuses = new Set(["收件箱", "暂停", "将来", "将来／也许", "已完成", "已失败", "已取消", "已放弃"]);
         const today = formatInputDate(Date.now());
         return items
             .filter((item) => {
-                if ((item.type !== "事务" && item.type !== "想法") || !item.planDate || !item.deadline || excludedStatuses.has(item.status)) return false;
+                if (scheduledIds.has(item.id) || (item.type !== "事务" && item.type !== "想法") || !item.planDate || !item.deadline || excludedStatuses.has(item.status)) return false;
                 return formatInputDate(item.planDate) <= today && formatInputDate(item.deadline) >= today;
             })
             .sort((a, b) => (a.deadline ?? 0) - (b.deadline ?? 0) || a.title.localeCompare(b.title, "zh-CN"));
@@ -648,7 +691,7 @@
 
     function getReviewMissingActionItems(items: WorkItem[], higherPriorityIds: Set<string>): WorkItem[] {
         if (!data?.fields.currentAction) return [];
-        const actionableStatuses = new Set(["待开始", "已计划", "进行中", "阻塞"]);
+        const actionableStatuses = new Set(["待开始", "进行中", "阻塞"]);
         return items
             .filter((item) => !higherPriorityIds.has(item.id) && (item.type === "事务" || item.type === "想法") && actionableStatuses.has(displayStatus(item.status)) && !item.currentAction.trim())
             .sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
@@ -656,10 +699,8 @@
 
     function getReviewDateItems(items: WorkItem[]): WorkItem[] {
         const excludedStatuses = new Set(["收件箱", "暂停", "将来", "将来／也许"]);
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
         return items
-            .filter((item) => !isClosed(item) && !excludedStatuses.has(item.status) && (needsDeadlineDecision(item, tree) || isOverdue(item) || Boolean(item.planDate && item.planDate < todayStart.getTime())))
+            .filter((item) => !isClosed(item) && !excludedStatuses.has(item.status) && (needsDeadlineDecision(item, tree) || isOverdue(item)))
             .sort((a, b) => Number(isOverdue(b)) - Number(isOverdue(a)) || (a.deadline ?? a.planDate ?? 0) - (b.deadline ?? b.planDate ?? 0));
     }
 
@@ -672,8 +713,7 @@
 
     function reviewDateReason(item: WorkItem): string {
         if (isOverdue(item)) return `截止日期已过 · ${formatDate(item.deadline)}`;
-        if (needsDeadlineDecision(item, tree)) return "截止日期待确认";
-        return `计划日期已过 · ${formatDate(item.planDate)}`;
+        return "截止日期待确认";
     }
 
     function getParentCandidates(item: WorkItem): WorkItem[] {
@@ -787,6 +827,7 @@
         if (status === "规划中") return "待开始";
         if (status === "等待") return "阻塞";
         if (status === "将来／也许") return "将来";
+        if (status === "已计划") return "待开始";
         return status;
     }
 
@@ -797,6 +838,10 @@
         return date.getFullYear() === today.getFullYear()
             && date.getMonth() === today.getMonth()
             && date.getDate() === today.getDate();
+    }
+
+    function isFuturePlanDate(timestamp: number | null): boolean {
+        return Boolean(timestamp && formatInputDate(timestamp) > formatInputDate(Date.now()));
     }
 
     function isOverdue(item: WorkItem): boolean {
@@ -1011,7 +1056,7 @@
                     </section>
 
                     <section class:xz-review-step--ready={reviewDateItems.length === 0} class="xz-review-step">
-                        <header><span class="xz-review-step-number">3</span><div><h3>处理遗留日期</h3><p>先重新安排已经过去的计划日期，并确认逾期事项是否仍然有效。</p></div><em>{reviewDateItems.length === 0 ? "已就绪" : `${reviewDateItems.length} 项`}</em></header>
+                        <header><span class="xz-review-step-number">3</span><div><h3>确认期限</h3><p>补充尚未确认的截止日期，并确认逾期事项是否仍然有效。</p></div><em>{reviewDateItems.length === 0 ? "已就绪" : `${reviewDateItems.length} 项`}</em></header>
                         {#if reviewDateItems.length > 0}<div class="xz-review-item-list">{#each reviewDateItems as item (item.id)}<button type="button" data-work-item-id={item.id} on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span class:xz-review-item-overdue={isOverdue(item)}>{reviewDateReason(item)}</span></button>{/each}</div>{/if}
                     </section>
 
@@ -1154,7 +1199,7 @@
 
                     <div class="xz-meta-grid xz-meta-grid--editable">
                         <label><span>工作项类型</span><select class="b3-select xz-meta-type-select" aria-label="工作项类型" bind:value={detailDraft.type} disabled={Boolean(savingInline)} on:change={() => void saveInline("type", detailDraft.type)}><option value="">未分类</option>{#each data.fields.type?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
-                        <label><span>{selectedProfile?.statusLabel ?? "状态"}</span><select class="b3-select xz-meta-status-select" aria-label={selectedProfile?.statusLabel ?? "状态"} bind:value={detailDraft.status} disabled={Boolean(savingInline)} on:change={() => void saveInline("status", detailDraft.status)}><option value="">未设置</option>{#if detailDraft.status && !selectedProfile?.statuses.includes(detailDraft.status)}<option value={detailDraft.status}>{detailDraft.status}{legacyStatuses.has(detailDraft.status) ? "（旧状态）" : "（当前值）"}</option>{/if}{#each selectedProfile?.statuses ?? [] as status}<option value={status}>{status}</option>{/each}</select></label>
+                        <label><span>{selectedProfile?.statusLabel ?? "状态"} {#if selected.type !== "长期领域" && hasOngoingDescendant(selected.id, tree) && selected.status !== "进行中" && selected.status !== "活跃" && selected.status !== "收件箱" && selected.status !== "待开始" && selected.status !== "已计划"}<em class="xz-date-hint xz-date-hint--pending">下级仍在进行</em>{/if}</span><select class="b3-select xz-meta-status-select" aria-label={selectedProfile?.statusLabel ?? "状态"} bind:value={detailDraft.status} disabled={Boolean(savingInline)} on:change={() => void saveInline("status", detailDraft.status)}><option value="">未设置</option>{#if detailDraft.status && !selectedProfile?.statuses.includes(detailDraft.status)}<option value={detailDraft.status}>{detailDraft.status}{legacyStatuses.has(detailDraft.status) ? "（旧状态）" : "（当前值）"}</option>{/if}{#each selectedProfile?.statuses ?? [] as status}<option value={status}>{status}</option>{/each}</select></label>
                         {#if selectedProfile?.showParent}
                             <label><span>{selectedProfile.parentLabel}</span><select class="b3-select" bind:value={detailDraft.parent} disabled={Boolean(savingInline)} on:change={() => void saveInline("parent", detailDraft.parent)}><option value="">—</option>{#each parentCandidates as item}<option value={item.id}>{item.title}</option>{/each}</select></label>
                         {/if}
@@ -1162,7 +1207,7 @@
                             <div class="xz-meta-readonly-field"><span>所属顶层项目</span><strong>{topProject?.title ?? "尚未形成顶层项目链"}</strong></div>
                         {/if}
                         {#if selectedProfile?.showPlanDate}
-                            <label><span>计划日期 {#if isToday(selected.planDate) && !isClosed(selected)}<em class="xz-date-hint xz-date-hint--today">今日</em>{/if}</span><input class="b3-text-field" type="date" bind:value={detailDraft.planDate} disabled={Boolean(savingInline)} on:change={() => void saveInline("planDate", detailDraft.planDate)} /></label>
+                            <label><span>计划开始日 {#if isToday(selected.planDate) && !isClosed(selected)}<em class="xz-date-hint xz-date-hint--today">今日</em>{:else if isFuturePlanDate(selected.planDate) && !isClosed(selected)}<em class="xz-date-hint xz-date-hint--scheduled">已安排</em>{/if}</span><input class="b3-text-field" type="date" bind:value={detailDraft.planDate} disabled={Boolean(savingInline)} on:change={() => void saveInline("planDate", detailDraft.planDate)} /></label>
                         {/if}
                         {#if selectedProfile?.showDeadline}
                             <label class="xz-deadline-field"><span>截止日期 {#if isOverdue(selected)}<em class="xz-date-hint xz-date-hint--overdue">已逾期</em>{:else if detailDraft.deadlineMode === "pending"}<em class="xz-date-hint xz-date-hint--pending">待确认</em>{/if}</span><div class="xz-deadline-control"><select class="b3-select" aria-label="截止日期设置" bind:value={detailDraft.deadlineMode} disabled={Boolean(savingInline)} on:change={() => void saveDeadlineMode(detailDraft.deadlineMode)}><option value="pending">待确认</option><option value="none" disabled={!data.fields.noDeadline}>无</option><option value="date">具体日期</option></select>{#if detailDraft.deadlineMode === "date"}<input class="b3-text-field" aria-label="具体截止日期" type="date" bind:value={detailDraft.deadline} disabled={Boolean(savingInline)} on:change={() => void saveDeadlineDate(detailDraft.deadline)} />{/if}</div></label>

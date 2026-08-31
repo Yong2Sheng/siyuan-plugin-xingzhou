@@ -31,7 +31,7 @@ export type WorkItemProfile = {
     actionLabel: string;
 };
 
-const EXECUTION_STATUSES = ["收件箱", "待开始", "已计划", "进行中", "阻塞", "暂停", "将来", "已完成", "已失败", "已取消", "已放弃"];
+const EXECUTION_STATUSES = ["待开始", "进行中", "阻塞", "暂停", "将来", "已完成", "已失败", "已取消", "已放弃"];
 const PROJECT_STATUSES = ["待开始", "进行中", "阻塞", "暂停", "将来", "已完成", "已取消", "已放弃"];
 const DOMAIN_STATUSES = ["重点投入", "持续维持", "暂停", "将来", "已归档"];
 

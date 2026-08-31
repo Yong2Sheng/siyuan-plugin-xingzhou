@@ -94,7 +94,7 @@ describe("XingzhouApp", () => {
         expect(captureRequests[1]?.parent).toMatchObject({ id: "domain", title: "写小说", type: "长期领域" });
         await captureRequests[1].onSubmit({ title: "完成第一卷", type: "项目" });
         await vi.waitFor(() => expect(captureInbox).toHaveBeenNthCalledWith(2, "完成第一卷", {
-            type: "项目", parentId: "domain", topProjectId: "",
+            type: "项目", status: "待开始", parentId: "domain", topProjectId: "",
         }));
         await vi.waitFor(() => expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("完成第一卷"));
     });
@@ -229,7 +229,20 @@ describe("XingzhouApp", () => {
             },
         };
         const completedData = { ...workItemData, items: [{ ...item, status: "已完成" }] };
-        const saveItem = vi.fn().mockResolvedValueOnce(completedData).mockResolvedValue(workItemData);
+        const saveItem = vi.fn()
+            .mockResolvedValueOnce(completedData)
+            .mockResolvedValueOnce(workItemData)
+            .mockImplementation(async (currentData, currentItem, changes) => ({
+                ...currentData,
+                items: currentData.items.map((candidate) => candidate.rowId === currentItem.rowId ? {
+                    ...candidate,
+                    ...(changes.status !== undefined ? { status: changes.status ?? "" } : {}),
+                    ...(changes.nextAction !== undefined ? { nextAction: changes.nextAction ?? "" } : {}),
+                    ...(changes.planDate !== undefined ? { planDate: changes.planDate ? new Date(`${changes.planDate}T00:00:00`).getTime() : null } : {}),
+                    ...(changes.deadline !== undefined ? { deadline: changes.deadline ? new Date(`${changes.deadline}T00:00:00`).getTime() : null } : {}),
+                    ...(changes.noDeadline !== undefined ? { noDeadline: Boolean(changes.noDeadline) } : {}),
+                } : candidate),
+            }));
         component = new XingzhouApp({
             target: document.body,
             props: {
@@ -274,7 +287,8 @@ describe("XingzhouApp", () => {
         expect(document.querySelectorAll(".xz-meta-grid--editable select")).toHaveLength(5);
         expect(document.querySelector(".xz-detail-header select")).toBeNull();
         const statusSelect = document.querySelector(".xz-meta-status-select") as HTMLSelectElement;
-        expect([...statusSelect.options].map((option) => option.value)).toContain("已计划");
+        expect([...statusSelect.options].map((option) => option.value)).not.toContain("已计划");
+        expect([...statusSelect.options].map((option) => option.value)).toContain("进行中");
         expect([...statusSelect.options].map((option) => option.value)).not.toContain("规划中");
 
         expect([...document.querySelectorAll("button")].find((button) => button.textContent?.includes("编辑行动内容"))).toBeUndefined();
@@ -321,7 +335,7 @@ describe("XingzhouApp", () => {
         planDate.dispatchEvent(new Event("change", { bubbles: true }));
         await tick();
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
-        expect(saveItem.mock.calls[0][2]).toMatchObject({ planDate: "2026-09-01", status: "已计划" });
+        expect(saveItem.mock.calls[0][2]).toMatchObject({ planDate: "2026-09-01", status: "待开始" });
 
         saveItem.mockClear();
         const deadlineMode = document.querySelector('select[aria-label="截止日期设置"]') as HTMLSelectElement;
@@ -334,16 +348,16 @@ describe("XingzhouApp", () => {
     it("本周页按实际日期分组，并能把待安排条目分配到某一天", async () => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
         const scheduled = {
             id: "scheduled", rowId: "scheduled", title: "今天处理合同", documentId: null, detached: true,
-            type: "事务", status: "已计划", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
-            planDate: today.getTime(), deadline: null, noDeadline: true, durationMinutes: 30, energy: "低", updatedAt: Date.now(),
+            type: "事务", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: today.getTime(), deadline: tomorrow.getTime(), noDeadline: false, durationMinutes: 30, energy: "低", updatedAt: Date.now(),
         };
         const unscheduled = {
             ...scheduled, id: "unscheduled", rowId: "unscheduled", title: "整理书架", status: "待开始", planDate: null,
         };
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
         const activeWindow = {
@@ -360,7 +374,7 @@ describe("XingzhouApp", () => {
             items: [scheduled, unscheduled, activeWindow, unscheduledProject, completed], missingFields: [],
             fields: {
                 title: { id: "title", name: "工作项", type: "block", options: [] },
-                status: { id: "status", name: "状态", type: "select", options: [{ name: "已计划" }] },
+                status: { id: "status", name: "状态", type: "select", options: [{ name: "待开始" }, { name: "进行中" }] },
                 planDate: { id: "plan", name: "计划日期", type: "date", options: [] },
             },
         };
@@ -389,14 +403,15 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-week-board")?.textContent).not.toContain("本周已完成的事务");
         expect(document.querySelector(".xz-week-backlog")?.textContent).toContain("整理书架");
         expect(document.querySelector(".xz-week-backlog")?.textContent).toContain("办理有效期内的事务");
+        expect(document.querySelector(".xz-week-backlog")?.textContent).not.toContain("今天处理合同");
         expect(document.querySelector(".xz-week-backlog")?.textContent).not.toContain("不应进入待安排的项目");
 
         const assignment = document.querySelector('select[aria-label="安排“整理书架”"]') as HTMLSelectElement;
-        const targetDate = assignment.options[1].value;
+        const targetDate = assignment.options[assignment.options.length - 1].value;
         assignment.value = targetDate;
         assignment.dispatchEvent(new Event("change", { bubbles: true }));
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
-        expect(saveItem.mock.calls[0][2]).toEqual({ planDate: targetDate, status: "已计划" });
+        expect(saveItem.mock.calls[0][2]).toEqual({ planDate: targetDate });
     });
 
     it("在任意工作项入口右键可安全删除数据库行，并提示保留下级与关联文档", async () => {

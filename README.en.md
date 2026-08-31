@@ -23,7 +23,7 @@ Xingzhou is a SiYuan plugin for managing personal projects with low friction. A 
 - Full hierarchy expansion in All and active-path expansion with executable items in Active Projects.
 - Active-path expansion and collapse-all controls.
 - All, active project, someday, and closed filters.
-- Direct detail editing for hierarchy, type, status, dates, duration, and energy.
+- Direct detail editing for hierarchy, type, status, planned start date, deadline, duration, and energy.
 - Role-aware detail layouts for areas, top-level projects, subprojects, tasks, transactions, and ideas, hiding execution-only fields from non-executable roles.
 - Derived, read-only top-project display that updates together with explicit direct-parent changes.
 - Three-state deadlines: Pending confirmation, None, or a concrete date.
@@ -34,10 +34,12 @@ Xingzhou is a SiYuan plugin for managing personal projects with low friction. A 
 - One shared colored text-badge system across the hierarchy legend, middle tree, and detail pane for areas, top-level projects, subprojects, tasks, transactions, and ideas.
 - A “Mark as completed” action separated from title editing, disappearing after completion and offering a short Undo window while status remains the single lifecycle source of truth.
 - Click-to-edit current-action and next-action cards with blur-to-save, Escape to cancel, and Cmd/Ctrl+Enter to save.
-- Setting a plan date can move Inbox/Ready items to Planned, but dates never pretend that work has actually started.
-- Derived Today and Overdue badges that do not overwrite lifecycle status.
+- Future planned start dates show a subtle Scheduled hint. When the start date arrives, Ready items automatically become In Progress without overriding blocked, paused, or closed states.
+- Inbox is a triage stage rather than a project/execution status option. Contextually created or classified items enter Ready.
+- Any In Progress descendant promotes project ancestors still in Inbox/Ready to In Progress. Areas and explicit paused, blocked, someday, or closed states are preserved, and ancestors never auto-demote when descendants stop.
+- Derived Today and Overdue badges. Planned start and deadline together describe a multi-day execution window.
 - A real Week page with Monday-to-Sunday dates, previous/current/next week navigation, moving, unscheduling, and completion controls.
-- An Unscheduled pool limited to executable Transactions and Ideas, plus reminders for items currently inside their plan-to-deadline window.
+- An Unscheduled pool limited to executable Transactions and Ideas, plus reminders for items currently inside their planned-start-to-deadline window.
 - A five-step Review page covering Inbox, active top-level projects, stale dates, missing action details, and this week's closed items.
 - Review prioritization ensures each item appears in only one highest-priority step per review pass.
 - Opens linked SiYuan documents and the native database block.
@@ -64,7 +66,7 @@ Main navigation uses page names only and keeps development-state labels out of t
 
 ## Expected fields
 
-The primary field is `工作项`. Xingzhou also recognizes `工作项类型`, `状态`, `上层工作项`, `所属顶层项目`, `本次行动细则`, `下一步行动`, `计划日期`, `截止日期`, `无截止日期`, `预计时长（分钟）`, and `所需精力`. Long-term areas use focus-oriented states while other roles use lifecycle states. `无截止日期` is a checkbox that distinguishes an explicit no-deadline decision from an unconfirmed blank. Legacy values remain readable during migration.
+The primary field is `工作项`. Xingzhou also recognizes `工作项类型`, `状态`, `上层工作项`, `所属顶层项目`, `本次行动细则`, `下一步行动`, `计划日期`, `截止日期`, `无截止日期`, `预计时长（分钟）`, and `所需精力`. The stored `计划日期` field is presented as Planned Start Date in the UI. Long-term areas use focus-oriented states while other roles use lifecycle states. `无截止日期` is a checkbox that distinguishes an explicit no-deadline decision from an unconfirmed blank. Legacy values remain readable during migration.
 
 ## Development
 

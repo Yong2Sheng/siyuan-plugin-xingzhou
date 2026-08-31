@@ -346,6 +346,7 @@
 .xz-meta-grid--editable label > span { color: var(--xingzhou-muted); font-size: 12px; }
 .xz-date-hint { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 999px; font-style: normal; font-size: 10px; white-space: nowrap; }
 .xz-date-hint--today { color: var(--b3-theme-success); background: color-mix(in srgb, var(--b3-theme-success) 13%, transparent); }
+.xz-date-hint--scheduled { color: var(--xingzhou-primary); background: color-mix(in srgb, var(--xingzhou-primary) 12%, transparent); }
 .xz-date-hint--overdue { color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 12%, transparent); }
 .xz-date-hint--pending { color: var(--b3-theme-warning, var(--xingzhou-primary)); background: color-mix(in srgb, var(--b3-theme-warning, var(--xingzhou-primary)) 13%, transparent); }
 .xz-meta-grid--editable .b3-select,

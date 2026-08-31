@@ -4,7 +4,18 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
-None.
+### Changed
+
+- Removed Planned from selectable execution statuses and clarified the `计划日期` UI label as Planned Start Date.
+- Future starts now show a subtle Scheduled hint; Ready and legacy Planned items automatically become In Progress when their start date arrives, while blocked, paused, and closed states remain untouched.
+- Legacy Planned values remain readable and are normalized to Ready or In Progress according to their planned start date.
+- Review no longer treats a past planned start as stale, preventing normal multi-day work from being repeatedly flagged.
+- Inbox is now a triage-only stage and no longer appears among project or execution status options; contextually created and classified items start as Ready.
+- Added upward hierarchy progression: any In Progress descendant promotes project ancestors still in Inbox/Ready, without overriding areas or explicit paused, blocked, someday, and closed states, and without automatic demotion.
+
+### Fixed
+
+- Prevented executable items already scheduled in the visible week from appearing again in the left-side Active Window; unscheduled items and cross-week window reminders remain unchanged.
 
 ## 0.3.0 - 2026-08-31
 

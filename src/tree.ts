@@ -81,6 +81,16 @@ export function hasActiveDescendant(itemId: string, tree: WorkItemTree): boolean
     return visit(itemId);
 }
 
+export function hasOngoingDescendant(itemId: string, tree: WorkItemTree): boolean {
+    const seen = new Set<string>();
+    const visit = (id: string): boolean => {
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return (tree.children.get(id) ?? []).some((child) => child.status === "进行中" || child.status === "活跃" || visit(child.id));
+    };
+    return visit(itemId);
+}
+
 export function collectDescendantIds(itemId: string, tree: WorkItemTree): Set<string> {
     const result = new Set<string>([itemId]);
     const visit = (id: string) => {
