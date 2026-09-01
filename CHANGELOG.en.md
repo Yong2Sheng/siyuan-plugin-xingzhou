@@ -4,6 +4,10 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
+None.
+
+## 0.4.0 - 2026-09-01
+
 ### Changed
 
 - Removed Planned from selectable execution statuses and clarified the `计划日期` UI label as Planned Start Date.

@@ -2,7 +2,7 @@
 
 Xingzhou is a SiYuan plugin for managing personal projects with low friction. A native Attribute View remains the single source of truth; the plugin adds a focused interface for browsing and progressively expanding the work that currently needs attention.
 
-> Current version: `0.3.0` (low-friction creation, clearer hierarchy, and safer completion)
+> Current version: `0.4.0` (date- and hierarchy-driven progression, clearer Inbox semantics, and closed-item visibility control)
 
 [中文说明](README.md) · [中文更新日志](CHANGELOG.md) · [English Changelog](CHANGELOG.en.md)
 

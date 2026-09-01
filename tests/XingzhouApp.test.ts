@@ -340,12 +340,15 @@ describe("XingzhouApp", () => {
 
         saveItem.mockClear();
         const planDate = document.querySelector('.xz-meta-grid--editable input[type="date"]') as HTMLInputElement;
-        planDate.value = "2026-09-01";
+        const futurePlanDate = new Date();
+        futurePlanDate.setDate(futurePlanDate.getDate() + 7);
+        const futurePlanDateKey = `${futurePlanDate.getFullYear()}-${String(futurePlanDate.getMonth() + 1).padStart(2, "0")}-${String(futurePlanDate.getDate()).padStart(2, "0")}`;
+        planDate.value = futurePlanDateKey;
         planDate.dispatchEvent(new Event("input", { bubbles: true }));
         planDate.dispatchEvent(new Event("change", { bubbles: true }));
         await tick();
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
-        expect(saveItem.mock.calls[0][2]).toMatchObject({ planDate: "2026-09-01", status: "待开始" });
+        expect(saveItem.mock.calls[0][2]).toMatchObject({ planDate: futurePlanDateKey, status: "待开始" });
 
         saveItem.mockClear();
         const deadlineMode = document.querySelector('select[aria-label="截止日期设置"]') as HTMLSelectElement;
@@ -368,10 +371,11 @@ describe("XingzhouApp", () => {
         const unscheduled = {
             ...scheduled, id: "unscheduled", rowId: "unscheduled", title: "整理书架", status: "待开始", planDate: null,
         };
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
+        const beforeVisibleWeek = new Date(today);
+        const currentDay = beforeVisibleWeek.getDay();
+        beforeVisibleWeek.setDate(beforeVisibleWeek.getDate() - (currentDay === 0 ? 7 : currentDay));
         const activeWindow = {
-            ...scheduled, id: "window", rowId: "window", title: "办理有效期内的事务", planDate: yesterday.getTime(), deadline: tomorrow.getTime(),
+            ...scheduled, id: "window", rowId: "window", title: "办理有效期内的事务", planDate: beforeVisibleWeek.getTime(), deadline: tomorrow.getTime(),
         };
         const unscheduledProject = {
             ...unscheduled, id: "project", rowId: "project", title: "不应进入待安排的项目", type: "项目",
