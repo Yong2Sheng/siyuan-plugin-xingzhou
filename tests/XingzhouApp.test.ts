@@ -2,6 +2,7 @@ import { tick } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import XingzhouApp from "../src/XingzhouApp.svelte";
 import type { CaptureDialogRequest } from "../src/capture-dialog";
+import type { WorkItem } from "../src/work-items";
 
 describe("XingzhouApp", () => {
     let component: XingzhouApp | undefined;
@@ -10,6 +11,7 @@ describe("XingzhouApp", () => {
         component?.$destroy();
         component = undefined;
         document.body.replaceChildren();
+        try { localStorage.clear(); } catch { /* jsdom 可能禁用本地存储 */ }
     });
 
     it("挂载后立即显示界面骨架", () => {
@@ -158,9 +160,10 @@ describe("XingzhouApp", () => {
         const subproject = { ...base, id: "subproject", rowId: "subproject", title: "整理世界观", type: "项目", status: "暂停", parentIds: [project.id], topProjectIds: [project.id] };
         const transaction = { ...base, id: "transaction", rowId: "transaction", title: "绘制贸易路线", type: "事务", status: "待开始", parentIds: [subproject.id], topProjectIds: [project.id] };
         const independent = { ...base, id: "independent", rowId: "independent", title: "签署租房合同", type: "事务", status: "待开始" };
+        const completedIndependent = { ...base, id: "completed-independent", rowId: "completed-independent", title: "已经完成的独立事务", type: "事务", status: "已完成" };
         const workItemData = {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
-            items: [base, idea, project, subproject, transaction, independent], missingFields: [], fields: {},
+            items: [base, idea, project, subproject, transaction, independent, completedIndependent], missingFields: [], fields: {},
         };
         const captureInbox = vi.fn().mockResolvedValue(workItemData);
         const captureRequests: CaptureDialogRequest[] = [];
@@ -184,6 +187,13 @@ describe("XingzhouApp", () => {
         expect(sidebar.querySelector(".xz-sidebar-group--areas")?.textContent).toContain("尝试短篇叙事");
         expect(sidebar.querySelector(".xz-sidebar-group--projects")?.textContent).toContain("完成第一卷");
         expect(sidebar.querySelector(".xz-sidebar-group--transactions")?.textContent).toContain("签署租房合同");
+        expect(sidebar.textContent).not.toContain("已经完成的独立事务");
+        const includeClosed = document.querySelector(".xz-include-closed-toggle") as HTMLButtonElement;
+        expect(includeClosed.getAttribute("aria-pressed")).toBe("false");
+        includeClosed.click();
+        await tick();
+        expect(sidebar.textContent).toContain("已经完成的独立事务");
+        expect(includeClosed.getAttribute("aria-pressed")).toBe("true");
         expect(sidebar.querySelectorAll(".xz-sidebar-group-actions button")).toHaveLength(3);
         expect(document.querySelector(".xz-tree-scroll")?.textContent).toContain("绘制贸易路线");
 
@@ -234,7 +244,7 @@ describe("XingzhouApp", () => {
             .mockResolvedValueOnce(workItemData)
             .mockImplementation(async (currentData, currentItem, changes) => ({
                 ...currentData,
-                items: currentData.items.map((candidate) => candidate.rowId === currentItem.rowId ? {
+                items: currentData.items.map((candidate: WorkItem) => candidate.rowId === currentItem.rowId ? {
                     ...candidate,
                     ...(changes.status !== undefined ? { status: changes.status ?? "" } : {}),
                     ...(changes.nextAction !== undefined ? { nextAction: changes.nextAction ?? "" } : {}),

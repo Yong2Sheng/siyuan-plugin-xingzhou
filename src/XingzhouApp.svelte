@@ -37,9 +37,11 @@
         { id: "closed", label: "已结束" },
     ];
     const legacyStatuses = new Set(["规划中", "活跃", "等待", "将来／也许", "已计划"]);
+    const includeClosedStorageKey = "siyuan-plugin-xingzhou:include-closed";
 
     let page: MainPage = "all";
     let filter: ItemFilter = "all";
+    let includeClosed = false;
     let data: WorkItemData | null = null;
     let tree: WorkItemTree = buildWorkItemTree([]);
     let visibleIds = new Set<string>();
@@ -73,6 +75,10 @@
     let deleteError = "";
     let draftSourceId: string | null = null;
     let detailDraft = emptyDetailDraft();
+    let areaAndIdeaRoots: WorkItem[] = [];
+    let topLevelProjects: WorkItem[] = [];
+    let independentTransactions: WorkItem[] = [];
+    let uncategorizedRoots: WorkItem[] = [];
 
     $: selected = selectedId ? tree.byId.get(selectedId) ?? null : null;
     $: selectedProfile = selected ? getWorkItemProfile(selected, tree) : null;
@@ -83,23 +89,33 @@
             ? (data?.items ?? []).filter((item) => item.id !== deleteTargetId && item.topProjectIds.includes(deleteTargetId)).length
             : 0;
     }
-    $: areaAndIdeaRoots = sortSidebarItems((data?.items ?? []).filter((item) => item.type === "长期领域" || (item.type === "想法" && !item.parentIds[0])));
-    $: longTermAreas = areaAndIdeaRoots.filter((item) => item.type === "长期领域");
-    $: topLevelProjects = sortSidebarItems((data?.items ?? []).filter((item) => {
+    $: allAreaAndIdeaRoots = sortSidebarItems((data?.items ?? []).filter((item) => item.type === "长期领域" || (item.type === "想法" && !item.parentIds[0])));
+    $: longTermAreas = allAreaAndIdeaRoots.filter((item) => item.type === "长期领域");
+    $: allTopLevelProjects = sortSidebarItems((data?.items ?? []).filter((item) => {
         if (item.type !== "项目") return false;
         const parentItem = item.parentIds[0] ? tree.byId.get(item.parentIds[0]) : null;
         return !parentItem || parentItem.type === "长期领域";
     }));
-    $: independentTransactions = sortSidebarItems(tree.roots.filter((item) => item.type === "事务"));
-    $: categorizedSidebarIds = new Set([...areaAndIdeaRoots, ...topLevelProjects, ...independentTransactions].map((item) => item.id));
-    $: uncategorizedRoots = sortSidebarItems(tree.roots.filter((item) => !categorizedSidebarIds.has(item.id)));
+    $: allIndependentTransactions = sortSidebarItems(tree.roots.filter((item) => item.type === "事务"));
+    $: categorizedSidebarIds = new Set([...allAreaAndIdeaRoots, ...allTopLevelProjects, ...allIndependentTransactions].map((item) => item.id));
+    $: allUncategorizedRoots = sortSidebarItems(tree.roots.filter((item) => !categorizedSidebarIds.has(item.id)));
     $: {
-        data; scope; filter; tree;
+        filter; includeClosed; tree;
+        areaAndIdeaRoots = allAreaAndIdeaRoots.filter(shouldShowSidebarRoot);
+        topLevelProjects = allTopLevelProjects.filter(shouldShowSidebarRoot);
+        independentTransactions = allIndependentTransactions.filter(shouldShowSidebarRoot);
+        uncategorizedRoots = allUncategorizedRoots.filter(shouldShowSidebarRoot);
+    }
+    $: {
+        data; scope; filter; tree; includeClosed;
         visibleIds = getVisibleIds();
     }
     $: {
         scope; tree; visibleIds;
         visibleRoots = getVisibleRoots();
+    }
+    $: if (data && selectedId && !visibleIds.has(selectedId)) {
+        selectedId = data.items.find((item) => visibleIds.has(item.id))?.id ?? null;
     }
     $: parent = selected?.parentIds[0] ? tree.byId.get(selected.parentIds[0]) ?? null : null;
     $: derivedTopProjectId = selected ? deriveTopProjectId(selected.parentIds[0] ?? "", tree) : "";
@@ -121,6 +137,11 @@
     $: if (selected && selected.id !== draftSourceId) resetDetailDraft(selected);
 
     onMount(() => {
+        try {
+            includeClosed = localStorage.getItem(includeClosedStorageKey) === "true";
+        } catch {
+            includeClosed = false;
+        }
         void refresh();
         scheduleTemporalRefresh();
         return () => {
@@ -182,6 +203,36 @@
 
     function sortSidebarItems(items: WorkItem[]): WorkItem[] {
         return [...items].sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+    }
+
+    function shouldShowSidebarRoot(item: WorkItem): boolean {
+        if (filter === "closed") return isClosed(item) || hasDescendantMatching(item.id, isClosed);
+        if (filter === "all" && includeClosed) return true;
+        return !isClosed(item) || hasDescendantMatching(item.id, (candidate) => !isClosed(candidate));
+    }
+
+    function hasDescendantMatching(itemId: string, predicate: (item: WorkItem) => boolean): boolean {
+        const seen = new Set<string>();
+        const visit = (id: string): boolean => {
+            if (seen.has(id)) return false;
+            seen.add(id);
+            return (tree.children.get(id) ?? []).some((child) => predicate(child) || visit(child.id));
+        };
+        return visit(itemId);
+    }
+
+    function toggleIncludeClosed() {
+        if (filter !== "all") return;
+        includeClosed = !includeClosed;
+        if (!includeClosed && scope !== "all") {
+            const scoped = tree.byId.get(scope);
+            if (scoped && isClosed(scoped) && !hasDescendantMatching(scoped.id, (item) => !isClosed(item))) scope = "all";
+        }
+        try {
+            localStorage.setItem(includeClosedStorageKey, String(includeClosed));
+        } catch {
+            // 无法访问本地存储时仍保留本次会话中的选择。
+        }
     }
 
     async function submitInbox() {
@@ -503,6 +554,11 @@
         await saveInline("status", "已完成");
         const updated = data?.items.find((item) => item.rowId === previous.rowId);
         if (updated?.status !== "已完成") return;
+        if (filter !== "closed" && !(filter === "all" && includeClosed)) {
+            if (scope === updated.id) scope = "all";
+            const nextVisible = data?.items.find((item) => !isClosed(item));
+            selectedId = nextVisible?.id ?? null;
+        }
         clearCompletionUndo();
         completionUndo = previous;
         completionUndoTimer = setTimeout(clearCompletionUndo, 8000);
@@ -754,9 +810,9 @@
             if (filter === "active") return isActive(item);
             if (filter === "future") return item.status === "将来" || item.status === "将来／也许" || item.status === "暂停";
             if (filter === "closed") return isClosed(item);
-            return true;
+            return includeClosed || !isClosed(item);
         });
-        if (filter === "all") return new Set(matched.map((item) => item.id));
+        if (filter === "all" && includeClosed) return new Set(matched.map((item) => item.id));
 
         const result = new Set(matched.map((item) => item.id));
         for (const item of matched) {
@@ -1081,10 +1137,15 @@
         </main>
     {:else if data}
         <div class="xz-secondary-bar">
-            <div class="xz-segmented">
-                {#each itemFilters as entry}
-                    <button class:active={filter === entry.id} type="button" on:click={() => setFilter(entry.id)}>{entry.label}</button>
-                {/each}
+            <div class="xz-filter-controls">
+                <div class="xz-segmented">
+                    {#each itemFilters as entry}
+                        <button class:active={filter === entry.id} type="button" on:click={() => setFilter(entry.id)}>{entry.label}</button>
+                    {/each}
+                </div>
+                <button class:active={includeClosed && filter === "all"} class="xz-include-closed-toggle" type="button" aria-pressed={includeClosed && filter === "all"} disabled={filter !== "all"} title={filter === "all" ? "控制“全部”中是否包含已经结束的工作项" : "此开关仅作用于“全部”筛选"} on:click={toggleIncludeClosed}>
+                    {includeClosed && filter === "all" ? "✓ " : ""}包含已结束
+                </button>
             </div>
             <div class="xz-secondary-actions">
                 {#if filter === "active"}

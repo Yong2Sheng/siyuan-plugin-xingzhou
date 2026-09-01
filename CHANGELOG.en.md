@@ -16,6 +16,12 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 ### Fixed
 
 - Prevented executable items already scheduled in the visible week from appearing again in the left-side Active Window; unscheduled items and cross-week window reminders remain unchanged.
+- Prevented narrow sidebar cards from wrapping statuses such as Completed into vertical character stacks.
+
+### Added
+
+- Added a persisted Include Closed toggle beside the top filters. All hides closed items by default, while the dedicated Closed filter always shows the complete result.
+- Preserved closed ancestors required as hierarchy context for open descendants when closed items are hidden.
 
 ## 0.3.0 - 2026-08-31
 

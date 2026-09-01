@@ -119,6 +119,11 @@
 }
 .xz-segmented button { padding: 6px 10px; }
 .xz-segmented button.active { color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 600; }
+.xz-filter-controls { display: flex; align-items: center; gap: 8px; }
+.xz-include-closed-toggle { padding: 5px 9px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: transparent; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.xz-include-closed-toggle:hover:not(:disabled) { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
+.xz-include-closed-toggle.active { border-color: color-mix(in srgb, var(--xingzhou-primary) 45%, var(--xingzhou-border)); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
+.xz-include-closed-toggle:disabled { opacity: .42; cursor: default; }
 .xz-secondary-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .xz-link-button { padding: 5px 8px; font-size: 12px; }
 .xz-link-button:hover { background: var(--xingzhou-surface-light); color: var(--xingzhou-text); }
@@ -205,8 +210,8 @@
 }
 .xz-scope-button:hover { background: var(--xingzhou-surface-light); }
 .xz-scope-button.active { color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
-.xz-scope-button small { color: var(--xingzhou-muted); }
-.xz-scope-button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xz-scope-button small { flex: 0 0 auto; color: var(--xingzhou-muted); line-height: 1.25; white-space: nowrap; }
+.xz-scope-button span { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .xz-tree-panel { display: flex; flex-direction: column; background: var(--xingzhou-panel); }
 .xz-panel-heading {

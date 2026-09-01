@@ -23,12 +23,14 @@ Xingzhou is a SiYuan plugin for managing personal projects with low friction. A 
 - Full hierarchy expansion in All and active-path expansion with executable items in Active Projects.
 - Active-path expansion and collapse-all controls.
 - All, active project, someday, and closed filters.
+- All hides completed, failed, cancelled, abandoned, and archived items by default. A persisted Include Closed toggle reveals them, while closed ancestors required as context for open descendants remain visible.
 - Direct detail editing for hierarchy, type, status, planned start date, deadline, duration, and energy.
 - Role-aware detail layouts for areas, top-level projects, subprojects, tasks, transactions, and ideas, hiding execution-only fields from non-executable roles.
 - Derived, read-only top-project display that updates together with explicit direct-parent changes.
 - Three-state deadlines: Pending confirmation, None, or a concrete date.
 - Global header capture with `Cmd/Ctrl + Shift + I`, without switching to Inbox first.
 - Compact `+` actions in Areas & Ideas, Top-level Projects, and Independent Transactions, prefilling applicable type, status, and hierarchy.
+- Sidebar titles truncate cleanly while status labels stay on one line, preventing narrow cards from stacking status characters vertically.
 - Contextual child creation from an area or project with direct parent and derived top project prefilled.
 - Native SiYuan creation dialogs. The database stores one Project type; Xingzhou derives top-level or subproject roles from the direct parent, with no extra project layer between them.
 - One shared colored text-badge system across the hierarchy legend, middle tree, and detail pane for areas, top-level projects, subprojects, tasks, transactions, and ideas.
