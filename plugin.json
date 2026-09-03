@@ -2,7 +2,7 @@
   "name": "siyuan-plugin-xingzhou",
   "author": "Yong2Sheng",
   "url": "https://github.com/Yong2Sheng/siyuan-plugin-xingzhou",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "minAppVersion": "3.8.0",
   "backends": ["all"],
   "frontends": ["desktop", "desktop-window", "browser-desktop"],
@@ -12,9 +12,9 @@
     "en_US": "Xingzhou · Personal Projects & Tasks"
   },
   "description": {
-    "default": "以思源属性视图为唯一数据源，捕获、安排与整理个人项目和事务。",
-    "zh_CN": "以思源属性视图为唯一数据源，捕获、安排与整理个人项目和事务。",
-    "en_US": "A personal project and task center for capturing, scheduling, and reviewing work in a native SiYuan Attribute View."
+    "default": "由插件独立保存完整工作项，捕获、安排与整理个人项目和事务。",
+    "zh_CN": "由插件独立保存完整工作项，捕获、安排与整理个人项目和事务。",
+    "en_US": "A self-contained personal project and task center with plugin-managed internal storage."
   },
   "readme": {
     "default": "README.md",

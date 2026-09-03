@@ -2,10 +2,10 @@
   "openCenter": "Open Xingzhou",
   "centerTitle": "Xingzhou · Personal Projects & Tasks",
   "settingsTitle": "Xingzhou Settings",
-  "attributeViewId": "Attribute View ID",
-  "attributeViewIdDescription": "Xingzhou reads this Attribute View and does not automatically alter fields or work items.",
-  "databaseBlockId": "Database Block ID",
-  "databaseBlockIdDescription": "Used by Open Native Database. Leave empty to disable the entry.",
+  "attributeViewId": "Legacy Attribute View ID",
+  "attributeViewIdDescription": "Used only once to import legacy data when no internal store exists.",
+  "databaseBlockId": "Legacy Database Block ID",
+  "databaseBlockIdDescription": "Retained only to identify the legacy source; it is not used after migration.",
   "save": "Save",
   "saved": "Settings saved"
 }

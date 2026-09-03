@@ -30,12 +30,11 @@ describe("XingzhouApp", () => {
                 saveItem: vi.fn(),
                 deleteItem: vi.fn(),
                 openDocument: vi.fn(),
-                openDatabase: vi.fn(),
             },
         });
 
         expect(document.body.textContent).toContain("行舟");
-        expect(document.body.textContent).toContain("正在读取个人项目数据库");
+        expect(document.body.textContent).toContain("正在读取行舟内部数据");
     });
 
     it("收件箱页显示真实捕获表单而不是占位说明", async () => {
@@ -47,7 +46,6 @@ describe("XingzhouApp", () => {
                 saveItem: vi.fn(),
                 deleteItem: vi.fn(),
                 openDocument: vi.fn(),
-                openDatabase: vi.fn(),
             },
         });
 
@@ -81,7 +79,7 @@ describe("XingzhouApp", () => {
             target: document.body,
             props: {
                 load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox, saveItem: vi.fn(), deleteItem: vi.fn(),
-                openDocument: vi.fn(), openDatabase: vi.fn(), openCaptureDialog: (request) => captureRequests.push(request),
+                openDocument: vi.fn(), openCaptureDialog: (request) => captureRequests.push(request),
             },
         });
 
@@ -121,7 +119,7 @@ describe("XingzhouApp", () => {
             target: document.body,
             props: {
                 load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox,
-                saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
+                saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
                 openCaptureDialog: (request) => captureRequests.push(request),
             },
         });
@@ -171,7 +169,7 @@ describe("XingzhouApp", () => {
             target: document.body,
             props: {
                 load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox,
-                saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
+                saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
                 openCaptureDialog: (request) => captureRequests.push(request),
             },
         });
@@ -215,7 +213,7 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-tree-scroll")?.textContent).toContain("绘制贸易路线");
     });
 
-    it("从收件箱查看独立条目时精确高亮，并允许直接编辑数据库字段", async () => {
+    it("从收件箱查看独立条目时精确高亮，并允许直接编辑内部字段", async () => {
         const item = {
             id: "item-1", rowId: "item-1", title: "清理房间中的垃圾", documentId: null, detached: true,
             type: "事务", status: "收件箱", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
@@ -257,7 +255,7 @@ describe("XingzhouApp", () => {
             target: document.body,
             props: {
                 load: vi.fn(() => new Promise<never>(() => undefined)),
-                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
+                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(),
             },
         });
         [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
@@ -275,13 +273,16 @@ describe("XingzhouApp", () => {
             .find((button) => button.textContent?.includes("清理房间中的垃圾"));
         expect(exactScope?.classList.contains("active"), document.body.textContent ?? "").toBe(true);
         expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("清理房间中的垃圾");
-        expect(document.body.textContent).toContain("这是数据库独立条目，不需要建立或关联文档");
+        expect(document.body.textContent).toContain("这是行舟内部工作项，当前没有关联思源文档");
         expect(document.querySelector(".xz-date-hint--today")?.textContent).toBe("今日");
         expect(document.querySelector(".xz-date-hint--overdue")?.textContent).toBe("已逾期");
         expect(document.querySelector(".xz-detail-header-actions .xz-tag--today")).toBeNull();
         expect(document.querySelector(".xz-complete-button")?.textContent?.trim()).toBe("✓ 标记为完成");
         expect(document.querySelector(".xz-detail-role-actions .xz-complete-button")).not.toBeNull();
         expect(document.querySelector(".xz-detail-title-row .xz-complete-button")).toBeNull();
+        expect(document.querySelector(".xz-dependency-setup")).toBeNull();
+        expect(document.querySelector('select[aria-label="添加完成后开始依赖"]')).toBeInstanceOf(HTMLSelectElement);
+        expect(document.querySelector('select[aria-label="添加需先行依赖"]')).toBeInstanceOf(HTMLSelectElement);
 
         saveItem.mockClear();
         (document.querySelector(".xz-complete-button") as HTMLButtonElement).click();
@@ -302,7 +303,7 @@ describe("XingzhouApp", () => {
         expect([...statusSelect.options].map((option) => option.value)).not.toContain("规划中");
 
         expect([...document.querySelectorAll("button")].find((button) => button.textContent?.includes("编辑行动内容"))).toBeUndefined();
-        expect(document.body.textContent).toContain("当前数据库尚无此字段");
+        expect(document.body.textContent).toContain("内部字段暂不可用");
         const nextActionCard = [...document.querySelectorAll<HTMLElement>(".xz-action-card")]
             .find((card) => card.querySelector("h3")?.textContent === "下一步行动") as HTMLElement;
         nextActionCard.click();
@@ -397,7 +398,7 @@ describe("XingzhouApp", () => {
             target: document.body,
             props: {
                 load: vi.fn(() => new Promise<never>(() => undefined)),
-                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
+                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(),
             },
         });
         [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
@@ -428,7 +429,7 @@ describe("XingzhouApp", () => {
         expect(saveItem.mock.calls[0][2]).toEqual({ planDate: targetDate });
     });
 
-    it("在任意工作项入口右键可安全删除数据库行，并提示保留下级与关联文档", async () => {
+    it("在任意工作项入口右键可安全删除内部工作项，并提示保留下级与关联文档", async () => {
         const domain = {
             id: "domain", rowId: "row-domain", title: "写小说", documentId: "domain-doc", detached: false,
             type: "长期领域", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
@@ -448,7 +449,7 @@ describe("XingzhouApp", () => {
             target: document.body,
             props: {
                 load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(), deleteItem, openItemMenu,
-                openDocument: vi.fn(), openDatabase: vi.fn(),
+                openDocument: vi.fn(),
             },
         });
 
@@ -512,7 +513,7 @@ describe("XingzhouApp", () => {
             target: document.body,
             props: {
                 load: vi.fn(() => new Promise<never>(() => undefined)),
-                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(), openDatabase: vi.fn(),
+                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
             },
         });
         [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
@@ -539,5 +540,66 @@ describe("XingzhouApp", () => {
         [...document.querySelectorAll<HTMLButtonElement>(".xz-review-item-list button")].find((button) => button.textContent?.includes("需要归类的想法"))?.click();
         await tick();
         expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("需要归类的想法");
+    });
+
+    it("编辑跨领域依赖并显示反向支持关系", async () => {
+        const base: WorkItem = {
+            id: "base", rowId: "base", title: "基础条目", documentId: null, detached: true,
+            type: "项目", status: "待开始", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            hardPrerequisiteIds: [], softPrerequisiteIds: [], planDate: null, deadline: null, noDeadline: false,
+            durationMinutes: null, energy: "", updatedAt: Date.now(),
+        };
+        const mapArea = { ...base, id: "map-area", rowId: "map-area", title: "地图制作学习", type: "长期领域", status: "将来" };
+        const learning = { ...base, id: "learning", rowId: "learning", title: "Azgaar 使用学习", parentIds: [mapArea.id] };
+        const writingArea = { ...base, id: "writing-area", rowId: "writing-area", title: "写小说", type: "长期领域", status: "重点投入" };
+        const novel = { ...base, id: "novel", rowId: "novel", title: "恶魔的尾巴第一季", status: "进行中", parentIds: [writingArea.id] };
+        const mapDesign = { ...base, id: "map-design", rowId: "map-design", title: "恶魔的尾巴小说地图设计", status: "进行中", parentIds: [novel.id], topProjectIds: [novel.id], softPrerequisiteIds: [learning.id] };
+        const reference = { ...base, id: "reference", rowId: "reference", title: "整理地图参考资料", type: "事务" };
+        const workItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [mapArea, learning, writingArea, novel, mapDesign, reference], missingFields: [],
+            fields: {},
+        };
+        const saveItem = vi.fn(async (currentData, currentItem, changes) => ({
+            ...currentData,
+            items: currentData.items.map((item: WorkItem) => item.id === currentItem.id ? {
+                ...item,
+                ...(changes.hardPrerequisites ? { hardPrerequisiteIds: changes.hardPrerequisites } : {}),
+                ...(changes.softPrerequisites ? { softPrerequisiteIds: changes.softPrerequisites } : {}),
+            } : item),
+        }));
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, deleteItem: vi.fn(),
+                openDocument: vi.fn(),
+            },
+        });
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
+        await tick();
+        const input = document.querySelector("#xz-inbox-input") as HTMLInputElement;
+        input.value = "初始化依赖测试";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await tick();
+        (document.querySelector(".xz-capture-card") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        await vi.waitFor(() => expect(document.body.textContent).toContain("已加入收件箱：初始化依赖测试"));
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "全部")?.click();
+        await tick();
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="map-design"]'), document.body.innerHTML).not.toBeNull());
+        (document.querySelector('[data-work-item-id="map-design"] .xz-tree-main') as HTMLButtonElement).click();
+        await tick();
+
+        expect(document.querySelector(".xz-dependency-card")?.textContent).toContain("Azgaar 使用学习");
+        expect(document.querySelector(".xz-dependency-indicator")?.textContent).toContain("1");
+        const hardSelect = document.querySelector('select[aria-label="添加完成后开始依赖"]') as HTMLSelectElement;
+        hardSelect.value = reference.id;
+        hardSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: mapDesign.id }), {
+            hardPrerequisites: [reference.id],
+        }));
+
+        (document.querySelector('[data-work-item-id="learning"] .xz-tree-main') as HTMLButtonElement).click();
+        await tick();
+        expect(document.querySelector(".xz-dependency-supported")?.textContent).toContain("恶魔的尾巴小说地图设计");
     });
 });

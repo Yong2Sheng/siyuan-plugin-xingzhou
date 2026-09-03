@@ -1,8 +1,9 @@
 import type { WorkItem } from "./work-items";
+import { dependencyCycleIds, prerequisiteIds } from "./dependencies";
 
 export type WorkItemIssue = {
     itemId: string;
-    kind: "self-parent" | "multiple-parents" | "missing-parent" | "cycle" | "top-project-mismatch";
+    kind: "self-parent" | "multiple-parents" | "missing-parent" | "cycle" | "top-project-mismatch" | "self-dependency" | "missing-dependency" | "dependency-cycle";
     message: string;
 };
 
@@ -22,6 +23,7 @@ export function buildWorkItemTree(items: WorkItem[]): WorkItemTree {
     const children = new Map<string, WorkItem[]>();
     const issues: WorkItemIssue[] = [];
     const roots: WorkItem[] = [];
+    const cyclicDependencyIds = dependencyCycleIds(items);
 
     for (const item of items) {
         if (item.parentIds.length > 1) {
@@ -54,6 +56,16 @@ export function buildWorkItemTree(items: WorkItem[]): WorkItemTree {
         const topId = item.topProjectIds[0];
         if (topId && topId !== item.id && !isAncestor(topId, item, byId)) {
             issues.push({ itemId: item.id, kind: "top-project-mismatch", message: `“${item.title}”的所属顶层项目不在其上层链中。` });
+        }
+        const dependencies = prerequisiteIds(item);
+        if (dependencies.includes(item.id)) {
+            issues.push({ itemId: item.id, kind: "self-dependency", message: `“${item.title}”不能依赖自身。` });
+        }
+        if (dependencies.some((id) => !byId.has(id))) {
+            issues.push({ itemId: item.id, kind: "missing-dependency", message: `“${item.title}”引用了当前数据库中不存在的前置工作项。` });
+        }
+        if (cyclicDependencyIds.has(item.id)) {
+            issues.push({ itemId: item.id, kind: "dependency-cycle", message: `“${item.title}”所在的前置关系形成了循环依赖。` });
         }
     }
 

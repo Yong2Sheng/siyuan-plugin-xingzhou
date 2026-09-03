@@ -1,74 +1,27 @@
 # Xingzhou · Personal Projects & Tasks
 
-Xingzhou is a SiYuan plugin for managing personal projects with low friction. A native Attribute View remains the single source of truth; the plugin adds a focused interface for browsing and progressively expanding the work that currently needs attention.
+Xingzhou is a self-contained SiYuan plugin for personal projects and tasks. Areas, projects, tasks, transactions, ideas, hierarchy, and cross-project dependencies are stored in plugin-managed private data; no extra SiYuan database or document is required as the data store.
 
-> Current version: `0.4.0` (date- and hierarchy-driven progression, clearer Inbox semantics, and closed-item visibility control)
+> Current version: `0.5.0` (complete internal storage, one-time legacy migration, rotating backups, and read-after-write verification)
 
 [中文说明](README.md) · [中文更新日志](CHANGELOG.md) · [English Changelog](CHANGELOG.en.md)
 
-## Goals
+## Highlights
 
-- Reduce the decision cost of choosing what to do in limited personal time.
-- Capture long-term areas, projects, tasks, transactions, and ideas in one database.
-- Keep complete project maps in project documents and only managed work items in the database.
-- Store only the direct parent relation and reconstruct the full hierarchy from it.
-- Keep simple one-off transactions in the database without forcing a document.
-- Follow SiYuan themes and dark mode.
-- Avoid turning personal project management into performance pressure.
+- Complete hierarchy browsing for areas, top-level projects, subprojects, tasks, transactions, and ideas.
+- Real calendar scheduling in Week, low-friction capture in Inbox, and a five-step Review flow.
+- Direct editing of lifecycle, hierarchy, dates, execution cost, and action details.
+- Cross-project hard prerequisites and should-stay-ahead relationships, with cycle prevention.
+- Optional links to SiYuan documents without requiring a document for every work item.
+- Safe deletion that keeps descendants and clears references to the removed item.
 
-## Current development status
+## Storage and migration
 
-- Reads the “全部工作项” view from a configured SiYuan Attribute View.
-- All-page navigation grouped into Areas & Ideas, Top-level Projects, and Independent Transactions, with an uncategorized fallback.
-- Full hierarchy expansion in All and active-path expansion with executable items in Active Projects.
-- Active-path expansion and collapse-all controls.
-- All, active project, someday, and closed filters.
-- All hides completed, failed, cancelled, abandoned, and archived items by default. A persisted Include Closed toggle reveals them, while closed ancestors required as context for open descendants remain visible.
-- Direct detail editing for hierarchy, type, status, planned start date, deadline, duration, and energy.
-- Role-aware detail layouts for areas, top-level projects, subprojects, tasks, transactions, and ideas, hiding execution-only fields from non-executable roles.
-- Derived, read-only top-project display that updates together with explicit direct-parent changes.
-- Three-state deadlines: Pending confirmation, None, or a concrete date.
-- Global header capture with `Cmd/Ctrl + Shift + I`, without switching to Inbox first.
-- Compact `+` actions in Areas & Ideas, Top-level Projects, and Independent Transactions, prefilling applicable type, status, and hierarchy.
-- Sidebar titles truncate cleanly while status labels stay on one line, preventing narrow cards from stacking status characters vertically.
-- Contextual child creation from an area or project with direct parent and derived top project prefilled.
-- Native SiYuan creation dialogs. The database stores one Project type; Xingzhou derives top-level or subproject roles from the direct parent, with no extra project layer between them.
-- One shared colored text-badge system across the hierarchy legend, middle tree, and detail pane for areas, top-level projects, subprojects, tasks, transactions, and ideas.
-- A “Mark as completed” action separated from title editing, disappearing after completion and offering a short Undo window while status remains the single lifecycle source of truth.
-- Click-to-edit current-action and next-action cards with blur-to-save, Escape to cancel, and Cmd/Ctrl+Enter to save.
-- Future planned start dates show a subtle Scheduled hint. When the start date arrives, Ready items automatically become In Progress without overriding blocked, paused, or closed states.
-- Inbox is a triage stage rather than a project/execution status option. Contextually created or classified items enter Ready.
-- Any In Progress descendant promotes project ancestors still in Inbox/Ready to In Progress. Areas and explicit paused, blocked, someday, or closed states are preserved, and ancestors never auto-demote when descendants stop.
-- Derived Today and Overdue badges. Planned start and deadline together describe a multi-day execution window.
-- A real Week page with Monday-to-Sunday dates, previous/current/next week navigation, moving, unscheduling, and completion controls.
-- An Unscheduled pool limited to executable Transactions and Ideas, plus reminders for items currently inside their planned-start-to-deadline window.
-- A five-step Review page covering Inbox, active top-level projects, stale dates, missing action details, and this week's closed items.
-- Review prioritization ensures each item appears in only one highest-priority step per review pass.
-- Opens linked SiYuan documents and the native database block.
-- Warns about self-parenting, multiple parents, missing parents, cycles, and top-project mismatches.
-- Opens a work-item menu by right-clicking list, tree, card, and detail-title surfaces, then removes the target Attribute View row only after a second confirmation.
-- Loading, empty, error, and missing-optional-field states.
-- SiYuan theme token and dark-mode support.
-- Configurable Attribute View ID and database block ID.
+The complete store lives in the plugin-private `work-items.json`. Before every mutation Xingzhou rotates the previous version through three private backup files, saves the new store, then reads it back and verifies exact equality. An invalid primary store recovers from the newest valid backup; if none is valid, writes stop instead of silently overwriting data.
 
-This release writes only after explicit capture, editing, scheduling, unscheduling, completion, or confirmed deletion actions. It never adds or removes database fields, creates documents automatically, or auto-repairs relations. Deleting a bound row keeps its SiYuan document, descendants are never deleted recursively, and remaining relation references are called out before confirmation.
+When upgrading from `0.4.x` with no internal store yet, Xingzhou reads the configured legacy Attribute View once, combines it with legacy plugin-private dependency data, and saves a migration snapshot. Normal operation no longer reads or modifies that Attribute View after migration.
 
-A pre-release audit against the design report found roughly **94%** coverage of the first-release requirements. Remaining work is enhancement-only: persisted tree/default-page preferences, drag-and-drop scheduling, concurrent-edit conflict feedback, precise native-row navigation, automatic document creation, and a hierarchy widget. None of these gaps blocks the capture–review–schedule–execute–reflect loop.
-
-### Current page status
-
-| Page | Status |
-| --- | --- |
-| All | Implemented: database loading, hierarchy browsing, status filters, editable details, and post-write verification |
-| Week | Implemented: actual seven-day dates, executable backlog, active date-window reminders, and schedule controls |
-| Inbox | Implemented: name-only capture, inbox listing, detail navigation, and automatic Inbox status |
-| Review | Implemented: five-step checks, issue counts, per-item prioritization, and detail navigation |
-
-Main navigation uses page names only and keeps development-state labels out of tab names.
-
-## Expected fields
-
-The primary field is `工作项`. Xingzhou also recognizes `工作项类型`, `状态`, `上层工作项`, `所属顶层项目`, `本次行动细则`, `下一步行动`, `计划日期`, `截止日期`, `无截止日期`, `预计时长（分钟）`, and `所需精力`. The stored `计划日期` field is presented as Planned Start Date in the UI. Long-term areas use focus-oriented states while other roles use lifecycle states. `无截止日期` is a checkbox that distinguishes an explicit no-deadline decision from an unconfirmed blank. Legacy values remain readable during migration.
+Once the migrated work items have been verified in Xingzhou, deleting the legacy database or its containing document does not delete the internal work items. A work item may still retain a link to a SiYuan document; deleting that document only makes the link unavailable.
 
 ## Development
 
@@ -79,15 +32,11 @@ pnpm check
 pnpm build
 ```
 
-The production build creates `dist/` and an installable `package.zip`.
+The build creates `dist/` and an installable `package.zip`.
 
-## Data and privacy
+## Privacy
 
-Xingzhou has no remote service. It accesses only the configured Attribute View through SiYuan’s local API and writes only after explicit capture, detail editing, scheduling, unscheduling, completion, or confirmed deletion actions. It stores only binding IDs in plugin-private data and is disabled in Publish mode.
-
-## Database schema note
-
-Xingzhou never changes the database schema automatically. Before first use, ensure that the target Attribute View contains the fields you intend to use, especially the `本次行动细则` text field and the `无截止日期` checkbox. Legacy statuses remain readable, but moving gradually to the current status set and reviewing native view filters is recommended.
+Xingzhou contains no remote service. Work items, the migration snapshot, and rotating backups use SiYuan's plugin-private data mechanism. The plugin accesses local SiYuan content only for one-time legacy migration or when opening a linked document, and it never creates or deletes documents automatically.
 
 ## License
 

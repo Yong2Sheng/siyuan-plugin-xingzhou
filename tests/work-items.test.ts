@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { validateDependencyUpdate } from "../src/dependencies";
 import { buildWorkItemTree, collectDescendantIds, hasActiveDescendant } from "../src/tree";
 import { buildInboxCapturePayload, findInboxViewId, parseRenderedAttributeView, type AttributeViewDefinition, type RenderedAttributeView, type WorkItem } from "../src/work-items";
 
@@ -61,6 +62,8 @@ describe("parseRenderedAttributeView", () => {
         expect(result.items[1]).toMatchObject({
             id: "task",
             parentIds: ["domain"],
+            hardPrerequisiteIds: [],
+            softPrerequisiteIds: [],
             nextAction: "整理十张参考图",
             noDeadline: true,
             detached: true,
@@ -88,6 +91,32 @@ describe("buildWorkItemTree", () => {
         expect(tree.issues.some((issue) => issue.kind === "multiple-parents" && issue.itemId === "a")).toBe(true);
         expect(tree.issues.some((issue) => issue.kind === "cycle")).toBe(true);
         expect(a.parentIds).toEqual(["b", "c"]);
+    });
+});
+
+describe("跨项目依赖", () => {
+    it("同时检查硬依赖和软依赖，阻止间接循环", () => {
+        const learning = item({ id: "learning", title: "Azgaar 使用学习", softPrerequisiteIds: [] });
+        const mapDesign = item({ id: "map", title: "小说地图设计", softPrerequisiteIds: [learning.id] });
+        const publishing = item({ id: "publishing", title: "地图发布", hardPrerequisiteIds: [mapDesign.id] });
+
+        expect(validateDependencyUpdate([learning, mapDesign, publishing], learning.id, "hardPrerequisites", [publishing.id]))
+            .toBe("这项设置会形成循环依赖，请先调整已有关系。");
+        expect(validateDependencyUpdate([learning, mapDesign, publishing], mapDesign.id, "softPrerequisites", [learning.id]))
+            .toBeNull();
+    });
+
+    it("在层级树之外报告缺失依赖和依赖循环", () => {
+        const a = item({ id: "a", title: "A", hardPrerequisiteIds: ["b"] });
+        const b = item({ id: "b", title: "B", softPrerequisiteIds: ["a"] });
+        const missing = item({ id: "missing", title: "Missing", hardPrerequisiteIds: ["gone"] });
+        const tree = buildWorkItemTree([a, b, missing]);
+
+        expect(tree.issues).toEqual(expect.arrayContaining([
+            expect.objectContaining({ itemId: "a", kind: "dependency-cycle" }),
+            expect.objectContaining({ itemId: "b", kind: "dependency-cycle" }),
+            expect.objectContaining({ itemId: "missing", kind: "missing-dependency" }),
+        ]));
     });
 });
 

@@ -2,9 +2,23 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
-## Unreleased
+## 0.5.0 - 2026-09-02
 
-None.
+### Added
+
+- Xingzhou now stores complete work items in plugin-managed internal storage. A legacy SiYuan Attribute View is read only once as an optional migration source.
+- Migration preserves fields, hierarchy, linked-document references, and cross-project dependencies, and creates a private migration snapshot.
+- Every mutation rotates three private backups and verifies the saved store by reading it back. A corrupt primary store recovers from the newest valid backup.
+- Added cross-project dependencies independent of the hierarchy. `完成后开始` (hard prerequisite) and `需先行` (should stay ahead) are stored directly by the plugin and require no database fields.
+- Added dependency editing, reverse references, tree indicators, unfinished hard-prerequisite hints, cycle prevention, and deletion warnings without automatically changing work-item status.
+
+### Changed
+
+- Capture, editing, scheduling, completion, and deletion no longer write to the legacy Attribute View. Once migrated, deleting that view or its containing document does not remove Xingzhou's work items.
+
+### Fixed
+
+- Correctly treats SiYuan's empty-object response for a missing plugin data file as first-run state instead of corruption.
 
 ## 0.4.0 - 2026-09-01
 

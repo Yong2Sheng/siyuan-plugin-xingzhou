@@ -83,7 +83,10 @@ export type WorkItemField = {
     options: Array<{ name: string; color?: string; desc?: string }>;
 };
 
-export type WorkItemChanges = Partial<Record<EditableWorkItemField, string | number | boolean | null>>;
+export type WorkItemChanges = Partial<Record<EditableWorkItemField, string | number | boolean | null>> & {
+    hardPrerequisites?: string[];
+    softPrerequisites?: string[];
+};
 
 export type WorkItem = {
     id: string;
@@ -97,6 +100,8 @@ export type WorkItem = {
     nextAction: string;
     parentIds: string[];
     topProjectIds: string[];
+    hardPrerequisiteIds?: string[];
+    softPrerequisiteIds?: string[];
     planDate: number | null;
     deadline: number | null;
     noDeadline: boolean;
@@ -153,7 +158,7 @@ export async function updateWorkItem(
     item: WorkItem,
     changes: WorkItemChanges,
 ): Promise<WorkItemData> {
-    const entries = Object.entries(changes) as Array<[EditableWorkItemField, string | number | boolean | null]>;
+    const entries = Object.entries(changes).filter(([role]) => role !== "hardPrerequisites" && role !== "softPrerequisites") as Array<[EditableWorkItemField, string | number | boolean | null]>;
     for (const [role, content] of entries) {
         const field = data.fields[role];
         if (!field) throw new Error(`当前数据库中没有“${FIELD_NAMES[role][0]}”字段。`);
@@ -324,6 +329,8 @@ export function parseRenderedAttributeView(rendered: RenderedAttributeView): Wor
             nextAction: extractText(get("nextAction")),
             parentIds: extractRelations(get("parent")),
             topProjectIds: extractRelations(get("topProject")),
+            hardPrerequisiteIds: [],
+            softPrerequisiteIds: [],
             planDate: extractDate(get("planDate")),
             deadline: extractDate(get("deadline")),
             noDeadline: extractCheckbox(get("noDeadline")),

@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import type { CaptureDialogMode, CaptureDialogRequest, CaptureDialogValues } from "./capture-dialog";
+    import { prerequisiteIds, validateDependencyUpdate, type DependencyKind } from "./dependencies";
     import RoleBadge from "./RoleBadge.svelte";
     import { getAutomaticHierarchyStatusChanges } from "./status-hierarchy";
     import { automaticStatusForPlanDate } from "./status-schedule";
@@ -16,7 +17,6 @@
     export let openItemMenu: (event: MouseEvent, onDelete: () => void, addChild?: { label: string; onClick: () => void }) => void = (_event, onDelete) => onDelete();
     export let openCaptureDialog: (request: CaptureDialogRequest) => void = () => undefined;
     export let openDocument: (blockId: string) => Promise<void>;
-    export let openDatabase: () => Promise<void>;
 
     type MainPage = "week" | "all" | "inbox" | "review";
     type ItemFilter = "all" | "active" | "future" | "closed";
@@ -71,6 +71,7 @@
     let deleteTarget: WorkItem | null = null;
     let deleteDescendantCount = 0;
     let deleteTopReferenceCount = 0;
+    let deleteDependencyReferenceCount = 0;
     let deleting = false;
     let deleteError = "";
     let draftSourceId: string | null = null;
@@ -122,6 +123,22 @@
     $: topProject = derivedTopProjectId ? tree.byId.get(derivedTopProjectId) ?? null : null;
     $: parentCandidates = selected ? getParentCandidates(selected) : [];
     $: selectedIssues = selected ? tree.issues.filter((issue) => issue.itemId === selected.id) : [];
+    $: dependencyCandidates = selected
+        ? sortSidebarItems((data?.items ?? []).filter((item) => item.id !== selected.id))
+        : [];
+    $: selectedPrerequisiteIds = new Set(selected ? prerequisiteIds(selected) : []);
+    $: hardPrerequisites = selected ? resolveItems(selected.hardPrerequisiteIds ?? []) : [];
+    $: softPrerequisites = selected ? resolveItems(selected.softPrerequisiteIds ?? []) : [];
+    $: unmetHardPrerequisites = hardPrerequisites.filter((item) => item.status !== "已完成");
+    $: selectedDependents = selected
+        ? sortSidebarItems((data?.items ?? []).filter((item) => prerequisiteIds(item).includes(selected.id)))
+        : [];
+    $: {
+        const deleteTargetId = deleteTarget?.id;
+        deleteDependencyReferenceCount = deleteTargetId
+            ? (data?.items ?? []).filter((item) => item.id !== deleteTargetId && prerequisiteIds(item).includes(deleteTargetId)).length
+            : 0;
+    }
     $: inboxItems = [...(data?.items.filter((item) => item.status === "收件箱") ?? [])]
         .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     $: weekDays = buildWeekDays(weekStart);
@@ -203,6 +220,10 @@
 
     function sortSidebarItems(items: WorkItem[]): WorkItem[] {
         return [...items].sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+    }
+
+    function resolveItems(ids: string[]): WorkItem[] {
+        return ids.map((id) => tree.byId.get(id)).filter((item): item is WorkItem => Boolean(item));
     }
 
     function shouldShowSidebarRoot(item: WorkItem): boolean {
@@ -548,6 +569,46 @@
         }
     }
 
+    async function addDependency(kind: DependencyKind, event: Event) {
+        const select = event.currentTarget as HTMLSelectElement;
+        const targetId = select.value;
+        select.value = "";
+        if (!selected || !targetId) return;
+        const current = kind === "hardPrerequisites" ? selected.hardPrerequisiteIds ?? [] : selected.softPrerequisiteIds ?? [];
+        await saveDependencies(kind, [...current, targetId]);
+    }
+
+    async function removeDependency(kind: DependencyKind, targetId: string) {
+        if (!selected) return;
+        const current = kind === "hardPrerequisites" ? selected.hardPrerequisiteIds ?? [] : selected.softPrerequisiteIds ?? [];
+        await saveDependencies(kind, current.filter((id) => id !== targetId));
+    }
+
+    async function saveDependencies(kind: DependencyKind, ids: string[]) {
+        if (!data || !selected || savingInline) return;
+        const normalized = [...new Set(ids)];
+        const validationError = validateDependencyUpdate(data.items, selected.id, kind, normalized);
+        if (validationError) {
+            inlineError = validationError;
+            return;
+        }
+        const selectedRowId = selected.rowId;
+        savingInline = kind;
+        inlineError = "";
+        try {
+            applyData(await saveItem(data, selected, { [kind]: normalized }));
+            const updated = data?.items.find((item) => item.rowId === selectedRowId);
+            if (updated) {
+                selectedId = updated.id;
+                resetDetailDraft(updated);
+            }
+        } catch (caught) {
+            inlineError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            savingInline = null;
+        }
+    }
+
     async function markSelectedComplete() {
         if (!selected || savingInline) return;
         const previous = { rowId: selected.rowId, title: selected.title, status: selected.status };
@@ -604,7 +665,7 @@
         if (mode === "date") return;
         if (!data.fields.noDeadline) {
             detailDraft.deadlineMode = selected.deadline ? "date" : "pending";
-            inlineError = "当前数据库尚无“无截止日期”字段，无法明确保存为“无”。";
+            inlineError = "内部数据字段暂不可用，无法明确保存为“无”。";
             return;
         }
         await saveDeadlineChanges(mode === "none"
@@ -922,7 +983,7 @@
         </div>
         <div class="xz-header-actions">
             {#if quickCaptureNotice}<span class="xz-quick-capture-notice" aria-live="polite">{quickCaptureNotice}</span>{/if}
-            <span class="xz-data-source">本地数据库</span>
+            <span class="xz-data-source">插件内部数据</span>
             <button class="b3-button b3-button--outline xz-global-capture-button" type="button" on:click={() => void openQuickCapture()}>
                 ＋ 添加
             </button>
@@ -948,7 +1009,6 @@
                     <h2>先记下来，之后再整理</h2>
                     <p>这里只要求一个名称。类型、上层项目、日期和下一步行动，可以留到每周整理时再补。</p>
                 </div>
-                <button class="xz-link-button" type="button" on:click={() => void openDatabase()}>打开原始数据库</button>
             </section>
 
             <form class="xz-capture-card" on:submit|preventDefault={() => void submitInbox()}>
@@ -967,7 +1027,7 @@
                         {capturing ? "正在保存…" : "加入收件箱"}
                     </button>
                 </div>
-                <p class="xz-capture-hint">按 Enter 即可保存为数据库独立行，状态自动设为“收件箱”。</p>
+                <p class="xz-capture-hint">按 Enter 即可保存为行舟内部工作项，状态自动设为“收件箱”。</p>
                 {#if captureMessage}<p class="xz-capture-feedback xz-capture-feedback--success" aria-live="polite">{captureMessage}</p>{/if}
                 {#if captureError}<p class="xz-capture-feedback xz-capture-feedback--error" aria-live="assertive">{captureError}</p>{/if}
             </form>
@@ -1129,10 +1189,10 @@
             {/if}
         </main>
     {:else if loading}
-        <main class="xz-state"><span class="xz-spinner"></span><p>正在读取个人项目数据库……</p></main>
+        <main class="xz-state"><span class="xz-spinner"></span><p>正在读取行舟内部数据……</p></main>
     {:else if error}
         <main class="xz-state xz-error">
-            <h2>暂时无法读取数据库</h2><p>{error}</p>
+            <h2>暂时无法读取内部数据</h2><p>{error}</p>
             <button class="b3-button" type="button" on:click={() => void refresh()}>重试</button>
         </main>
     {:else if data}
@@ -1154,12 +1214,11 @@
                     <button class="xz-link-button" type="button" on:click={expandAllVisible}>全部展开</button>
                 {/if}
                 <button class="xz-link-button" type="button" on:click={collapseAll}>全部收起</button>
-                <button class="xz-link-button" type="button" on:click={() => void openDatabase()}>打开原始数据库</button>
             </div>
         </div>
 
         {#if data.missingFields.includes("本次行动细则")}
-            <div class="xz-notice"><strong>兼容提示：</strong>当前数据库尚无“本次行动细则”字段，详情页会先显示占位内容；插件不会自动新增字段。</div>
+            <div class="xz-notice"><strong>数据提示：</strong>内部数据缺少“本次行动细则”字段，请重新加载插件以恢复完整字段定义。</div>
         {/if}
         {#if tree.issues.length > 0}
             <div class="xz-notice xz-notice--warning"><strong>关系检查：</strong>发现 {tree.issues.length} 个需要人工确认的层级关系问题。插件只提示，不会自动修正。</div>
@@ -1278,9 +1337,43 @@
                             <label><span>所需精力</span><select class="b3-select" bind:value={detailDraft.energy} disabled={Boolean(savingInline)} on:change={() => void saveInline("energy", detailDraft.energy)}><option value="">—</option>{#each data.fields.energy?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
                         {/if}
                     </div>
-                    {#if selectedProfile?.showDeadline && !data.fields.noDeadline}<p class="xz-missing-field"><strong>缺少“无截止日期”字段</strong><span>目前仍可设置具体日期；新增复选框字段后，才能把“无”和“待确认”区分开。</span></p>{/if}
+                    {#if selectedProfile?.showDeadline && !data.fields.noDeadline}<p class="xz-missing-field"><strong>内部字段暂不可用</strong><span>请重新加载插件后再设置“无截止日期”。</span></p>{/if}
                     {#if savingInline}<p class="xz-inline-feedback">正在保存并复核……</p>{/if}
                     {#if inlineError}<p class="xz-save-error" role="alert">{inlineError}</p>{/if}
+
+                    <section class="xz-dependency-card">
+                        <header>
+                            <div><h3>跨项目依赖</h3><p>独立于上下层归属，可连接任意领域中的工作项。</p></div>
+                            {#if unmetHardPrerequisites.length > 0}<span class="xz-dependency-warning">{unmetHardPrerequisites.length} 项尚未完成</span>{/if}
+                        </header>
+                        <div class="xz-dependency-group">
+                            <div class="xz-dependency-label"><strong>完成后开始</strong><span>前置项完成后再启动当前项</span></div>
+                            <div class="xz-dependency-values">
+                                {#each hardPrerequisites as item (item.id)}
+                                    <span class="xz-dependency-chip" class:xz-dependency-chip--pending={item.status !== "已完成"}>{item.title}<small>{item.status || "未设置"}</small><button type="button" aria-label={`移除硬依赖 ${item.title}`} disabled={Boolean(savingInline)} on:click={() => void removeDependency("hardPrerequisites", item.id)}>×</button></span>
+                                {/each}
+                                <select class="b3-select xz-dependency-add" aria-label="添加完成后开始依赖" disabled={Boolean(savingInline)} on:change={(event) => void addDependency("hardPrerequisites", event)}>
+                                    <option value="">＋ 添加前置项</option>
+                                    {#each dependencyCandidates.filter((item) => !selectedPrerequisiteIds.has(item.id)) as item}<option value={item.id}>{item.title} · {item.type || "未分类"}</option>{/each}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="xz-dependency-group">
+                            <div class="xz-dependency-label"><strong>需先行</strong><span>允许并行，但前置项应保持领先</span></div>
+                            <div class="xz-dependency-values">
+                                {#each softPrerequisites as item (item.id)}
+                                    <span class="xz-dependency-chip">{item.title}<small>{item.status || "未设置"}</small><button type="button" aria-label={`移除软依赖 ${item.title}`} disabled={Boolean(savingInline)} on:click={() => void removeDependency("softPrerequisites", item.id)}>×</button></span>
+                                {/each}
+                                <select class="b3-select xz-dependency-add" aria-label="添加需先行依赖" disabled={Boolean(savingInline)} on:change={(event) => void addDependency("softPrerequisites", event)}>
+                                    <option value="">＋ 添加先行项</option>
+                                    {#each dependencyCandidates.filter((item) => !selectedPrerequisiteIds.has(item.id)) as item}<option value={item.id}>{item.title} · {item.type || "未分类"}</option>{/each}
+                                </select>
+                            </div>
+                        </div>
+                        {#if selectedDependents.length > 0}
+                            <div class="xz-dependency-supported"><strong>被以下工作项依赖</strong><span>{selectedDependents.map((item) => item.title).join("、")}</span></div>
+                        {/if}
+                    </section>
 
                     {#if data.fields.currentAction}
                         <section
@@ -1302,7 +1395,7 @@
                     {:else}
                         <section class="xz-action-card xz-action-card--primary xz-action-card--missing">
                             <header><h3>{fieldLabel(selected)}</h3></header>
-                            <p>当前数据库尚无此字段；插件不会擅自新增字段。</p>
+                            <p>内部字段暂不可用，请重新加载插件。</p>
                         </section>
                     {/if}
                     {#if selectedProfile?.showNextAction}
@@ -1333,9 +1426,9 @@
                             <svg><use href="#iconOpen"></use></svg>打开关联文档
                         </button>
                     {:else}
-                        <p class="xz-detached-note">这是数据库独立条目，不需要建立或关联文档。</p>
+                        <p class="xz-detached-note">这是行舟内部工作项，当前没有关联思源文档。</p>
                     {/if}
-                    <p class="xz-detail-note">点击行动卡片可直接编辑；失焦自动保存，Esc 取消。修改会写入思源属性视图并重新读取复核。</p>
+                    <p class="xz-detail-note">点击行动卡片可直接编辑；失焦自动保存，Esc 取消。修改会写入插件内部数据并重新读取复核。</p>
                 {:else}
                     <div class="xz-empty"><p>选择一个工作项查看详情。</p></div>
                 {/if}
@@ -1353,19 +1446,22 @@
     {#if deleteTarget}
         <div class="xz-dialog-backdrop" role="presentation" on:click|self={() => { if (!deleting) { deleteTarget = null; deleteError = ""; } }}>
             <section class="xz-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="xz-delete-title">
-                <span class="xz-section-kicker">不可撤销的数据库操作</span>
+                <span class="xz-section-kicker">删除工作项</span>
                 <h2 id="xz-delete-title">删除“{deleteTarget.title}”？</h2>
-                <p>这个工作项将从“行舟”绑定的思源属性视图中移除。</p>
+                <p>这个工作项将从行舟内部数据中移除。</p>
                 {#if deleteTarget.documentId}
-                    <p class="xz-delete-note">关联的思源文档不会被删除，只会解除它与当前数据库的绑定。</p>
+                    <p class="xz-delete-note">关联的思源文档不会被删除，只会移除行舟保存的关联记录。</p>
                 {:else}
-                    <p class="xz-delete-note">这是数据库独立条目；删除后，其名称和属性不会保留在当前数据库中。</p>
+                    <p class="xz-delete-note">这是行舟内部工作项；删除后，其名称和属性不会保留。</p>
                 {/if}
                 {#if deleteDescendantCount > 0}
-                    <p class="xz-delete-warning">检测到 {deleteDescendantCount} 个下级工作项。它们不会被级联删除，但会暂时保留指向已删除父项的关系，需要之后重新整理。</p>
+                    <p class="xz-delete-warning">检测到 {deleteDescendantCount} 个下级工作项。它们不会被级联删除，指向当前父项的关系会自动清除。</p>
                 {/if}
                 {#if deleteTopReferenceCount > 0}
-                    <p class="xz-delete-warning">另有 {deleteTopReferenceCount} 个工作项把它设为所属顶层项目；这些引用不会自动改写。</p>
+                    <p class="xz-delete-warning">另有 {deleteTopReferenceCount} 个工作项把它设为所属顶层项目；这些引用会自动清除。</p>
+                {/if}
+                {#if deleteDependencyReferenceCount > 0}
+                    <p class="xz-delete-warning">另有 {deleteDependencyReferenceCount} 个工作项把它设为前置项；这些依赖会自动清除。</p>
                 {/if}
                 {#if deleteError}<p class="xz-save-error" role="alert">{deleteError}</p>{/if}
                 <div class="xz-delete-actions">

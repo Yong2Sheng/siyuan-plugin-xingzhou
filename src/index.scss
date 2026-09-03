@@ -362,6 +362,25 @@
 .xz-deadline-control { min-width: 0; display: grid !important; grid-template-columns: minmax(88px, .75fr) minmax(130px, 1.25fr) !important; gap: 7px !important; padding: 0 !important; }
 .xz-deadline-control .b3-select:only-child { grid-column: 1 / -1; }
 .xz-inline-feedback { margin: -10px 0 10px; color: var(--xingzhou-muted); text-align: right; font-size: 11px; }
+.xz-dependency-card { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--xingzhou-border); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-surface); }
+.xz-dependency-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.xz-dependency-card h3 { margin: 0 0 4px; font-size: 13px; }
+.xz-dependency-card header p { margin: 0; color: var(--xingzhou-muted); font-size: 11px; }
+.xz-dependency-warning { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; color: var(--b3-theme-warning, var(--xingzhou-primary)); background: color-mix(in srgb, var(--b3-theme-warning, var(--xingzhou-primary)) 13%, transparent); font-size: 10px; }
+.xz-dependency-group { display: grid; grid-template-columns: 10em minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid var(--xingzhou-border); }
+.xz-dependency-label { display: flex; flex-direction: column; gap: 3px; }
+.xz-dependency-label strong { font-size: 12px; }
+.xz-dependency-label span { color: var(--xingzhou-muted); font-size: 10px; line-height: 1.5; }
+.xz-dependency-values { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-width: 0; }
+.xz-dependency-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 7px 5px 9px; border: 1px solid color-mix(in srgb, var(--xingzhou-primary) 30%, var(--xingzhou-border)); border-radius: 999px; background: var(--xingzhou-primary-light); font-size: 11px; }
+.xz-dependency-chip--pending { border-color: color-mix(in srgb, var(--b3-theme-warning, var(--xingzhou-primary)) 42%, var(--xingzhou-border)); }
+.xz-dependency-chip small { color: var(--xingzhou-muted); font-size: 9px; }
+.xz-dependency-chip button { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; color: var(--xingzhou-muted); background: transparent; cursor: pointer; line-height: 1; }
+.xz-dependency-chip button:hover { color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 10%, transparent); }
+.xz-dependency-add { width: auto; max-width: 220px; font-size: 11px; }
+.xz-dependency-supported { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--xingzhou-border); color: var(--xingzhou-muted); font-size: 11px; }
+.xz-dependency-supported strong { flex: 0 0 auto; color: var(--xingzhou-text); }
+.xz-dependency-indicator { flex: 0 0 auto; padding: 1px 5px; border-radius: 999px; color: var(--xingzhou-primary); background: color-mix(in srgb, var(--xingzhou-primary) 10%, transparent); font-size: 10px; }
 .xz-action-card { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--xingzhou-border); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-surface); }
 .xz-action-card--primary { min-height: 124px; border-left: 3px solid var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
 .xz-action-card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
@@ -385,6 +404,10 @@
 .xz-missing-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; padding: 11px 12px; border: 1px dashed var(--xingzhou-strong-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); font-size: 12px; line-height: 1.6; }
 .xz-missing-field strong { color: var(--xingzhou-text); }
 .xz-save-error { margin: 12px 0 0; padding: 9px 10px; border-radius: var(--xingzhou-radius); color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 10%, transparent); font-size: 12px; }
+
+@media (max-width: 760px) {
+    .xz-dependency-group { grid-template-columns: 1fr; gap: 7px; }
+}
 
 .xz-inbox-page {
     flex: 1;

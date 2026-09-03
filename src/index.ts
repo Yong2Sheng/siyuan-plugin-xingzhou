@@ -2,8 +2,24 @@ import { Dialog, Menu, openTab, Plugin, Setting, showMessage, type Custom, type 
 import XingzhouApp from "./XingzhouApp.svelte";
 import { showCaptureDialog, type CaptureDialogRequest } from "./capture-dialog";
 import { DEFAULT_SETTINGS, normalizeSettings, type XingzhouSettings } from "./config";
+import { applyDependencyStorage, DEPENDENCIES_FILE, normalizeDependencyStorage } from "./dependency-storage";
+import {
+    addStoredWorkItem,
+    backupFileForRevision,
+    createEmptyInternalStore,
+    INTERNAL_STORE_FILE,
+    isAbsentInternalStore,
+    MIGRATION_SNAPSHOT_FILE,
+    migrateWorkItemData,
+    parseInternalStore,
+    removeStoredWorkItem,
+    storesMatch,
+    toInternalWorkItemData,
+    updateStoredWorkItem,
+    type InternalWorkItemStore,
+} from "./internal-store";
 import { getXingzhouTabId, XINGZHOU_TAB_TYPE } from "./tab-id";
-import { captureInboxItem, deleteWorkItem, loadWorkItems, updateWorkItem, type InboxCaptureOptions } from "./work-items";
+import { loadWorkItems, type InboxCaptureOptions, type WorkItem, type WorkItemChanges, type WorkItemData } from "./work-items";
 import "./index.scss";
 
 const SETTINGS_FILE = "settings.json";
@@ -33,12 +49,14 @@ export default class XingzhouPlugin extends Plugin {
     private opening?: Promise<Tab>;
     private topBar?: HTMLElement;
     private stopped = false;
+    private settingsReady: Promise<void> = Promise.resolve();
+    private mutationQueue: Promise<void> = Promise.resolve();
 
     onload(): void {
         this.addIcons(ICON);
         this.registerTab();
         this.configureSettings();
-        void this.loadSettings();
+        this.settingsReady = this.loadSettings();
     }
 
     onLayoutReady(): void {
@@ -86,16 +104,10 @@ export default class XingzhouPlugin extends Plugin {
                     const component = new XingzhouApp({
                         target: mount,
                         props: {
-                            load: () => loadWorkItems(plugin.settings.attributeViewId),
-                            captureInbox: (title: string, options?: InboxCaptureOptions) => captureInboxItem(
-                                plugin.settings.attributeViewId,
-                                plugin.settings.databaseBlockId,
-                                title,
-                                undefined,
-                                options,
-                            ),
-                            saveItem: updateWorkItem,
-                            deleteItem: deleteWorkItem,
+                            load: () => plugin.loadWorkItemData(),
+                            captureInbox: (title: string, options?: InboxCaptureOptions) => plugin.captureInternalItem(title, options),
+                            saveItem: (data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => plugin.saveWorkItemData(data, item, changes),
+                            deleteItem: (data: WorkItemData, item: WorkItem) => plugin.deleteWorkItemData(data, item),
                             openCaptureDialog: (request: CaptureDialogRequest) => {
                                 let dialog!: Dialog;
                                 dialog = showCaptureDialog({
@@ -125,7 +137,6 @@ export default class XingzhouPlugin extends Plugin {
                                 menu.open({ x: event.clientX, y: event.clientY });
                             },
                             openDocument: (blockId: string) => plugin.openBlock(blockId),
-                            openDatabase: () => plugin.openNativeDatabase(),
                         },
                     });
                     plugin.instances.set(this, { component, mount });
@@ -176,12 +187,112 @@ export default class XingzhouPlugin extends Plugin {
         });
     }
 
-    private async openNativeDatabase(): Promise<void> {
-        if (!this.settings.databaseBlockId) {
-            showMessage("尚未配置数据库块 ID。", 5000, "error");
-            return;
+    private async loadWorkItemData(): Promise<WorkItemData> {
+        await this.settingsReady;
+        await this.mutationQueue;
+        return toInternalWorkItemData(await this.loadInternalStoreOrMigrate());
+    }
+
+    private async captureInternalItem(title: string, options: InboxCaptureOptions = {}): Promise<WorkItemData> {
+        return this.enqueueMutation(async () => {
+            const current = await this.loadInternalStoreOrMigrate();
+            const next = addStoredWorkItem(current, title, createInternalItemId(), options);
+            await this.persistStore(current, next);
+            return toInternalWorkItemData(next);
+        });
+    }
+
+    private async saveWorkItemData(_data: WorkItemData, item: WorkItem, changes: WorkItemChanges): Promise<WorkItemData> {
+        return this.enqueueMutation(async () => {
+            const current = await this.loadInternalStoreOrMigrate();
+            const next = updateStoredWorkItem(current, item.id, changes);
+            await this.persistStore(current, next);
+            return toInternalWorkItemData(next);
+        });
+    }
+
+    private async deleteWorkItemData(_data: WorkItemData, item: WorkItem): Promise<WorkItemData> {
+        return this.enqueueMutation(async () => {
+            const current = await this.loadInternalStoreOrMigrate();
+            const next = removeStoredWorkItem(current, item.id);
+            await this.persistStore(current, next);
+            return toInternalWorkItemData(next);
+        });
+    }
+
+    private enqueueMutation(action: () => Promise<WorkItemData>): Promise<WorkItemData> {
+        const result = this.mutationQueue.then(action, action);
+        this.mutationQueue = result.then(() => undefined, () => undefined);
+        return result;
+    }
+
+    private async loadInternalStoreOrMigrate(): Promise<InternalWorkItemStore> {
+        await this.settingsReady;
+        let raw: unknown;
+        try {
+            raw = await this.loadData(INTERNAL_STORE_FILE);
+        } catch (error) {
+            throw new Error(`插件内部数据读取失败：${errorMessage(error)}`);
         }
-        await this.openBlock(this.settings.databaseBlockId);
+        const primary = parseInternalStore(raw);
+        if (primary) return primary;
+
+        const backups = await Promise.all([1, 2, 3].map(async (slot) => {
+            try {
+                return parseInternalStore(await this.loadData(`work-items.backup-${slot}.json`));
+            } catch {
+                return null;
+            }
+        }));
+        const recovered = backups.filter((candidate): candidate is InternalWorkItemStore => Boolean(candidate))
+            .sort((a, b) => b.revision - a.revision)[0];
+        if (recovered) {
+            await this.saveAndVerify(INTERNAL_STORE_FILE, recovered);
+            console.warn(`行舟已从第 ${recovered.revision} 版内部备份恢复数据。`);
+            return recovered;
+        }
+
+        if (!isAbsentInternalStore(raw)) {
+            throw new Error("插件内部数据文件无法识别，且三个轮换备份均不可用。为避免覆盖，行舟已停止写入。");
+        }
+
+        const initial = await this.importLegacyData();
+        await this.saveAndVerify(MIGRATION_SNAPSHOT_FILE, initial);
+        await this.saveAndVerify(INTERNAL_STORE_FILE, initial);
+        return initial;
+    }
+
+    private async importLegacyData(): Promise<InternalWorkItemStore> {
+        let legacy: WorkItemData;
+        try {
+            legacy = await loadWorkItems(this.settings.attributeViewId);
+        } catch (error) {
+            console.warn("未找到可导入的旧属性视图，行舟将建立空的内部数据仓库。", error);
+            return createEmptyInternalStore();
+        }
+        let dependencyStorage = normalizeDependencyStorage(null);
+        try {
+            dependencyStorage = normalizeDependencyStorage(await this.loadData(DEPENDENCIES_FILE));
+        } catch (error) {
+            console.warn("旧版跨项目依赖读取失败；其余工作项仍会迁移。", error);
+        }
+        const migrated = migrateWorkItemData(applyDependencyStorage(legacy, dependencyStorage));
+        console.info(`行舟已将旧属性视图中的 ${migrated.items.length} 个工作项一次性迁移到插件内部。`);
+        return migrated;
+    }
+
+    private async persistStore(previous: InternalWorkItemStore, next: InternalWorkItemStore): Promise<void> {
+        await this.saveAndVerify(backupFileForRevision(previous.revision), previous);
+        await this.saveAndVerify(INTERNAL_STORE_FILE, next);
+    }
+
+    private async saveAndVerify(file: string, store: InternalWorkItemStore): Promise<void> {
+        const response = await this.saveData(file, store);
+        if (response.code !== 0) throw new Error(response.msg || `无法保存 ${file}。`);
+        const verified = parseInternalStore(await this.loadData(file));
+        if (!verified || !storesMatch(store, verified)) {
+            throw new Error(`内部数据写入 ${file} 后未通过完整性复核。`);
+        }
     }
 
     private configureSettings(): void {
@@ -200,16 +311,16 @@ export default class XingzhouPlugin extends Plugin {
             },
         });
         this.setting.addItem({
-            title: this.i18n.attributeViewId || "属性视图 ID",
-            description: this.i18n.attributeViewIdDescription || "行舟只读取这个属性视图。",
+            title: this.i18n.attributeViewId || "旧属性视图 ID",
+            description: this.i18n.attributeViewIdDescription || "仅在尚未建立内部数据时，用作一次性旧数据导入来源。",
             createActionElement: () => {
                 avInput = createTextInput(this.settings.attributeViewId);
                 return avInput;
             },
         });
         this.setting.addItem({
-            title: this.i18n.databaseBlockId || "数据库块 ID",
-            description: this.i18n.databaseBlockIdDescription || "用于打开原始数据库。",
+            title: this.i18n.databaseBlockId || "旧数据库块 ID",
+            description: this.i18n.databaseBlockIdDescription || "仅保留旧数据来源位置；迁移完成后不参与数据读写。",
             createActionElement: () => {
                 blockInput = createTextInput(this.settings.databaseBlockId);
                 return blockInput;
@@ -221,7 +332,7 @@ export default class XingzhouPlugin extends Plugin {
         try {
             this.settings = normalizeSettings(await this.loadData(SETTINGS_FILE));
         } catch (error) {
-            console.warn("行舟设置读取失败，将使用默认属性视图。", error);
+            console.warn("行舟设置读取失败，将使用默认的旧数据导入来源。", error);
             this.settings = { ...DEFAULT_SETTINGS };
         }
     }
@@ -233,6 +344,18 @@ function createTextInput(value: string): HTMLInputElement {
     input.value = value;
     input.spellcheck = false;
     return input;
+}
+
+function createInternalItemId(): string {
+    const lute = (globalThis as typeof globalThis & { Lute?: { NewNodeID?: () => string } }).Lute;
+    if (typeof lute?.NewNodeID === "function") return lute.NewNodeID();
+    const timestamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+    const random = Math.random().toString(36).slice(2, 9).padEnd(7, "0");
+    return `${timestamp}-${random}`;
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }
 
 function renderMountError(target: HTMLElement, error: unknown): void {
