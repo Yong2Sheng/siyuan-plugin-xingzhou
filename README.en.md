@@ -8,9 +8,9 @@ Xingzhou is a self-contained SiYuan plugin for personal projects and tasks. Area
 
 ## Highlights
 
-- Complete hierarchy browsing for areas, top-level projects, subprojects, tasks, transactions, and ideas.
-- Real calendar scheduling in Week, low-friction capture in Inbox, and a five-step Review flow.
-- Direct editing of lifecycle, hierarchy, dates, execution cost, and action details.
+- Complete hierarchy browsing for areas, top-level projects, subprojects, tasks, transactions, and ideas, with Today markers and rolled-up counts along relevant project paths.
+- Week projects multi-day work across the full planned-start-to-deadline interval with start, ongoing, deadline, and cross-week markers; it also supports calendar scheduling, while Inbox provides low-friction capture and Review provides a five-step flow.
+- Direct editing of lifecycle, hierarchy, dates, execution cost, and action details; Current Action Details and Next Action render basic SiYuan Markdown while being viewed, expand their editors to fit the full content, continue lists while being edited, and immediately normalize sibling numbering after typing, deletion, cutting, or pasting.
 - Cross-project hard prerequisites and should-stay-ahead relationships, with cycle prevention.
 - Optional links to SiYuan documents without requiring a document for every work item.
 - Safe deletion that keeps descendants and clears references to the removed item.

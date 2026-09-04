@@ -2,11 +2,16 @@
     import { onMount } from "svelte";
     import type { CaptureDialogMode, CaptureDialogRequest, CaptureDialogValues } from "./capture-dialog";
     import { prerequisiteIds, validateDependencyUpdate, type DependencyKind } from "./dependencies";
+    import { continueMarkdownList, normalizeMarkdownOrderedLists } from "./markdown-editor";
+    import { renderActionMarkdown } from "./markdown-renderer";
     import RoleBadge from "./RoleBadge.svelte";
     import { getAutomaticHierarchyStatusChanges } from "./status-hierarchy";
     import { automaticStatusForPlanDate } from "./status-schedule";
+    import { autoResizeTextarea } from "./textarea-autosize";
+    import { getTodayFocusCounts } from "./today-focus";
     import TreeNode from "./TreeNode.svelte";
     import { buildWorkItemTree, collectDescendantIds, hasActiveDescendant, hasOngoingDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
+    import { groupWeekOccurrences, isWeekOccurrenceCompact, weekOccurrenceLabel } from "./week-schedule";
     import { deriveTopProjectId, getWorkItemProfile, needsDeadlineDecision, WORK_ITEM_ROLE_LEGEND } from "./work-item-role";
     import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
 
@@ -44,6 +49,7 @@
     let includeClosed = false;
     let data: WorkItemData | null = null;
     let tree: WorkItemTree = buildWorkItemTree([]);
+    let todayFocusCounts = new Map<string, number>();
     let visibleIds = new Set<string>();
     let visibleRoots: WorkItem[] = [];
     let loading = true;
@@ -82,6 +88,7 @@
     let uncategorizedRoots: WorkItem[] = [];
 
     $: selected = selectedId ? tree.byId.get(selectedId) ?? null : null;
+    $: todayFocusCounts = getTodayFocusCounts(data?.items ?? [], tree);
     $: selectedProfile = selected ? getWorkItemProfile(selected, tree) : null;
     $: deleteDescendantCount = deleteTarget ? Math.max(0, collectDescendantIds(deleteTarget.id, tree).size - 1) : 0;
     $: {
@@ -142,9 +149,9 @@
     $: inboxItems = [...(data?.items.filter((item) => item.status === "收件箱") ?? [])]
         .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     $: weekDays = buildWeekDays(weekStart);
-    $: weekItemsByDate = groupWeekItems(data?.items ?? [], weekStart);
-    $: scheduledWeekIds = new Set([...weekItemsByDate.values()].flatMap((items) => items.map((item) => item.id)));
-    $: scheduledWeekCount = [...weekItemsByDate.values()].reduce((count, items) => count + items.length, 0);
+    $: weekItemsByDate = groupWeekOccurrences(data?.items ?? [], weekStart);
+    $: scheduledWeekIds = new Set([...weekItemsByDate.values()].flatMap((occurrences) => occurrences.map(({ item }) => item.id)));
+    $: scheduledWeekCount = scheduledWeekIds.size;
     $: unscheduledWeekItems = getUnscheduledWeekItems(data?.items ?? []);
     $: activeWindowItems = getActiveWindowItems(data?.items ?? [], scheduledWeekIds);
     $: reviewActiveProjects = getReviewActiveProjects(data?.items ?? []);
@@ -491,7 +498,28 @@
         if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
             void saveAction(field);
+            return;
         }
+        if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.isComposing && event.target instanceof HTMLTextAreaElement) {
+            const edit = continueMarkdownList(event.target.value, event.target.selectionStart, event.target.selectionEnd);
+            if (!edit) return;
+            event.preventDefault();
+            detailDraft = { ...detailDraft, [field]: edit.value };
+            event.target.value = edit.value;
+            event.target.setSelectionRange(edit.cursor, edit.cursor);
+        }
+    }
+
+    function handleActionInput(event: Event, field: ActionField) {
+        if (!(event.target instanceof HTMLTextAreaElement)) return;
+        if ((event as InputEvent).isComposing) {
+            detailDraft = { ...detailDraft, [field]: event.target.value };
+            return;
+        }
+        const normalized = normalizeMarkdownOrderedLists(event.target.value, event.target.selectionStart, event.target.selectionEnd);
+        detailDraft = { ...detailDraft, [field]: normalized.value };
+        event.target.value = normalized.value;
+        event.target.setSelectionRange(normalized.selectionStart, normalized.selectionEnd);
     }
 
     function handleActionCardKeydown(event: KeyboardEvent, field: ActionField) {
@@ -725,6 +753,11 @@
     }
 
     async function assignWeekDate(item: WorkItem, dateKey: string) {
+        const deadlineKey = formatInputDate(item.deadline);
+        if (dateKey && deadlineKey && dateKey > deadlineKey) {
+            weekError = `“${item.title}”的计划开始日不能晚于截止日期 ${deadlineKey}。如需整体后移，请先在详情中调整截止日期。`;
+            return;
+        }
         const changes: WorkItemChanges = { planDate: dateKey || null };
         const targetStatus = automaticStatusForPlanDate(item.status, dateKey, formatInputDate(Date.now()));
         if (targetStatus && targetStatus !== item.status) changes.status = targetStatus;
@@ -759,23 +792,6 @@
                 isToday: isToday(date.getTime()),
             };
         });
-    }
-
-    function groupWeekItems(items: WorkItem[], start: number): Map<string, WorkItem[]> {
-        const result = new Map<string, WorkItem[]>();
-        const end = new Date(start);
-        end.setDate(end.getDate() + 7);
-        for (const item of items) {
-            if (isClosed(item) || !item.planDate || item.planDate < start || item.planDate >= end.getTime()) continue;
-            const key = formatInputDate(item.planDate);
-            const existing = result.get(key) ?? [];
-            existing.push(item);
-            result.set(key, existing);
-        }
-        for (const dayItems of result.values()) {
-            dayItems.sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
-        }
-        return result;
     }
 
     function getUnscheduledWeekItems(items: WorkItem[]): WorkItem[] {
@@ -1088,14 +1104,25 @@
                                     {#if (weekItemsByDate.get(day.key) ?? []).length === 0}
                                         <p class="xz-week-day-empty">暂无安排</p>
                                     {:else}
-                                        {#each weekItemsByDate.get(day.key) ?? [] as item (item.id)}
-                                            <article class:xz-week-item--closed={isClosed(item)} class="xz-week-item" data-work-item-id={item.id}>
+                                        {#each weekItemsByDate.get(day.key) ?? [] as occurrence (occurrence.item.id)}
+                                            {@const item = occurrence.item}
+                                            {@const compactOccurrence = isWeekOccurrenceCompact(occurrence.phase)}
+                                            <article class:xz-week-item--closed={isClosed(item)} class:xz-week-item--continuation={compactOccurrence} class="xz-week-item" data-work-item-id={item.id} data-week-phase={occurrence.phase}>
                                                 <button class="xz-week-item-title" type="button" on:click={() => revealInboxItem(item)}>{item.title}</button>
-                                                <div class="xz-week-item-meta"><span>{displayStatus(item.status) || "未设置"}</span>{#if item.durationMinutes !== null}<span>{item.durationMinutes} 分钟</span>{/if}{#if item.energy}<span>{item.energy}精力</span>{/if}</div>
+                                                <div class="xz-week-item-meta">
+                                                    <span class="xz-week-item-phase">{weekOccurrenceLabel(occurrence.phase)}</span>
+                                                    <span>{displayStatus(item.status) || "未设置"}</span>
+                                                    {#if !compactOccurrence && item.durationMinutes !== null}<span>{item.durationMinutes} 分钟</span>{/if}
+                                                    {#if !compactOccurrence && item.energy}<span>{item.energy}精力</span>{/if}
+                                                </div>
                                                 <div class="xz-week-item-actions">
-                                                    <select aria-label={`移动“${item.title}”`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekAssignment(event, item)}>
-                                                        <option value="">移动到…</option>{#each weekDays as targetDay}<option value={targetDay.key}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}<option value="__clear">取消安排</option>
-                                                    </select>
+                                                    {#if !compactOccurrence}
+                                                        <select aria-label={occurrence.phase === "start" ? `修改“${item.title}”的开始日` : `移动“${item.title}”`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekAssignment(event, item)}>
+                                                            <option value="">{occurrence.phase === "start" ? "修改开始日…" : "移动到…"}</option>
+                                                            {#each weekDays as targetDay}<option value={targetDay.key} disabled={Boolean(item.deadline && targetDay.key > formatInputDate(item.deadline))}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}
+                                                            <option value="__clear">{occurrence.phase === "start" ? "清除开始日" : "取消安排"}</option>
+                                                        </select>
+                                                    {/if}
                                                     <button type="button" disabled={weekSavingIds.has(item.id) || item.status === "已完成"} on:click={() => void updateWeekItem(item, { status: "已完成" })}>{item.status === "已完成" ? "已完成" : "完成"}</button>
                                                 </div>
                                             </article>
@@ -1284,6 +1311,7 @@
                                 {selectedId}
                                 {expandedIds}
                                 {visibleIds}
+                                {todayFocusCounts}
                                 on:select={(event) => selectedId = event.detail.id}
                                 on:toggle={(event) => toggle(event.detail.id)}
                             />
@@ -1386,9 +1414,11 @@
                         >
                             <header><h3>{fieldLabel(selected)}</h3><span>{savingAction === "currentAction" ? "正在保存并复核…" : editingAction === "currentAction" ? "Esc 取消 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span></header>
                             {#if editingAction === "currentAction"}
-                                <textarea use:focusOnMount class="b3-text-field xz-action-editor" rows="6" aria-label={fieldLabel(selected)} bind:value={detailDraft.currentAction} disabled={savingAction === "currentAction"} on:click|stopPropagation on:blur={() => void saveAction("currentAction")} on:keydown={(event) => handleActionKeydown(event, "currentAction")}></textarea>
+                                <textarea use:focusOnMount use:autoResizeTextarea={detailDraft.currentAction} class="b3-text-field xz-action-editor" rows="6" aria-label={fieldLabel(selected)} value={detailDraft.currentAction} disabled={savingAction === "currentAction"} on:input={(event) => handleActionInput(event, "currentAction")} on:click|stopPropagation on:blur={() => void saveAction("currentAction")} on:keydown={(event) => handleActionKeydown(event, "currentAction")}></textarea>
+                            {:else if selected.currentAction}
+                                <div class="xz-markdown-preview">{@html renderActionMarkdown(selected.currentAction)}</div>
                             {:else}
-                                <p>{selected.currentAction || "尚未填写。"}</p>
+                                <p class="xz-action-empty">尚未填写。</p>
                             {/if}
                             {#if actionErrors.currentAction}<p class="xz-action-error" role="alert">{actionErrors.currentAction}</p>{/if}
                         </section>
@@ -1409,9 +1439,11 @@
                         >
                             <header><h3>下一步行动</h3><span>{savingAction === "nextAction" ? "正在保存并复核…" : editingAction === "nextAction" ? "Esc 取消 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span></header>
                             {#if editingAction === "nextAction"}
-                                <textarea use:focusOnMount class="b3-text-field xz-action-editor" rows="4" aria-label="下一步行动" bind:value={detailDraft.nextAction} disabled={savingAction === "nextAction"} on:click|stopPropagation on:blur={() => void saveAction("nextAction")} on:keydown={(event) => handleActionKeydown(event, "nextAction")}></textarea>
+                                <textarea use:focusOnMount use:autoResizeTextarea={detailDraft.nextAction} class="b3-text-field xz-action-editor" rows="4" aria-label="下一步行动" value={detailDraft.nextAction} disabled={savingAction === "nextAction"} on:input={(event) => handleActionInput(event, "nextAction")} on:click|stopPropagation on:blur={() => void saveAction("nextAction")} on:keydown={(event) => handleActionKeydown(event, "nextAction")}></textarea>
+                            {:else if selected.nextAction}
+                                <div class="xz-markdown-preview">{@html renderActionMarkdown(selected.nextAction)}</div>
                             {:else}
-                                <p>{selected.nextAction || "尚未填写明确的下一步行动。"}</p>
+                                <p class="xz-action-empty">尚未填写明确的下一步行动。</p>
                             {/if}
                             {#if actionErrors.nextAction}<p class="xz-action-error" role="alert">{actionErrors.nextAction}</p>{/if}
                         </section>

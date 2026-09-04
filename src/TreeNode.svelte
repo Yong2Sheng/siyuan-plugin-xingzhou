@@ -10,6 +10,7 @@
     export let selectedId: string | null;
     export let expandedIds: Set<string>;
     export let visibleIds: Set<string>;
+    export let todayFocusCounts: Map<string, number>;
     export let depth = 0;
 
     const dispatch = createEventDispatcher<{
@@ -21,6 +22,7 @@
     $: expanded = expandedIds.has(item.id);
     $: role = getWorkItemRole(item, tree);
     $: dependencyCount = (item.hardPrerequisiteIds?.length ?? 0) + (item.softPrerequisiteIds?.length ?? 0);
+    $: todayFocusCount = todayFocusCounts.get(item.id) ?? 0;
 </script>
 
 <div class="xz-tree-node" data-depth={depth} data-work-item-id={item.id}>
@@ -42,7 +44,8 @@
             <RoleBadge {role} />
             <span class="xz-tree-title">{item.title}</span>
             {#if dependencyCount > 0}<span class="xz-dependency-indicator" title={`${dependencyCount} 项跨项目依赖`}>⇠ {dependencyCount}</span>{/if}
-            {#if item.status}<span class="xz-tag" data-status={item.status}>{item.status}</span>{/if}
+            {#if todayFocusCount > 0}<span class="xz-today-focus" title={todayFocusCount > 1 ? `包含 ${todayFocusCount} 个今日工作项` : "今日工作项或所在路径"}>今日{todayFocusCount > 1 ? ` ${todayFocusCount}` : ""}</span>{/if}
+            {#if item.status}<span class:xz-tag--secondary={todayFocusCount > 0} class="xz-tag" data-status={item.status}>{item.status}</span>{/if}
         </button>
     </div>
 
@@ -55,6 +58,7 @@
                     {selectedId}
                     {expandedIds}
                     {visibleIds}
+                    {todayFocusCounts}
                     depth={depth + 1}
                     on:select
                     on:toggle

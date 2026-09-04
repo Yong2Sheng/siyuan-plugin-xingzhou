@@ -273,6 +273,8 @@ describe("XingzhouApp", () => {
             .find((button) => button.textContent?.includes("清理房间中的垃圾"));
         expect(exactScope?.classList.contains("active"), document.body.textContent ?? "").toBe(true);
         expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("清理房间中的垃圾");
+        expect(document.querySelector(".xz-tree-row.selected .xz-today-focus")?.textContent).toBe("今日");
+        expect(document.querySelector(".xz-tree-row.selected .xz-tag")?.classList.contains("xz-tag--secondary")).toBe(true);
         expect(document.body.textContent).toContain("这是行舟内部工作项，当前没有关联思源文档");
         expect(document.querySelector(".xz-date-hint--today")?.textContent).toBe("今日");
         expect(document.querySelector(".xz-date-hint--overdue")?.textContent).toBe("已逾期");
@@ -370,7 +372,7 @@ describe("XingzhouApp", () => {
             planDate: today.getTime(), deadline: tomorrow.getTime(), noDeadline: false, durationMinutes: 30, energy: "低", updatedAt: Date.now(),
         };
         const unscheduled = {
-            ...scheduled, id: "unscheduled", rowId: "unscheduled", title: "整理书架", status: "待开始", planDate: null,
+            ...scheduled, id: "unscheduled", rowId: "unscheduled", title: "整理书架", status: "待开始", planDate: null, deadline: null, noDeadline: true,
         };
         const beforeVisibleWeek = new Date(today);
         const currentDay = beforeVisibleWeek.getDay();
@@ -415,9 +417,23 @@ describe("XingzhouApp", () => {
         expect(document.body.textContent).toContain("周一");
         expect(document.body.textContent).toContain("周日");
         expect(document.querySelector(".xz-week-board")?.textContent).toContain("今天处理合同");
+        expect(document.querySelector(".xz-week-board")?.textContent).toContain("办理有效期内的事务");
+        expect(document.querySelector(".xz-week-header")?.textContent).toContain("已安排 2 项");
+        expect(document.querySelector('[data-work-item-id="scheduled"][data-week-phase="start"]')).not.toBeNull();
+        expect(document.querySelectorAll('[data-work-item-id="scheduled"]')).toHaveLength(2);
+        const startDateSelect = document.querySelector('select[aria-label="修改“今天处理合同”的开始日"]') as HTMLSelectElement;
+        expect(startDateSelect.options[0].textContent).toBe("修改开始日…");
+        expect(document.querySelector('[data-work-item-id="scheduled"][data-week-phase="deadline"] select')).toBeNull();
+        const forbiddenStartDate = [...startDateSelect.options].find((option) => option.disabled);
+        expect(forbiddenStartDate).toBeDefined();
+        startDateSelect.value = forbiddenStartDate?.value ?? "";
+        startDateSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(saveItem).not.toHaveBeenCalled();
+        expect(document.querySelector(".xz-week-error")?.textContent).toContain("计划开始日不能晚于截止日期");
         expect(document.querySelector(".xz-week-board")?.textContent).not.toContain("本周已完成的事务");
         expect(document.querySelector(".xz-week-backlog")?.textContent).toContain("整理书架");
-        expect(document.querySelector(".xz-week-backlog")?.textContent).toContain("办理有效期内的事务");
+        expect(document.querySelector(".xz-week-backlog")?.textContent).not.toContain("办理有效期内的事务");
         expect(document.querySelector(".xz-week-backlog")?.textContent).not.toContain("今天处理合同");
         expect(document.querySelector(".xz-week-backlog")?.textContent).not.toContain("不应进入待安排的项目");
 

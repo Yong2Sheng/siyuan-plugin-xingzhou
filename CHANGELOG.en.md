@@ -2,6 +2,21 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## Unreleased
+
+### Added
+
+- Week now shows work items across their full planned-start-to-deadline interval, distinguishing Start, Ongoing, Deadline, Carry-over, and Continues-next-week states. Weekly totals remain deduplicated by work item, estimated duration is shown only on the start day, and multi-day start dates can only be changed from the first card without crossing the deadline.
+- Hierarchy browsing now highlights work that starts today, ends today, or spans today, and rolls the count up through its project path while retaining the original lifecycle status in a quieter style.
+- Current Action Details and Next Action now render basic Markdown directly through SiYuan's Lute renderer while not being edited, including headings, emphasis, lists, blockquotes, code, links, tables, and task lists, while preserving ordinary text line breaks. Editing and storage continue to use the original Markdown text.
+- Action text editors now continue numbered, bulleted, and task lists automatically. Pressing Enter again on an empty list item exits the list.
+- Action text editors now expand to fit their full content on entry and continue adapting after content or window-width changes, preventing a sudden size drop between viewing and editing.
+
+### Fixed
+
+- Fixed SiYuan's internal block ID attribute marker appearing in rendered Markdown previews.
+- Fixed ordered-list source numbers diverging from the rendered result after inserting or deleting an item. Following sibling numbers now normalize immediately after typing, deletion, cutting, or pasting.
+
 ## 0.5.0 - 2026-09-02
 
 ### Added

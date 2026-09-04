@@ -304,6 +304,8 @@
 .xz-tag--type { color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
 .xz-tag--today { color: var(--b3-theme-success); background: color-mix(in srgb, var(--b3-theme-success) 13%, transparent); }
 .xz-tag--overdue { color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 12%, transparent); }
+.xz-tree-row .xz-tag--secondary { color: var(--xingzhou-muted); background: var(--xingzhou-surface-light); opacity: .72; }
+.xz-today-focus { display: inline-flex; flex: 0 0 auto; align-items: center; padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--xingzhou-primary) 32%, transparent); border-radius: 999px; color: var(--xingzhou-primary); background: color-mix(in srgb, var(--xingzhou-primary) 13%, transparent); font-size: 10px; font-weight: 650; white-space: nowrap; }
 
 .xz-detail { padding: 22px 24px 32px; background: var(--xingzhou-panel); }
 .xz-detail p,
@@ -388,12 +390,42 @@
 .xz-action-card > header span { color: var(--xingzhou-muted); font-size: 10px; font-weight: 400; }
 .xz-action-card p { margin: 0; line-height: 1.7; white-space: pre-wrap; }
 .xz-action-card--primary p { font-size: 15px; }
+.xz-markdown-preview { overflow-wrap: anywhere; color: var(--xingzhou-text); font-size: 14px; line-height: 1.7; }
+.xz-action-card--primary .xz-markdown-preview { font-size: 15px; }
+.xz-markdown-preview > :first-child { margin-top: 0; }
+.xz-markdown-preview > :last-child { margin-bottom: 0; }
+.xz-markdown-preview p { margin: .55em 0; white-space: normal; }
+.xz-markdown-preview h1,
+.xz-markdown-preview h2,
+.xz-markdown-preview h3,
+.xz-markdown-preview h4,
+.xz-markdown-preview h5,
+.xz-markdown-preview h6 { margin: .9em 0 .45em; color: var(--xingzhou-text); line-height: 1.35; }
+.xz-markdown-preview h1 { font-size: 1.45em; }
+.xz-markdown-preview h2 { font-size: 1.3em; }
+.xz-markdown-preview h3 { font-size: 1.16em; }
+.xz-markdown-preview h4,
+.xz-markdown-preview h5,
+.xz-markdown-preview h6 { font-size: 1em; }
+.xz-markdown-preview ul,
+.xz-markdown-preview ol { margin: .55em 0; padding-left: 1.75em; }
+.xz-markdown-preview li { margin: .2em 0; }
+.xz-markdown-preview blockquote { margin: .65em 0; padding: .35em .8em; border-left: 3px solid var(--xingzhou-primary); color: var(--xingzhou-muted); background: color-mix(in srgb, var(--xingzhou-primary) 7%, transparent); }
+.xz-markdown-preview code { padding: .1em .3em; border-radius: 4px; background: var(--xingzhou-panel-subtle); font-family: var(--b3-font-family-code, monospace); font-size: .9em; }
+.xz-markdown-preview pre { overflow: auto; margin: .65em 0; padding: .75em .9em; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel-subtle); }
+.xz-markdown-preview pre code { padding: 0; background: transparent; }
+.xz-markdown-preview a { color: var(--b3-theme-primary, var(--xingzhou-primary)); text-decoration: underline; pointer-events: none; }
+.xz-markdown-preview hr { margin: .8em 0; border: 0; border-top: 1px solid var(--xingzhou-border); }
+.xz-markdown-preview table { width: 100%; margin: .65em 0; border-collapse: collapse; }
+.xz-markdown-preview th,
+.xz-markdown-preview td { padding: .35em .5em; border: 1px solid var(--xingzhou-border); text-align: left; }
+.xz-markdown-preview input[type="checkbox"] { margin-right: .4em; pointer-events: none; }
 .xz-action-card--editable { cursor: text; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
 .xz-action-card--editable:hover { border-color: color-mix(in srgb, var(--xingzhou-primary) 48%, var(--xingzhou-border)); box-shadow: 0 2px 7px color-mix(in srgb, var(--xingzhou-text) 10%, transparent); }
 .xz-action-card--editable:focus-visible { outline: 2px solid color-mix(in srgb, var(--xingzhou-primary) 55%, transparent); outline-offset: 2px; }
 .xz-action-card--editing { border-color: var(--xingzhou-primary); box-shadow: 0 0 0 1px color-mix(in srgb, var(--xingzhou-primary) 28%, transparent); }
 .xz-action-card--missing { cursor: default; }
-.xz-action-editor { box-sizing: border-box; width: 100%; min-height: 96px; resize: vertical; line-height: 1.65; }
+.xz-action-editor { box-sizing: border-box; width: 100%; min-height: 96px; overflow-y: hidden; resize: none; line-height: 1.65; }
 .xz-action-error { margin-top: 9px !important; padding: 7px 9px; border-radius: var(--xingzhou-radius); color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 10%, transparent); font-size: 11px; }
 .xz-issues { margin-top: 14px; padding: 12px 14px; border-left: 3px solid var(--b3-theme-warning); background: var(--xingzhou-surface-light); }
 .xz-issues p { margin: 5px 0; color: var(--xingzhou-muted); font-size: 12px; }
@@ -549,12 +581,20 @@
     background: color-mix(in srgb, var(--xingzhou-bg) 72%, var(--xingzhou-primary-light) 28%);
     box-shadow: 0 3px 9px color-mix(in srgb, var(--xingzhou-text) 15%, transparent);
 }
+.xz-week-item--continuation {
+    padding-block: 8px;
+    border-left-width: 2px;
+    background: color-mix(in srgb, var(--xingzhou-panel-subtle) 88%, var(--xingzhou-primary-light) 12%);
+    box-shadow: 0 1px 4px color-mix(in srgb, var(--xingzhou-text) 8%, transparent);
+}
 .xz-week-item + .xz-week-item { margin-top: 7px; }
 .xz-week-item--closed { opacity: .6; }
 .xz-week-item-title { width: 100%; padding: 0; border: 0; color: var(--xingzhou-text); background: transparent; text-align: left; cursor: pointer; font-weight: 600; line-height: 1.45; }
 .xz-week-item-title:hover { color: var(--xingzhou-primary); }
 .xz-week-item-meta { display: flex; flex-wrap: wrap; gap: 3px 7px; margin-top: 6px; color: var(--xingzhou-muted); font-size: 9px; }
+.xz-week-item-phase { padding: 1px 5px; border-radius: 999px; color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 600; }
 .xz-week-item-actions { display: flex; gap: 5px; margin-top: 8px; }
+.xz-week-item--continuation .xz-week-item-actions { justify-content: flex-end; margin-top: 6px; }
 .xz-week-item-actions select,
 .xz-week-backlog-item select { min-width: 0; padding: 4px 20px 4px 6px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); font: inherit; font-size: 9px; }
 .xz-week-item-actions select { flex: 1; }
