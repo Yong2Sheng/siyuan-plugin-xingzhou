@@ -1,7 +1,20 @@
 import { Dialog, Menu, openTab, Plugin, Setting, showMessage, type Custom, type Tab } from "siyuan";
-import XingzhouApp from "./XingzhouApp.svelte";
+import AppShell from "./AppShell.svelte";
 import { showCaptureDialog, type CaptureDialogRequest } from "./capture-dialog";
 import { DEFAULT_SETTINGS, normalizeSettings, type XingzhouSettings } from "./config";
+import {
+    DAILY_RUBRICS,
+    DAILY_STORE_FILE,
+    cloneDailyRecord,
+    createEmptyDailyStore,
+    dailyBackupFileForRevision,
+    dailyStoresMatch,
+    parseDailyStore,
+    upsertDailyRecord,
+    type DailyRecord,
+    type DailyRecordStore,
+    type DailyRubric,
+} from "./daily-records";
 import { applyDependencyStorage, DEPENDENCIES_FILE, normalizeDependencyStorage } from "./dependency-storage";
 import {
     addStoredWorkItem,
@@ -37,7 +50,7 @@ const ICON = `<symbol id="${ICON_ID}" viewBox="0 0 24 24">
 </symbol>`;
 
 type AppInstance = {
-    component: XingzhouApp;
+    component: AppShell;
     mount: HTMLDivElement;
 };
 
@@ -95,13 +108,13 @@ export default class XingzhouPlugin extends Plugin {
 
                 const mount = document.createElement("div");
                 mount.className = "xingzhou-tab-mount";
-                mount.setAttribute("aria-label", "行舟 · 个人项目与事务中心");
+                mount.setAttribute("aria-label", "行舟 · 个人行动与生活系统");
                 mount.textContent = "行舟正在启动……";
                 target.replaceChildren(mount);
 
                 try {
                     mount.textContent = "";
-                    const component = new XingzhouApp({
+                    const component = new AppShell({
                         target: mount,
                         props: {
                             load: () => plugin.loadWorkItemData(),
@@ -137,6 +150,8 @@ export default class XingzhouPlugin extends Plugin {
                                 menu.open({ x: event.clientX, y: event.clientY });
                             },
                             openDocument: (blockId: string) => plugin.openBlock(blockId),
+                            loadDaily: () => plugin.getDailyRecordsSnapshot(),
+                            saveDaily: (record: DailyRecord) => plugin.saveDailyRecord(record),
                         },
                     });
                     plugin.instances.set(this, { component, mount });
@@ -168,7 +183,7 @@ export default class XingzhouPlugin extends Plugin {
             custom: {
                 id: getXingzhouTabId(this.name),
                 icon: ICON_ID,
-                title: this.i18n.centerTitle || "行舟 · 个人项目与事务中心",
+                title: this.i18n.centerTitle || "行舟 · 个人行动与生活系统",
             },
             keepCursor: false,
         });
@@ -220,7 +235,34 @@ export default class XingzhouPlugin extends Plugin {
         });
     }
 
-    private enqueueMutation(action: () => Promise<WorkItemData>): Promise<WorkItemData> {
+    /** Read-only integration point for future weekly, monthly, or AI analysis. */
+    public async getDailyRecordsSnapshot(options: { from?: string; to?: string } = {}): Promise<DailyRecordStore> {
+        await this.settingsReady;
+        await this.mutationQueue;
+        const store = await this.loadDailyStore();
+        const records = store.records
+            .filter((record) => !options.from || record.date >= options.from)
+            .filter((record) => !options.to || record.date <= options.to)
+            .map(cloneDailyRecord);
+        return { ...store, records };
+    }
+
+    /** Stable scoring-rule integration point; callers receive a detached copy. */
+    public getDailyRubrics(): DailyRubric[] {
+        return DAILY_RUBRICS.map((rubric) => ({ ...rubric, levels: [...rubric.levels] as DailyRubric["levels"] }));
+    }
+
+    private async saveDailyRecord(record: DailyRecord): Promise<DailyRecordStore> {
+        return this.enqueueMutation(async () => {
+            const current = await this.loadDailyStore();
+            const next = upsertDailyRecord(current, record);
+            await this.saveDailyAndVerify(dailyBackupFileForRevision(current.revision), current);
+            await this.saveDailyAndVerify(DAILY_STORE_FILE, next);
+            return next;
+        });
+    }
+
+    private enqueueMutation<T>(action: () => Promise<T>): Promise<T> {
         const result = this.mutationQueue.then(action, action);
         this.mutationQueue = result.then(() => undefined, () => undefined);
         return result;
@@ -286,12 +328,53 @@ export default class XingzhouPlugin extends Plugin {
         await this.saveAndVerify(INTERNAL_STORE_FILE, next);
     }
 
+    private async loadDailyStore(): Promise<DailyRecordStore> {
+        let raw: unknown;
+        try {
+            raw = await this.loadData(DAILY_STORE_FILE);
+        } catch (error) {
+            throw new Error(`生活节律数据读取失败：${errorMessage(error)}`);
+        }
+        const primary = parseDailyStore(raw);
+        if (primary) return primary;
+
+        const backups = await Promise.all([1, 2, 3].map(async (slot) => {
+            try {
+                return parseDailyStore(await this.loadData(`daily-records.backup-${slot}.json`));
+            } catch {
+                return null;
+            }
+        }));
+        const recovered = backups.filter((candidate): candidate is DailyRecordStore => Boolean(candidate))
+            .sort((a, b) => b.revision - a.revision)[0];
+        if (recovered) {
+            await this.saveDailyAndVerify(DAILY_STORE_FILE, recovered);
+            console.warn(`行舟已从第 ${recovered.revision} 版生活节律备份恢复数据。`);
+            return recovered;
+        }
+        if (!isAbsentInternalStore(raw)) {
+            throw new Error("生活节律数据文件无法识别，且三个轮换备份均不可用。为避免覆盖，行舟已停止写入。");
+        }
+        const initial = createEmptyDailyStore();
+        await this.saveDailyAndVerify(DAILY_STORE_FILE, initial);
+        return initial;
+    }
+
     private async saveAndVerify(file: string, store: InternalWorkItemStore): Promise<void> {
         const response = await this.saveData(file, store);
         if (response.code !== 0) throw new Error(response.msg || `无法保存 ${file}。`);
         const verified = parseInternalStore(await this.loadData(file));
         if (!verified || !storesMatch(store, verified)) {
             throw new Error(`内部数据写入 ${file} 后未通过完整性复核。`);
+        }
+    }
+
+    private async saveDailyAndVerify(file: string, store: DailyRecordStore): Promise<void> {
+        const response = await this.saveData(file, store);
+        if (response.code !== 0) throw new Error(response.msg || `无法保存 ${file}。`);
+        const verified = parseDailyStore(await this.loadData(file));
+        if (!verified || !dailyStoresMatch(store, verified)) {
+            throw new Error(`生活节律数据写入 ${file} 后未通过完整性复核。`);
         }
     }
 

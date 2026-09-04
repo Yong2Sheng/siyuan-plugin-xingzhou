@@ -2,10 +2,16 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
-## Unreleased
+## 0.6.0 - 2026-09-03
 
 ### Added
 
+- Added Life Rhythm as a top-level module beside Projects & Tasks; All, Week, Inbox, and Review remain second-level project views.
+- Added Today, History, Rubrics, and Timeline views with research-workday, Saturday-reset, Sunday-half-day, and holiday profiles.
+- Added staged daily forms, hour/minute selectors, kg/lb weight units, automatic work-boundary evaluation, and five in-context scoring rubrics.
+- Added Pending / Not needed / Needed states for optional after-work closure. Detail fields appear only when needed, and not-needed durations are stored as null rather than zero.
+- Added a separate `daily-records.json` with three rotating backups and read-after-write verification. It starts empty and never migrates the old daily document.
+- Added read-only date-range and rubric interfaces for future weekly, monthly, and AI analysis.
 - Week now shows work items across their full planned-start-to-deadline interval, distinguishing Start, Ongoing, Deadline, Carry-over, and Continues-next-week states. Weekly totals remain deduplicated by work item, estimated duration is shown only on the start day, and multi-day start dates can only be changed from the first card without crossing the deadline.
 - Hierarchy browsing now highlights work that starts today, ends today, or spans today, and rolls the count up through its project path while retaining the original lifecycle status in a quieter style.
 - Current Action Details and Next Action now render basic Markdown directly through SiYuan's Lute renderer while not being edited, including headings, emphasis, lists, blockquotes, code, links, tables, and task lists, while preserving ordinary text line breaks. Editing and storage continue to use the original Markdown text.
@@ -14,6 +20,9 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ### Fixed
 
+- Improved Life Rhythm typography, responsive control widths, and column alignment so time, score, and weight controls no longer stretch awkwardly on wide windows.
+- Lights-off and wake values now retain explicit dates for cross-day sleep. Also corrected the placement of actual work-end time, watch sleep score, and rubric links.
+- Fixed the first Key Work Result selection still appearing blank, and made a second click on an active score clear it without inserting a layout-shifting button.
 - Fixed SiYuan's internal block ID attribute marker appearing in rendered Markdown previews.
 - Fixed ordered-list source numbers diverging from the rendered result after inserting or deleting an item. Following sibling numbers now normalize immediately after typing, deletion, cutting, or pasting.
 

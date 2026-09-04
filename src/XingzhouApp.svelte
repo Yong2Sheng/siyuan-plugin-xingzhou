@@ -22,6 +22,7 @@
     export let openItemMenu: (event: MouseEvent, onDelete: () => void, addChild?: { label: string; onClick: () => void }) => void = (_event, onDelete) => onDelete();
     export let openCaptureDialog: (request: CaptureDialogRequest) => void = () => undefined;
     export let openDocument: (blockId: string) => Promise<void>;
+    export let embedded = false;
 
     type MainPage = "week" | "all" | "inbox" | "review";
     type ItemFilter = "all" | "active" | "future" | "closed";
@@ -992,11 +993,8 @@
 <svelte:window on:contextmenu={handleContextMenu} on:keydown={handleWindowKeydown} />
 
 <div class="xz-app">
-    <header class="xz-header">
-        <div>
-            <div class="xz-eyebrow">个人项目与事务中心</div>
-            <h1>行舟</h1>
-        </div>
+    <header class:xz-header--embedded={embedded} class="xz-header">
+        {#if !embedded}<div><div class="xz-eyebrow">个人行动与生活系统</div><h1>行舟</h1></div>{/if}
         <div class="xz-header-actions">
             {#if quickCaptureNotice}<span class="xz-quick-capture-notice" aria-live="polite">{quickCaptureNotice}</span>{/if}
             <span class="xz-data-source">插件内部数据</span>

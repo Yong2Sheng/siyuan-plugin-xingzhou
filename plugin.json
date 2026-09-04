@@ -2,19 +2,19 @@
   "name": "siyuan-plugin-xingzhou",
   "author": "Yong2Sheng",
   "url": "https://github.com/Yong2Sheng/siyuan-plugin-xingzhou",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "minAppVersion": "3.8.0",
   "backends": ["all"],
   "frontends": ["desktop", "desktop-window", "browser-desktop"],
   "displayName": {
-    "default": "行舟 · 个人项目与事务中心",
-    "zh_CN": "行舟 · 个人项目与事务中心",
-    "en_US": "Xingzhou · Personal Projects & Tasks"
+    "default": "行舟 · 个人行动与生活系统",
+    "zh_CN": "行舟 · 个人行动与生活系统",
+    "en_US": "Xingzhou · Personal Action & Life System"
   },
   "description": {
-    "default": "由插件独立保存完整工作项，捕获、安排与整理个人项目和事务。",
-    "zh_CN": "由插件独立保存完整工作项，捕获、安排与整理个人项目和事务。",
-    "en_US": "A self-contained personal project and task center with plugin-managed internal storage."
+    "default": "由插件独立保存项目事务与生活节律数据，平衡科研工作、个人生活和恢复。",
+    "zh_CN": "由插件独立保存项目事务与生活节律数据，平衡科研工作、个人生活和恢复。",
+    "en_US": "A self-contained system for personal projects, daily rhythm, research-life balance, and recovery."
   },
   "readme": {
     "default": "README.md",
@@ -27,6 +27,6 @@
     "github": "",
     "custom": []
   },
-  "keywords": ["project", "task", "attribute-view", "personal", "项目管理"],
+  "keywords": ["project", "task", "daily", "personal", "项目管理", "生活节律"],
   "disabledInPublish": true
 }
