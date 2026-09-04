@@ -86,6 +86,7 @@ export type WorkItemField = {
 export type WorkItemChanges = Partial<Record<EditableWorkItemField, string | number | boolean | null>> & {
     hardPrerequisites?: string[];
     softPrerequisites?: string[];
+    completedDates?: string[];
 };
 
 export type WorkItem = {
@@ -102,12 +103,16 @@ export type WorkItem = {
     topProjectIds: string[];
     hardPrerequisiteIds?: string[];
     softPrerequisiteIds?: string[];
+    /** 在本周视图中逐日完成的本地日期（YYYY-MM-DD）。 */
+    completedDates?: string[];
     planDate: number | null;
     deadline: number | null;
     noDeadline: boolean;
     durationMinutes: number | null;
     energy: string;
     updatedAt: number | null;
+    /** 同一直接上层内的手动显示顺序；旧数据未排序时为空。 */
+    sortOrder?: number | null;
 };
 
 export type WorkItemData = {
@@ -158,7 +163,7 @@ export async function updateWorkItem(
     item: WorkItem,
     changes: WorkItemChanges,
 ): Promise<WorkItemData> {
-    const entries = Object.entries(changes).filter(([role]) => role !== "hardPrerequisites" && role !== "softPrerequisites") as Array<[EditableWorkItemField, string | number | boolean | null]>;
+    const entries = Object.entries(changes).filter(([role]) => role !== "hardPrerequisites" && role !== "softPrerequisites" && role !== "completedDates") as Array<[EditableWorkItemField, string | number | boolean | null]>;
     for (const [role, content] of entries) {
         const field = data.fields[role];
         if (!field) throw new Error(`当前数据库中没有“${FIELD_NAMES[role][0]}”字段。`);
@@ -331,6 +336,7 @@ export function parseRenderedAttributeView(rendered: RenderedAttributeView): Wor
             topProjectIds: extractRelations(get("topProject")),
             hardPrerequisiteIds: [],
             softPrerequisiteIds: [],
+            completedDates: [],
             planDate: extractDate(get("planDate")),
             deadline: extractDate(get("deadline")),
             noDeadline: extractCheckbox(get("noDeadline")),

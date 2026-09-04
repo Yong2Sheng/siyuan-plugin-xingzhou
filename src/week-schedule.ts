@@ -15,7 +15,9 @@ export function groupWeekOccurrences(items: WorkItem[], weekStart: number): Map<
     const result = new Map<string, WeekOccurrence[]>();
 
     for (const item of items) {
-        if (isClosed(item) || !item.planDate) continue;
+        if (!item.planDate) continue;
+        const closed = isClosed(item);
+        if (closed && (item.completedDates?.length ?? 0) === 0) continue;
         const startKey = localDateKey(item.planDate);
         const rawEndKey = item.deadline ? localDateKey(item.deadline) : "";
         const endKey = rawEndKey >= startKey ? rawEndKey : startKey;
@@ -23,6 +25,7 @@ export function groupWeekOccurrences(items: WorkItem[], weekStart: number): Map<
 
         for (const dayKey of dayKeys) {
             if (dayKey < startKey || dayKey > endKey) continue;
+            if (closed && !item.completedDates?.includes(dayKey)) continue;
             const phase = occurrencePhase(dayKey, startKey, endKey, weekStartKey, weekEndKey);
             const occurrences = result.get(dayKey) ?? [];
             occurrences.push({ item, phase });

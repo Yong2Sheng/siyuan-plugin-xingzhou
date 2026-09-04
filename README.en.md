@@ -13,8 +13,8 @@ Xingzhou is a self-contained SiYuan system for personal action and daily rhythm.
 - Staged daily forms with hour/minute selectors, kg/lb weight units, automatic work-boundary evaluation, history, timelines, and embedded scoring rubrics. Lights-off and wake times are stored as explicit cross-day date-times.
 - The optional after-work closure flow distinguishes Pending, Not needed, and Needed. Detail and duration fields appear only when needed; not-needed durations remain not applicable rather than becoming zero.
 - Holiday records treat work metrics as not applicable instead of failed or zero-valued.
-- Complete hierarchy browsing for areas, top-level projects, subprojects, tasks, transactions, and ideas, with Today markers and rolled-up counts along relevant project paths.
-- Week projects multi-day work across the full planned-start-to-deadline interval with start, ongoing, deadline, and cross-week markers; it also supports calendar scheduling, while Inbox provides low-friction capture and Review provides a five-step flow.
+- Complete hierarchy browsing for areas, top-level projects, subprojects, tasks, transactions, and ideas, with Today markers and rolled-up counts along relevant project paths. Siblings can be manually reordered with per-row Up/Down controls or the drag handle.
+- Week projects multi-day work across the full planned-start-to-deadline interval with start, ongoing, deadline, and cross-week markers. Each dated card records completion independently without completing the other dates or the whole work item; daily completion can be undone and remains visible in historical weeks after the item itself is closed. Week also supports calendar scheduling, while Inbox provides low-friction capture and Review provides a five-step flow.
 - Direct editing of lifecycle, hierarchy, dates, execution cost, and action details; Current Action Details and Next Action render basic SiYuan Markdown while being viewed, expand their editors to fit the full content, continue lists while being edited, and immediately normalize sibling numbering after typing, deletion, cutting, or pasting.
 - Cross-project hard prerequisites and should-stay-ahead relationships, with cycle prevention.
 - Optional links to SiYuan documents without requiring a document for every work item.
@@ -22,7 +22,7 @@ Xingzhou is a self-contained SiYuan system for personal action and daily rhythm.
 
 ## Storage and migration
 
-The complete store lives in the plugin-private `work-items.json`. Before every mutation Xingzhou rotates the previous version through three private backup files, saves the new store, then reads it back and verifies exact equality. An invalid primary store recovers from the newest valid backup; if none is valid, writes stop instead of silently overwriting data.
+Complete work items, sibling order, and per-date completion records live in the plugin-private `work-items.json`. Before every mutation Xingzhou rotates the previous version through three private backup files, saves the new store, then reads it back and verifies exact equality. An invalid primary store recovers from the newest valid backup; if none is valid, writes stop instead of silently overwriting data.
 
 When upgrading from `0.4.x` with no internal store yet, Xingzhou reads the configured legacy Attribute View once, combines it with legacy plugin-private dependency data, and saves a migration snapshot. Normal operation no longer reads or modifies that Attribute View after migration.
 

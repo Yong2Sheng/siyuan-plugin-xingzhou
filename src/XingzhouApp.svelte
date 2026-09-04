@@ -10,7 +10,7 @@
     import { autoResizeTextarea } from "./textarea-autosize";
     import { getTodayFocusCounts } from "./today-focus";
     import TreeNode from "./TreeNode.svelte";
-    import { buildWorkItemTree, collectDescendantIds, hasActiveDescendant, hasOngoingDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
+    import { buildWorkItemTree, collectDescendantIds, compareWorkItemOrder, hasActiveDescendant, hasOngoingDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
     import { groupWeekOccurrences, isWeekOccurrenceCompact, weekOccurrenceLabel } from "./week-schedule";
     import { deriveTopProjectId, getWorkItemProfile, needsDeadlineDecision, WORK_ITEM_ROLE_LEGEND } from "./work-item-role";
     import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
@@ -19,6 +19,8 @@
     export let captureInbox: (title: string, options?: InboxCaptureOptions) => Promise<WorkItemData>;
     export let saveItem: (data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData>;
     export let deleteItem: (data: WorkItemData, item: WorkItem) => Promise<WorkItemData>;
+    export let reorderItems: (data: WorkItemData, parentId: string | null, orderedIds: string[]) => Promise<WorkItemData>
+        = async (currentData) => currentData;
     export let openItemMenu: (event: MouseEvent, onDelete: () => void, addChild?: { label: string; onClick: () => void }) => void = (_event, onDelete) => onDelete();
     export let openCaptureDialog: (request: CaptureDialogRequest) => void = () => undefined;
     export let openDocument: (blockId: string) => Promise<void>;
@@ -87,6 +89,9 @@
     let topLevelProjects: WorkItem[] = [];
     let independentTransactions: WorkItem[] = [];
     let uncategorizedRoots: WorkItem[] = [];
+    let draggingId: string | null = null;
+    let reordering = false;
+    let reorderError = "";
 
     $: selected = selectedId ? tree.byId.get(selectedId) ?? null : null;
     $: todayFocusCounts = getTodayFocusCounts(data?.items ?? [], tree);
@@ -227,7 +232,7 @@
     }
 
     function sortSidebarItems(items: WorkItem[]): WorkItem[] {
-        return [...items].sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+        return [...items].sort(compareWorkItemOrder);
     }
 
     function resolveItems(ids: string[]): WorkItem[] {
@@ -753,6 +758,12 @@
         }
     }
 
+    async function toggleWeekDateCompletion(item: WorkItem, dateKey: string) {
+        const completedDates = new Set(item.completedDates ?? []);
+        completedDates.has(dateKey) ? completedDates.delete(dateKey) : completedDates.add(dateKey);
+        await updateWeekItem(item, { completedDates: [...completedDates].sort() });
+    }
+
     async function assignWeekDate(item: WorkItem, dateKey: string) {
         const deadlineKey = formatInputDate(item.deadline);
         if (dateKey && deadlineKey && dateKey > deadlineKey) {
@@ -917,6 +928,50 @@
         const next = new Set(expandedIds);
         next.has(id) ? next.delete(id) : next.add(id);
         expandedIds = next;
+    }
+
+    async function reorderRelative(draggedId: string, targetId: string, position: "before" | "after") {
+        if (!data || reordering || draggedId === targetId) return;
+        const dragged = tree.byId.get(draggedId);
+        const target = tree.byId.get(targetId);
+        if (!dragged || !target) return;
+        const parentId = dragged.parentIds[0] ?? null;
+        if ((target.parentIds[0] ?? null) !== parentId) {
+            reorderError = "只能调整同一上层下的工作项顺序。";
+            return;
+        }
+        const siblings = parentId ? [...(tree.children.get(parentId) ?? [])] : [...tree.roots];
+        const withoutDragged = siblings.filter((item) => item.id !== draggedId);
+        const targetIndex = withoutDragged.findIndex((item) => item.id === targetId);
+        if (targetIndex < 0) return;
+        withoutDragged.splice(targetIndex + (position === "after" ? 1 : 0), 0, dragged);
+        const orderedIds = withoutDragged.map((item) => item.id);
+        if (orderedIds.every((id, index) => id === siblings[index]?.id)) return;
+
+        const previousExpandedIds = new Set(expandedIds);
+        reordering = true;
+        reorderError = "";
+        try {
+            applyData(await reorderItems(data, parentId, orderedIds));
+            expandedIds = new Set([...previousExpandedIds].filter((id) => tree.byId.has(id)));
+        } catch (caught) {
+            reorderError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            draggingId = null;
+            reordering = false;
+        }
+    }
+
+    function moveSibling(itemId: string, direction: -1 | 1) {
+        const item = tree.byId.get(itemId);
+        if (!item || reordering) return;
+        const parentId = item.parentIds[0] ?? null;
+        const siblings = (parentId ? tree.children.get(parentId) ?? [] : tree.roots)
+            .filter((candidate) => visibleIds.has(candidate.id));
+        const index = siblings.findIndex((candidate) => candidate.id === itemId);
+        const target = siblings[index + direction];
+        if (!target) return;
+        void reorderRelative(itemId, target.id, direction < 0 ? "before" : "after");
     }
 
     function expandActivePaths() {
@@ -1105,10 +1160,12 @@
                                         {#each weekItemsByDate.get(day.key) ?? [] as occurrence (occurrence.item.id)}
                                             {@const item = occurrence.item}
                                             {@const compactOccurrence = isWeekOccurrenceCompact(occurrence.phase)}
-                                            <article class:xz-week-item--closed={isClosed(item)} class:xz-week-item--continuation={compactOccurrence} class="xz-week-item" data-work-item-id={item.id} data-week-phase={occurrence.phase}>
+                                            {@const dateCompleted = item.completedDates?.includes(day.key) ?? false}
+                                            <article class:xz-week-item--closed={isClosed(item)} class:xz-week-item--date-completed={dateCompleted} class:xz-week-item--continuation={compactOccurrence} class="xz-week-item" data-work-item-id={item.id} data-week-date={day.key} data-week-phase={occurrence.phase}>
                                                 <button class="xz-week-item-title" type="button" on:click={() => revealInboxItem(item)}>{item.title}</button>
                                                 <div class="xz-week-item-meta">
                                                     <span class="xz-week-item-phase">{weekOccurrenceLabel(occurrence.phase)}</span>
+                                                    {#if dateCompleted}<span class="xz-week-item-date-done">✓ 当日已完成</span>{/if}
                                                     <span>{displayStatus(item.status) || "未设置"}</span>
                                                     {#if !compactOccurrence && item.durationMinutes !== null}<span>{item.durationMinutes} 分钟</span>{/if}
                                                     {#if !compactOccurrence && item.energy}<span>{item.energy}精力</span>{/if}
@@ -1121,7 +1178,7 @@
                                                             <option value="__clear">{occurrence.phase === "start" ? "清除开始日" : "取消安排"}</option>
                                                         </select>
                                                     {/if}
-                                                    <button type="button" disabled={weekSavingIds.has(item.id) || item.status === "已完成"} on:click={() => void updateWeekItem(item, { status: "已完成" })}>{item.status === "已完成" ? "已完成" : "完成"}</button>
+                                                    <button class:xz-week-complete-button--done={dateCompleted} type="button" aria-label={`${dateCompleted ? "撤销" : "完成"}“${item.title}”在 ${day.key} 的每日记录`} disabled={weekSavingIds.has(item.id)} on:click={() => void toggleWeekDateCompletion(item, day.key)}>{dateCompleted ? "撤销" : "完成"}</button>
                                                 </div>
                                             </article>
                                         {/each}
@@ -1299,6 +1356,7 @@
                     </div>
                 </div>
                 <div class="xz-tree-scroll">
+                    {#if reorderError}<p class="xz-tree-order-error" role="alert">{reorderError}</p>{/if}
                     {#if visibleRoots.length === 0}
                         <div class="xz-empty"><p>当前范围没有符合条件的工作项。</p></div>
                     {:else}
@@ -1310,8 +1368,13 @@
                                 {expandedIds}
                                 {visibleIds}
                                 {todayFocusCounts}
+                                {draggingId}
+                                reorderDisabled={reordering}
                                 on:select={(event) => selectedId = event.detail.id}
                                 on:toggle={(event) => toggle(event.detail.id)}
+                                on:dragstate={(event) => draggingId = event.detail.id}
+                                on:reorder={(event) => void reorderRelative(event.detail.draggedId, event.detail.targetId, event.detail.position)}
+                                on:move={(event) => moveSibling(event.detail.id, event.detail.direction)}
                             />
                         {/each}
                     {/if}

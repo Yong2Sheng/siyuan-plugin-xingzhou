@@ -101,12 +101,19 @@ export function updateStoredWorkItem(
     now = Date.now(),
 ): InternalWorkItemStore {
     let found = false;
-    const items = store.items.map((item) => {
+    const original = store.items.find((item) => item.id === itemId || item.rowId === itemId);
+    let items = store.items.map((item) => {
         if (item.id !== itemId && item.rowId !== itemId) return cloneWorkItem(item);
         found = true;
         return applyChanges(item, changes, now);
     });
     if (!found) throw new Error("内部数据中没有找到要修改的工作项，请刷新后重试。");
+    const moved = items.find((item) => item.id === itemId || item.rowId === itemId);
+    const oldParentId = original?.parentIds[0] ?? null;
+    const newParentId = moved?.parentIds[0] ?? null;
+    if (changes.parent !== undefined && moved && oldParentId !== newParentId) {
+        items = normalizeOrdersAfterParentChange(items, moved.id, oldParentId, newParentId);
+    }
     return nextRevision(store, items, now);
 }
 
@@ -120,6 +127,14 @@ export function addStoredWorkItem(
     const normalizedTitle = title.trim();
     if (!normalizedTitle) throw new Error("请输入要记录的内容。");
     if (!id || store.items.some((item) => item.id === id || item.rowId === id)) throw new Error("无法生成唯一的工作项 ID，请重试。");
+    const parentId = options.parentId || null;
+    const siblings = store.items
+        .filter((candidate) => (candidate.parentIds[0] ?? null) === parentId)
+        .sort(compareStoredOrder);
+    const siblingOrder = new Map(siblings.map((candidate, index) => [candidate.id, index]));
+    const existingItems = store.items.map((candidate) => siblingOrder.has(candidate.id)
+        ? { ...cloneWorkItem(candidate), sortOrder: siblingOrder.get(candidate.id) ?? null }
+        : cloneWorkItem(candidate));
     const item: WorkItem = {
         id,
         rowId: id,
@@ -134,14 +149,16 @@ export function addStoredWorkItem(
         topProjectIds: options.topProjectId ? [options.topProjectId] : [],
         hardPrerequisiteIds: [],
         softPrerequisiteIds: [],
+        completedDates: [],
         planDate: null,
         deadline: null,
         noDeadline: false,
         durationMinutes: null,
         energy: "",
         updatedAt: now,
+        sortOrder: siblings.length,
     };
-    return nextRevision(store, [...store.items.map(cloneWorkItem), item], now);
+    return nextRevision(store, [...existingItems, item], now);
 }
 
 export function removeStoredWorkItem(store: InternalWorkItemStore, itemId: string, now = Date.now()): InternalWorkItemStore {
@@ -157,6 +174,25 @@ export function removeStoredWorkItem(store: InternalWorkItemStore, itemId: strin
             hardPrerequisiteIds: (item.hardPrerequisiteIds ?? []).filter((id) => id !== itemId),
             softPrerequisiteIds: (item.softPrerequisiteIds ?? []).filter((id) => id !== itemId),
         }));
+    return nextRevision(store, items, now);
+}
+
+export function reorderStoredWorkItems(
+    store: InternalWorkItemStore,
+    parentId: string | null,
+    orderedIds: string[],
+    now = Date.now(),
+): InternalWorkItemStore {
+    const siblings = store.items.filter((item) => (item.parentIds[0] ?? null) === parentId);
+    const siblingIds = new Set(siblings.map((item) => item.id));
+    if (orderedIds.length !== siblings.length || new Set(orderedIds).size !== orderedIds.length
+        || orderedIds.some((id) => !siblingIds.has(id))) {
+        throw new Error("同级工作项已发生变化，请刷新后重试排序。");
+    }
+    const orderById = new Map(orderedIds.map((id, index) => [id, index]));
+    const items = store.items.map((item) => siblingIds.has(item.id)
+        ? { ...cloneWorkItem(item), sortOrder: orderById.get(item.id) ?? null }
+        : cloneWorkItem(item));
     return nextRevision(store, items, now);
 }
 
@@ -183,6 +219,7 @@ function applyChanges(item: WorkItem, changes: WorkItemChanges, now: number): Wo
     if (changes.topProject !== undefined) next.topProjectIds = changes.topProject ? [String(changes.topProject)] : [];
     if (changes.hardPrerequisites !== undefined) next.hardPrerequisiteIds = normalizeIds(changes.hardPrerequisites);
     if (changes.softPrerequisites !== undefined) next.softPrerequisiteIds = normalizeIds(changes.softPrerequisites);
+    if (changes.completedDates !== undefined) next.completedDates = normalizeDateKeys(changes.completedDates);
     if (changes.planDate !== undefined) next.planDate = normalizeDate(changes.planDate);
     if (changes.deadline !== undefined) next.deadline = normalizeDate(changes.deadline);
     if (changes.noDeadline !== undefined) next.noDeadline = Boolean(changes.noDeadline);
@@ -219,12 +256,14 @@ function normalizeWorkItem(value: unknown): WorkItem | null {
         topProjectIds: normalizeIds(item.topProjectIds),
         hardPrerequisiteIds: normalizeIds(item.hardPrerequisiteIds),
         softPrerequisiteIds: normalizeIds(item.softPrerequisiteIds),
+        completedDates: normalizeDateKeys(item.completedDates),
         planDate: nullableNumber(item.planDate),
         deadline: nullableNumber(item.deadline),
         noDeadline: Boolean(item.noDeadline),
         durationMinutes: nullableNumber(item.durationMinutes),
         energy: stringValue(item.energy),
         updatedAt: nullableNumber(item.updatedAt),
+        sortOrder: nullableNumber(item.sortOrder),
     };
 }
 
@@ -235,6 +274,7 @@ function cloneWorkItem(item: WorkItem): WorkItem {
         topProjectIds: [...item.topProjectIds],
         hardPrerequisiteIds: [...(item.hardPrerequisiteIds ?? [])],
         softPrerequisiteIds: [...(item.softPrerequisiteIds ?? [])],
+        completedDates: [...(item.completedDates ?? [])],
     };
 }
 
@@ -261,6 +301,11 @@ function normalizeIds(value: unknown): string[] {
     return [...new Set(value.filter((id): id is string => typeof id === "string" && Boolean(id)))];
 }
 
+function normalizeDateKeys(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value.filter((date): date is string => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)))].sort();
+}
+
 function normalizeDate(value: string | number | boolean | null): number | null {
     if (value === null || value === "") return null;
     if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -279,4 +324,30 @@ function finiteNumber(value: unknown): number | null {
 
 function stringValue(value: unknown): string {
     return typeof value === "string" ? value : "";
+}
+
+function compareStoredOrder(a: WorkItem, b: WorkItem): number {
+    const aOrder = finiteNumber(a.sortOrder);
+    const bOrder = finiteNumber(b.sortOrder);
+    if (aOrder !== null && bOrder !== null && aOrder !== bOrder) return aOrder - bOrder;
+    if (aOrder !== null && bOrder === null) return -1;
+    if (aOrder === null && bOrder !== null) return 1;
+    return a.title.localeCompare(b.title, "zh-CN");
+}
+
+function normalizeOrdersAfterParentChange(items: WorkItem[], movedId: string, oldParentId: string | null, newParentId: string | null): WorkItem[] {
+    const oldSiblings = items
+        .filter((item) => item.id !== movedId && (item.parentIds[0] ?? null) === oldParentId)
+        .sort(compareStoredOrder);
+    const newSiblings = items
+        .filter((item) => item.id !== movedId && (item.parentIds[0] ?? null) === newParentId)
+        .sort(compareStoredOrder);
+    const oldOrder = new Map(oldSiblings.map((item, index) => [item.id, index]));
+    const newOrder = new Map(newSiblings.map((item, index) => [item.id, index]));
+    return items.map((item) => {
+        if (item.id === movedId) return { ...item, sortOrder: newSiblings.length };
+        if (oldOrder.has(item.id)) return { ...item, sortOrder: oldOrder.get(item.id) ?? null };
+        if (newOrder.has(item.id)) return { ...item, sortOrder: newOrder.get(item.id) ?? null };
+        return item;
+    });
 }

@@ -26,6 +26,7 @@ import {
     migrateWorkItemData,
     parseInternalStore,
     removeStoredWorkItem,
+    reorderStoredWorkItems,
     storesMatch,
     toInternalWorkItemData,
     updateStoredWorkItem,
@@ -121,6 +122,7 @@ export default class XingzhouPlugin extends Plugin {
                             captureInbox: (title: string, options?: InboxCaptureOptions) => plugin.captureInternalItem(title, options),
                             saveItem: (data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => plugin.saveWorkItemData(data, item, changes),
                             deleteItem: (data: WorkItemData, item: WorkItem) => plugin.deleteWorkItemData(data, item),
+                            reorderItems: (data: WorkItemData, parentId: string | null, orderedIds: string[]) => plugin.reorderWorkItemData(data, parentId, orderedIds),
                             openCaptureDialog: (request: CaptureDialogRequest) => {
                                 let dialog!: Dialog;
                                 dialog = showCaptureDialog({
@@ -230,6 +232,15 @@ export default class XingzhouPlugin extends Plugin {
         return this.enqueueMutation(async () => {
             const current = await this.loadInternalStoreOrMigrate();
             const next = removeStoredWorkItem(current, item.id);
+            await this.persistStore(current, next);
+            return toInternalWorkItemData(next);
+        });
+    }
+
+    private async reorderWorkItemData(_data: WorkItemData, parentId: string | null, orderedIds: string[]): Promise<WorkItemData> {
+        return this.enqueueMutation(async () => {
+            const current = await this.loadInternalStoreOrMigrate();
+            const next = reorderStoredWorkItems(current, parentId, orderedIds);
             await this.persistStore(current, next);
             return toInternalWorkItemData(next);
         });

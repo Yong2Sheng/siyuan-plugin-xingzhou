@@ -49,6 +49,20 @@ describe("本周区间安排", () => {
         expect([...grouped.values()].flat().some(({ item }) => item.id === "closed")).toBe(false);
     });
 
+    it("整体结束后仍保留已经逐日完成的历史日期", () => {
+        const closed = item({
+            id: "closed-with-history",
+            status: "已完成",
+            planDate: localDate(2026, 9, 1),
+            deadline: localDate(2026, 9, 4),
+            completedDates: ["2026-09-02"],
+        });
+        const grouped = groupWeekOccurrences([closed], localDate(2026, 8, 31));
+
+        expect([...grouped.entries()].map(([date, occurrences]) => [date, occurrences.map(({ item }) => item.id)]))
+            .toEqual([["2026-09-02", ["closed-with-history"]]]);
+    });
+
     it("提供清晰的阶段文案", () => {
         expect(weekOccurrenceLabel("single")).toBe("当日");
         expect(weekOccurrenceLabel("start")).toBe("开始");

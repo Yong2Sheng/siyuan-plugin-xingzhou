@@ -6,6 +6,7 @@ import {
     migrateWorkItemData,
     parseInternalStore,
     removeStoredWorkItem,
+    reorderStoredWorkItems,
     toInternalWorkItemData,
     updateStoredWorkItem,
 } from "../src/internal-store";
@@ -48,6 +49,7 @@ describe("行舟内部工作项仓库", () => {
         const next = updateStoredWorkItem(store, "task", {
             title: "新版名称", type: "事务", status: "进行中", currentAction: "执行", nextAction: "复核",
             parent: "parent", topProject: "top", hardPrerequisites: ["hard", "hard"], softPrerequisites: ["soft"],
+            completedDates: ["2026-09-03", "无效日期", "2026-09-03"],
             planDate: "2026-09-03", deadline: "2026-09-10", noDeadline: false, duration: 45, energy: "高",
         }, 2000);
 
@@ -55,9 +57,23 @@ describe("行舟内部工作项仓库", () => {
         expect(next.items[0]).toMatchObject({
             title: "新版名称", type: "事务", status: "进行中", currentAction: "执行", nextAction: "复核",
             parentIds: ["parent"], topProjectIds: ["top"], hardPrerequisiteIds: ["hard"], softPrerequisiteIds: ["soft"],
+            completedDates: ["2026-09-03"],
             noDeadline: false, durationMinutes: 45, energy: "高", updatedAt: 2000,
         });
         expect(next.items[0].planDate).toBe(new Date("2026-09-03T00:00:00").getTime());
+    });
+
+    it("更换直接上层时把工作项放到新同级组末尾", () => {
+        const store = migrateWorkItemData(data([
+            item({ id: "old-parent", title: "旧项目" }),
+            item({ id: "new-parent", title: "新项目" }),
+            item({ id: "moved", title: "移动项", parentIds: ["old-parent"], sortOrder: 0 }),
+            item({ id: "existing", title: "已有项", parentIds: ["new-parent"], sortOrder: 0 }),
+        ]), 1000);
+        const next = updateStoredWorkItem(store, "moved", { parent: "new-parent" }, 2000);
+        const newSiblings = next.items.filter((entry) => entry.parentIds[0] === "new-parent")
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+        expect(newSiblings.map((entry) => entry.id)).toEqual(["existing", "moved"]);
     });
 
     it("新增工作项直接进入内部收件箱，并支持带上下文创建", () => {
@@ -71,6 +87,26 @@ describe("行舟内部工作项仓库", () => {
             detached: true, parentIds: ["parent"], topProjectIds: ["top"],
             hardPrerequisiteIds: [], softPrerequisiteIds: [],
         });
+    });
+
+    it("新增工作项排在同级末尾，且可原子保存完整同级顺序", () => {
+        const store = migrateWorkItemData(data([
+            item({ id: "parent", title: "项目" }),
+            item({ id: "second", title: "第二章", parentIds: ["parent"] }),
+            item({ id: "first", title: "第一章", parentIds: ["parent"] }),
+        ]), 1000);
+        const added = addStoredWorkItem(store, "第三章", "third", { parentId: "parent" }, 1500);
+        expect(added.items.filter((entry) => entry.parentIds[0] === "parent")
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+            .map((entry) => entry.id)).toEqual(["second", "first", "third"]);
+
+        const reordered = reorderStoredWorkItems(added, "parent", ["first", "third", "second"], 2000);
+        expect(reordered.revision).toBe(added.revision + 1);
+        expect(reordered.items.filter((entry) => entry.parentIds[0] === "parent")
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+            .map((entry) => entry.id)).toEqual(["first", "third", "second"]);
+        expect(() => reorderStoredWorkItems(added, "parent", ["first", "second"], 2000))
+            .toThrow("同级工作项已发生变化");
     });
 
     it("删除工作项时保留下级，并自动清除所有指向它的关系", () => {

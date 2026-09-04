@@ -2,7 +2,7 @@ import { tick } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import XingzhouApp from "../src/XingzhouApp.svelte";
 import type { CaptureDialogRequest } from "../src/capture-dialog";
-import type { WorkItem } from "../src/work-items";
+import type { WorkItem, WorkItemChanges, WorkItemData } from "../src/work-items";
 
 describe("XingzhouApp", () => {
     let component: XingzhouApp | undefined;
@@ -213,6 +213,49 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-tree-scroll")?.textContent).toContain("绘制贸易路线");
     });
 
+    it("可用每行的上下按钮保存同级顺序", async () => {
+        const parent: WorkItem = {
+            id: "project", rowId: "project", title: "小说", documentId: null, detached: true,
+            type: "项目", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            hardPrerequisiteIds: [], softPrerequisiteIds: [], planDate: null, deadline: null, noDeadline: false,
+            durationMinutes: null, energy: "", updatedAt: 1,
+        };
+        const first: WorkItem = { ...parent, id: "first", rowId: "first", title: "第一章", parentIds: [parent.id], sortOrder: 0 };
+        const second: WorkItem = { ...parent, id: "second", rowId: "second", title: "第二章", parentIds: [parent.id], sortOrder: 1 };
+        const workItemData = {
+            attributeViewId: "xingzhou-internal", attributeViewName: "行舟内部数据", viewId: "all",
+            items: [parent, first, second], missingFields: [], fields: {},
+        };
+        const reorderedData = {
+            ...workItemData,
+            items: [parent, { ...first, sortOrder: 1 }, { ...second, sortOrder: 0 }],
+        };
+        const reorderItems = vi.fn().mockResolvedValue(reorderedData);
+        const captureRequests: CaptureDialogRequest[] = [];
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn(() => new Promise<never>(() => undefined)),
+                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(),
+                deleteItem: vi.fn(), reorderItems, openDocument: vi.fn(),
+                openCaptureDialog: (request) => captureRequests.push(request),
+            },
+        });
+        (document.querySelector(".xz-global-capture-button") as HTMLButtonElement).click();
+        await captureRequests[0].onSubmit({ title: "载入排序测试" });
+        await vi.waitFor(() => expect(document.querySelectorAll(".xz-drag-handle"), document.body.innerHTML).toHaveLength(3));
+        const moveUp = document.querySelector<HTMLButtonElement>('[aria-label="上移“第一章”"]');
+        const moveDown = document.querySelector<HTMLButtonElement>('[aria-label="下移“第一章”"]');
+        expect(moveUp?.disabled).toBe(true);
+        expect(moveDown?.disabled).toBe(false);
+        moveDown?.click();
+
+        await vi.waitFor(() => expect(reorderItems).toHaveBeenCalledTimes(1));
+        expect(reorderItems.mock.calls[0][1]).toBe("project");
+        expect(reorderItems.mock.calls[0][2]).toEqual(["second", "first"]);
+        await vi.waitFor(() => expect(document.querySelector(".xz-tree-children .xz-tree-title")?.textContent).toBe("第二章"));
+    });
+
     it("从收件箱查看独立条目时精确高亮，并允许直接编辑内部字段", async () => {
         const item = {
             id: "item-1", rowId: "item-1", title: "清理房间中的垃圾", documentId: null, detached: true,
@@ -395,7 +438,18 @@ describe("XingzhouApp", () => {
                 planDate: { id: "plan", name: "计划日期", type: "date", options: [] },
             },
         };
-        const saveItem = vi.fn().mockResolvedValue(workItemData);
+        const saveItem = vi.fn(async (currentData: WorkItemData, currentItem: WorkItem, changes: WorkItemChanges): Promise<WorkItemData> => ({
+            ...currentData,
+            items: currentData.items.map((candidate) => candidate.id === currentItem.id ? {
+                ...candidate,
+                ...(changes.completedDates !== undefined ? { completedDates: changes.completedDates } : {}),
+                ...(changes.planDate !== undefined ? {
+                    planDate: typeof changes.planDate === "string" && changes.planDate
+                        ? new Date(`${changes.planDate}T00:00:00`).getTime()
+                        : null,
+                } : {}),
+            } : candidate),
+        }));
         component = new XingzhouApp({
             target: document.body,
             props: {
@@ -437,6 +491,17 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-week-backlog")?.textContent).not.toContain("今天处理合同");
         expect(document.querySelector(".xz-week-backlog")?.textContent).not.toContain("不应进入待安排的项目");
 
+        saveItem.mockClear();
+        const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+        const startCard = document.querySelector<HTMLElement>('[data-work-item-id="scheduled"][data-week-phase="start"]');
+        startCard?.querySelector<HTMLButtonElement>(".xz-week-item-actions button")?.click();
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
+        expect(saveItem.mock.calls[0][2]).toEqual({ completedDates: [todayKey] });
+        await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="scheduled"][data-week-date="${todayKey}"]`)?.classList.contains("xz-week-item--date-completed")).toBe(true));
+        expect(document.querySelector('[data-work-item-id="scheduled"][data-week-phase="deadline"]')?.classList.contains("xz-week-item--date-completed")).toBe(false);
+        expect(document.querySelector(`[data-week-date="${todayKey}"] .xz-week-item-date-done`)?.textContent).toContain("当日已完成");
+
+        saveItem.mockClear();
         const assignment = document.querySelector('select[aria-label="安排“整理书架”"]') as HTMLSelectElement;
         const targetDate = assignment.options[assignment.options.length - 1].value;
         assignment.value = targetDate;

@@ -6,6 +6,8 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ### Added
 
+- Added per-row Up and Down controls plus drag handles for persistent manual sibling ordering in the hierarchy browser.
+- Changed Week completion to per-date records: completing one dated card no longer closes the other dates or the whole work item. Completed dates remain visible, can be undone, and stay available in historical weeks after the item itself is closed.
 - Added Life Rhythm as a top-level module beside Projects & Tasks; All, Week, Inbox, and Review remain second-level project views.
 - Added Today, History, Rubrics, and Timeline views with research-workday, Saturday-reset, Sunday-half-day, and holiday profiles.
 - Added staged daily forms, hour/minute selectors, kg/lb weight units, automatic work-boundary evaluation, and five in-context scoring rubrics.

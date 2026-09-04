@@ -9,6 +9,8 @@
     export let captureInbox: (title: string, options?: InboxCaptureOptions) => Promise<WorkItemData>;
     export let saveItem: (data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData>;
     export let deleteItem: (data: WorkItemData, item: WorkItem) => Promise<WorkItemData>;
+    export let reorderItems: (data: WorkItemData, parentId: string | null, orderedIds: string[]) => Promise<WorkItemData>
+        = async (currentData) => currentData;
     export let openItemMenu: (event: MouseEvent, onDelete: () => void, addChild?: { label: string; onClick: () => void }) => void;
     export let openCaptureDialog: (request: CaptureDialogRequest) => void;
     export let openDocument: (blockId: string) => Promise<void>;
@@ -35,6 +37,7 @@
                 {captureInbox}
                 {saveItem}
                 {deleteItem}
+                {reorderItems}
                 {openItemMenu}
                 {openCaptureDialog}
                 {openDocument}

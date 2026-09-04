@@ -92,6 +92,14 @@ describe("buildWorkItemTree", () => {
         expect(tree.issues.some((issue) => issue.kind === "cycle")).toBe(true);
         expect(a.parentIds).toEqual(["b", "c"]);
     });
+
+    it("同级工作项优先使用手动顺序，未排序数据继续按名称排列", () => {
+        const parent = item({ id: "parent", title: "项目" });
+        const first = item({ id: "first", title: "第一章", parentIds: ["parent"], sortOrder: 1 });
+        const second = item({ id: "second", title: "第二章", parentIds: ["parent"], sortOrder: 0 });
+        const tree = buildWorkItemTree([parent, first, second]);
+        expect(tree.children.get("parent")?.map((entry) => entry.id)).toEqual(["second", "first"]);
+    });
 });
 
 describe("跨项目依赖", () => {

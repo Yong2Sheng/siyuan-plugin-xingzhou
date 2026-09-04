@@ -14,6 +14,15 @@ export type WorkItemTree = {
     issues: WorkItemIssue[];
 };
 
+export function compareWorkItemOrder(a: WorkItem, b: WorkItem): number {
+    const aOrder = typeof a.sortOrder === "number" && Number.isFinite(a.sortOrder) ? a.sortOrder : null;
+    const bOrder = typeof b.sortOrder === "number" && Number.isFinite(b.sortOrder) ? b.sortOrder : null;
+    if (aOrder !== null && bOrder !== null && aOrder !== bOrder) return aOrder - bOrder;
+    if (aOrder !== null && bOrder === null) return -1;
+    if (aOrder === null && bOrder !== null) return 1;
+    return a.title.localeCompare(b.title, "zh-CN");
+}
+
 // 旧状态暂时保留在判定中，确保数据库迁移前现有项目不会从活跃筛选中消失。
 const ACTIVE_STATUSES = new Set(["活跃", "进行中", "待开始", "已计划", "等待", "阻塞"]);
 const CLOSED_STATUSES = new Set(["已完成", "已失败", "已取消", "已放弃", "已归档"]);
@@ -69,9 +78,8 @@ export function buildWorkItemTree(items: WorkItem[]): WorkItemTree {
         }
     }
 
-    const order = (a: WorkItem, b: WorkItem) => a.title.localeCompare(b.title, "zh-CN");
-    roots.sort(order);
-    for (const siblings of children.values()) siblings.sort(order);
+    roots.sort(compareWorkItemOrder);
+    for (const siblings of children.values()) siblings.sort(compareWorkItemOrder);
     return { byId, children, roots, issues: dedupeIssues(issues) };
 }
 
