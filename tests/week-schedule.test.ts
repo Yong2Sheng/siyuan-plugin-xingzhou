@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupWeekOccurrences, weekOccurrenceLabel } from "../src/week-schedule";
+import { groupWeekOccurrences, isWeekOccurrenceCompact, weekOccurrenceLabel } from "../src/week-schedule";
 import type { WorkItem } from "../src/work-items";
 
 function localDate(year: number, month: number, day: number): number {
@@ -8,67 +8,54 @@ function localDate(year: number, month: number, day: number): number {
 
 function item(overrides: Partial<WorkItem> = {}): WorkItem {
     return {
-        id: "item", rowId: "item", title: "区间工作项", documentId: null, detached: true,
+        id: "item", rowId: "item", title: "执行事务", documentId: null, detached: true,
         type: "事务", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
         planDate: localDate(2026, 9, 1), deadline: localDate(2026, 9, 10), noDeadline: false,
-        durationMinutes: 30, energy: "中", updatedAt: null,
+        durationMinutes: 30, energy: "中", updatedAt: null, sliceTargetCount: 3,
+        executionSlices: [
+            { id: "first", scheduledDate: "2026-09-01", status: "completed", completedAt: localDate(2026, 9, 1), updatedAt: 1 },
+            { id: "second", scheduledDate: "2026-09-03", status: "scheduled", completedAt: null, updatedAt: 2 },
+            { id: "failed", scheduledDate: "2026-09-05", status: "abandoned", completedAt: null, updatedAt: 3 },
+        ],
         ...overrides,
     };
 }
 
-describe("本周区间安排", () => {
-    it("把开始日至截止日投影到本周，并标出开始与跨周延续", () => {
+describe("本周执行切片安排", () => {
+    it("事务只投影明确安排的执行切片，不再展开开始日至截止日", () => {
         const grouped = groupWeekOccurrences([item()], localDate(2026, 8, 31));
 
-        expect(grouped.get("2026-08-31")).toBeUndefined();
+        expect([...grouped.keys()]).toEqual(["2026-09-01", "2026-09-03", "2026-09-05"]);
+        expect([...grouped.values()].flat().every(({ phase }) => phase === "slice")).toBe(true);
+        expect(grouped.get("2026-09-03")?.[0].slice?.status).toBe("scheduled");
+        expect(grouped.get("2026-09-02")).toBeUndefined();
+    });
+
+    it("已完成事务仍保留真实切片历史，周外切片不出现", () => {
+        const grouped = groupWeekOccurrences([item({
+            status: "已完成",
+            executionSlices: [
+                { id: "inside", scheduledDate: "2026-09-02", status: "completed", completedAt: 10, updatedAt: 10 },
+                { id: "outside", scheduledDate: "2026-09-09", status: "completed", completedAt: 20, updatedAt: 20 },
+            ],
+        })], localDate(2026, 8, 31));
+
+        expect([...grouped.keys()]).toEqual(["2026-09-02"]);
+        expect(grouped.get("2026-09-02")?.[0].slice?.id).toBe("inside");
+    });
+
+    it("非事务仍保留单日与日期区间投影", () => {
+        const idea = item({ id: "idea", type: "想法", title: "整理想法", executionSlices: [], planDate: localDate(2026, 9, 1), deadline: localDate(2026, 9, 3) });
+        const grouped = groupWeekOccurrences([idea], localDate(2026, 8, 31));
+
         expect(grouped.get("2026-09-01")?.[0].phase).toBe("start");
         expect(grouped.get("2026-09-02")?.[0].phase).toBe("ongoing");
-        expect(grouped.get("2026-09-06")?.[0].phase).toBe("carry-out");
-        expect([...grouped.values()].flat()).toHaveLength(6);
+        expect(grouped.get("2026-09-03")?.[0].phase).toBe("deadline");
     });
 
-    it("下一周显示承接、持续与真正的截止日", () => {
-        const grouped = groupWeekOccurrences([item()], localDate(2026, 9, 7));
-
-        expect(grouped.get("2026-09-07")?.[0].phase).toBe("carry-in");
-        expect(grouped.get("2026-09-08")?.[0].phase).toBe("ongoing");
-        expect(grouped.get("2026-09-10")?.[0].phase).toBe("deadline");
-        expect(grouped.get("2026-09-11")).toBeUndefined();
-    });
-
-    it("没有有效区间时仍只显示在开始日，已结束项目不显示", () => {
-        const single = item({ id: "single", title: "单日事项", deadline: null });
-        const invalid = item({ id: "invalid", title: "错误区间", deadline: localDate(2026, 8, 30) });
-        const closed = item({ id: "closed", title: "已完成事项", status: "已完成" });
-        const grouped = groupWeekOccurrences([single, invalid, closed], localDate(2026, 8, 31));
-
-        expect(grouped.get("2026-09-01")?.map(({ item, phase }) => [item.id, phase]).sort()).toEqual([
-            ["invalid", "single"],
-            ["single", "single"],
-        ]);
-        expect([...grouped.values()].flat().some(({ item }) => item.id === "closed")).toBe(false);
-    });
-
-    it("整体结束后仍保留已经逐日完成的历史日期", () => {
-        const closed = item({
-            id: "closed-with-history",
-            status: "已完成",
-            planDate: localDate(2026, 9, 1),
-            deadline: localDate(2026, 9, 4),
-            completedDates: ["2026-09-02"],
-        });
-        const grouped = groupWeekOccurrences([closed], localDate(2026, 8, 31));
-
-        expect([...grouped.entries()].map(([date, occurrences]) => [date, occurrences.map(({ item }) => item.id)]))
-            .toEqual([["2026-09-02", ["closed-with-history"]]]);
-    });
-
-    it("提供清晰的阶段文案", () => {
-        expect(weekOccurrenceLabel("single")).toBe("当日");
-        expect(weekOccurrenceLabel("start")).toBe("开始");
-        expect(weekOccurrenceLabel("ongoing")).toBe("持续中");
-        expect(weekOccurrenceLabel("deadline")).toBe("截止");
+    it("提供切片文案且切片卡片不折叠", () => {
+        expect(weekOccurrenceLabel("slice")).toBe("执行切片");
+        expect(isWeekOccurrenceCompact("slice")).toBe(false);
         expect(weekOccurrenceLabel("carry-in")).toBe("承接上周");
-        expect(weekOccurrenceLabel("carry-out")).toBe("延续下周");
     });
 });

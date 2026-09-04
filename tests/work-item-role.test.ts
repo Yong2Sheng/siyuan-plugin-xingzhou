@@ -17,13 +17,13 @@ describe("工作项角色", () => {
         expect(deriveTopProjectId(action.parentIds[0], tree)).toBe(top.id);
     });
 
-    it("长期领域隐藏执行字段，事务保留计划与成本字段", () => {
+    it("长期领域隐藏执行字段，事务改用切片日历并保留截止与成本字段", () => {
         const domain = item("domain", "写作", "长期领域");
         const action = item("action", "整理资料", "事务");
         const tree = buildWorkItemTree([domain, action]);
 
         expect(getWorkItemProfile(domain, tree)).toMatchObject({ showPlanDate: false, showDeadline: false, showExecutionCost: false, showComplete: false });
-        expect(getWorkItemProfile(action, tree)).toMatchObject({ showPlanDate: true, showDeadline: true, showExecutionCost: true, showComplete: true });
+        expect(getWorkItemProfile(action, tree)).toMatchObject({ showPlanDate: false, showDeadline: true, showExecutionCost: true, showComplete: true });
     });
 
     it("区分尚未确认截止日期、明确无截止日期和具体日期", () => {

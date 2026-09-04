@@ -3,7 +3,7 @@
     import type { DailyRecord, DailyRecordStore } from "./daily-records";
     import DailyRhythm from "./DailyRhythm.svelte";
     import XingzhouApp from "./XingzhouApp.svelte";
-    import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
+    import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData, WorkItemViewState } from "./work-items";
 
     export let load: () => Promise<WorkItemData>;
     export let captureInbox: (title: string, options?: InboxCaptureOptions) => Promise<WorkItemData>;
@@ -18,6 +18,25 @@
     export let saveDaily: (record: DailyRecord) => Promise<DailyRecordStore>;
 
     let module: "projects" | "rhythm" = "projects";
+    let dailyRhythm: DailyRhythm | undefined;
+    let projectApp: XingzhouApp | undefined;
+    let initialWorkItemId: string | null = null;
+    let projectViewState: WorkItemViewState | null = null;
+
+    async function changeModule(next: "projects" | "rhythm", workItemId: string | null = null) {
+        if (next === module && !workItemId) return;
+        if (module === "rhythm" && dailyRhythm && !(await dailyRhythm.flushAutoSave())) return;
+        if (module === "projects" && next === "rhythm") {
+            projectViewState = projectApp?.getViewState() ?? projectViewState;
+            initialWorkItemId = null;
+        }
+        if (workItemId) initialWorkItemId = workItemId;
+        module = next;
+    }
+
+    function openWorkItemFromRhythm(workItemId: string) {
+        void changeModule("projects", workItemId);
+    }
 </script>
 
 <div class="xz-app-shell">
@@ -26,12 +45,13 @@
         <span class="xz-data-source">插件内部数据</span>
     </header>
     <nav class="xz-module-nav" aria-label="一级模块">
-        <button class:active={module === "projects"} type="button" on:click={() => module = "projects"}><strong>项目与事务</strong><span>捕获、安排与整理</span></button>
-        <button class:active={module === "rhythm"} type="button" on:click={() => module = "rhythm"}><strong>生活节律</strong><span>科研、生活与恢复</span></button>
+        <button class:active={module === "projects"} type="button" on:click={() => void changeModule("projects")}><strong>项目与事务</strong><span>捕获、安排与整理</span></button>
+        <button class:active={module === "rhythm"} type="button" on:click={() => void changeModule("rhythm")}><strong>生活节律</strong><span>科研、生活与恢复</span></button>
     </nav>
     <div class="xz-shell-content">
         {#if module === "projects"}
             <XingzhouApp
+                bind:this={projectApp}
                 embedded={true}
                 {load}
                 {captureInbox}
@@ -41,9 +61,11 @@
                 {openItemMenu}
                 {openCaptureDialog}
                 {openDocument}
+                {initialWorkItemId}
+                initialViewState={projectViewState}
             />
         {:else}
-            <DailyRhythm {loadDaily} {saveDaily} />
+            <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
         {/if}
     </div>
 </div>

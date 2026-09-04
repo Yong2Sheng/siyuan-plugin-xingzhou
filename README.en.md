@@ -2,7 +2,7 @@
 
 Xingzhou is a self-contained SiYuan system for personal action and daily rhythm. Projects and tasks live in one top-level module; research-life balance, wellbeing, and recovery records live in another. Both use plugin-managed private data without requiring extra SiYuan databases or documents.
 
-> Current version: `0.6.0` (projects and daily rhythm modules, separate internal stores, rotating backups, and read-after-write verification)
+> Current version: `0.7.0` (execution slices, daily-task integration, autosave, private storage, and read-after-write verification)
 
 [中文说明](README.md) · [中文更新日志](CHANGELOG.md) · [English Changelog](CHANGELOG.en.md)
 
@@ -10,11 +10,15 @@ Xingzhou is a self-contained SiYuan system for personal action and daily rhythm.
 
 - Separate top-level Projects & Tasks and Life Rhythm modules, each with its own second-level navigation.
 - Daily profiles for research workdays, Saturday reset, Sunday half-day research, and holidays, with weekday defaults and per-date overrides.
-- Staged daily forms with hour/minute selectors, kg/lb weight units, automatic work-boundary evaluation, history, timelines, and embedded scoring rubrics. Lights-off and wake times are stored as explicit cross-day date-times.
-- The optional after-work closure flow distinguishes Pending, Not needed, and Needed. Detail and duration fields appear only when needed; not-needed durations remain not applicable rather than becoming zero.
+- Daily forms follow a Morning / After lunch / Clock-out / After work / 21:00 timeline and save automatically. Sleep duration uses hour/minute selectors, weight supports kg/lb, and lights-off and wake values retain explicit cross-day dates.
+- Training details appear only after training is marked complete. The after-work closure flow distinguishes Pending, Not needed, and Needed; details appear only when needed, and not-needed durations remain not applicable rather than becoming zero.
 - Holiday records treat work metrics as not applicable instead of failed or zero-valued.
+- Transactions can be divided into a target number of execution slices with a per-slice estimate and independently scheduled on a calendar. Completion is shown as a percentage; missed and abandoned attempts remain in history while releasing a replacement slot.
+- A deadline acts only as the latest schedulable date. Transactions without a deadline can still schedule and move slices from today onward.
+- Week uses execution slices as dated work, while Life Rhythm automatically shows today's personal slices and can add a slice from an in-progress transaction with immediate synchronization back to Projects & Tasks.
 - Complete hierarchy browsing for areas, top-level projects, subprojects, tasks, transactions, and ideas, with Today markers and rolled-up counts along relevant project paths. Siblings can be manually reordered with per-row Up/Down controls or the drag handle.
-- Week projects multi-day work across the full planned-start-to-deadline interval with start, ongoing, deadline, and cross-week markers. Each dated card records completion independently without completing the other dates or the whole work item; daily completion can be undone and remains visible in historical weeks after the item itself is closed. Week also supports calendar scheduling, while Inbox provides low-friction capture and Review provides a five-step flow.
+- Week remains compatible with legacy planned-date and per-day completion records. Transactions configured with execution slices now follow their explicit slice dates instead of being repeated mechanically across every day from start to deadline.
+- Returning to Projects & Tasks restores the previous page, filters, hierarchy expansion, selected work item, and scroll position.
 - Direct editing of lifecycle, hierarchy, dates, execution cost, and action details; Current Action Details and Next Action render basic SiYuan Markdown while being viewed, expand their editors to fit the full content, continue lists while being edited, and immediately normalize sibling numbering after typing, deletion, cutting, or pasting.
 - Cross-project hard prerequisites and should-stay-ahead relationships, with cycle prevention.
 - Optional links to SiYuan documents without requiring a document for every work item.
@@ -22,7 +26,7 @@ Xingzhou is a self-contained SiYuan system for personal action and daily rhythm.
 
 ## Storage and migration
 
-Complete work items, sibling order, and per-date completion records live in the plugin-private `work-items.json`. Before every mutation Xingzhou rotates the previous version through three private backup files, saves the new store, then reads it back and verifies exact equality. An invalid primary store recovers from the newest valid backup; if none is valid, writes stop instead of silently overwriting data.
+Complete work items, sibling order, legacy per-date completion records, and execution slices live in the plugin-private `work-items.json`. Before every mutation Xingzhou rotates the previous version through three private backup files, saves the new store, then reads it back and verifies exact equality. An invalid primary store recovers from the newest valid backup; if none is valid, writes stop instead of silently overwriting data.
 
 When upgrading from `0.4.x` with no internal store yet, Xingzhou reads the configured legacy Attribute View once, combines it with legacy plugin-private dependency data, and saves a migration snapshot. Normal operation no longer reads or modifies that Attribute View after migration.
 

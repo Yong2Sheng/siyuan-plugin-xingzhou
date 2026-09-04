@@ -1,8 +1,9 @@
 import type { WorkItem, WorkItemChanges, WorkItemData, WorkItemField } from "./work-items";
+import { normalizeExecutionSlices } from "./execution-slices";
 
 export const INTERNAL_STORE_FILE = "work-items.json";
 export const MIGRATION_SNAPSHOT_FILE = "migration-source-snapshot.json";
-export const INTERNAL_STORE_VERSION = 1;
+export const INTERNAL_STORE_VERSION = 2;
 export const INTERNAL_DATA_SOURCE_ID = "xingzhou-internal";
 
 export function isAbsentInternalStore(value: unknown): boolean {
@@ -12,7 +13,7 @@ export function isAbsentInternalStore(value: unknown): boolean {
 }
 
 export type InternalWorkItemStore = {
-    version: 1;
+    version: 2;
     revision: number;
     createdAt: number;
     updatedAt: number;
@@ -27,8 +28,8 @@ export type InternalWorkItemStore = {
 
 export function parseInternalStore(value: unknown): InternalWorkItemStore | null {
     if (!value || typeof value !== "object") return null;
-    const source = value as Partial<InternalWorkItemStore>;
-    if (source.version !== INTERNAL_STORE_VERSION || !Array.isArray(source.items)) return null;
+    const source = value as Partial<Omit<InternalWorkItemStore, "version">> & { version?: unknown };
+    if ((source.version !== 1 && source.version !== INTERNAL_STORE_VERSION) || !Array.isArray(source.items)) return null;
     const ids = new Set<string>();
     const items: WorkItem[] = [];
     for (const raw of source.items) {
@@ -150,6 +151,8 @@ export function addStoredWorkItem(
         hardPrerequisiteIds: [],
         softPrerequisiteIds: [],
         completedDates: [],
+        sliceTargetCount: null,
+        executionSlices: [],
         planDate: null,
         deadline: null,
         noDeadline: false,
@@ -220,6 +223,8 @@ function applyChanges(item: WorkItem, changes: WorkItemChanges, now: number): Wo
     if (changes.hardPrerequisites !== undefined) next.hardPrerequisiteIds = normalizeIds(changes.hardPrerequisites);
     if (changes.softPrerequisites !== undefined) next.softPrerequisiteIds = normalizeIds(changes.softPrerequisites);
     if (changes.completedDates !== undefined) next.completedDates = normalizeDateKeys(changes.completedDates);
+    if (changes.sliceTargetCount !== undefined) next.sliceTargetCount = normalizeSliceTarget(changes.sliceTargetCount);
+    if (changes.executionSlices !== undefined) next.executionSlices = normalizeExecutionSlices(changes.executionSlices);
     if (changes.planDate !== undefined) next.planDate = normalizeDate(changes.planDate);
     if (changes.deadline !== undefined) next.deadline = normalizeDate(changes.deadline);
     if (changes.noDeadline !== undefined) next.noDeadline = Boolean(changes.noDeadline);
@@ -257,6 +262,8 @@ function normalizeWorkItem(value: unknown): WorkItem | null {
         hardPrerequisiteIds: normalizeIds(item.hardPrerequisiteIds),
         softPrerequisiteIds: normalizeIds(item.softPrerequisiteIds),
         completedDates: normalizeDateKeys(item.completedDates),
+        sliceTargetCount: normalizeSliceTarget(item.sliceTargetCount),
+        executionSlices: normalizeExecutionSlices(item.executionSlices),
         planDate: nullableNumber(item.planDate),
         deadline: nullableNumber(item.deadline),
         noDeadline: Boolean(item.noDeadline),
@@ -275,6 +282,7 @@ function cloneWorkItem(item: WorkItem): WorkItem {
         hardPrerequisiteIds: [...(item.hardPrerequisiteIds ?? [])],
         softPrerequisiteIds: [...(item.softPrerequisiteIds ?? [])],
         completedDates: [...(item.completedDates ?? [])],
+        executionSlices: normalizeExecutionSlices(item.executionSlices),
     };
 }
 
@@ -304,6 +312,10 @@ function normalizeIds(value: unknown): string[] {
 function normalizeDateKeys(value: unknown): string[] {
     if (!Array.isArray(value)) return [];
     return [...new Set(value.filter((date): date is string => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)))].sort();
+}
+
+function normalizeSliceTarget(value: unknown): number | null {
+    return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 366 ? value : null;
 }
 
 function normalizeDate(value: string | number | boolean | null): number | null {

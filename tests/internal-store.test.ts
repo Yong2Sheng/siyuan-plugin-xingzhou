@@ -44,6 +44,17 @@ describe("行舟内部工作项仓库", () => {
         })).toBeNull();
     });
 
+    it("读取 v1 仓库时升级为 v2，并为旧事务补齐空的切片数据", () => {
+        const migrated = parseInternalStore({
+            version: 1, revision: 3, createdAt: 1, updatedAt: 2,
+            items: [item({ id: "legacy-task", type: "事务", planDate: Date.now() })],
+        });
+
+        expect(migrated?.version).toBe(2);
+        expect(migrated?.items[0]).toMatchObject({ sliceTargetCount: null, executionSlices: [] });
+        expect(migrated?.items[0].planDate).not.toBeNull();
+    });
+
     it("可在内部仓库更新全部详情字段和依赖，并增加修订号", () => {
         const store = migrateWorkItemData(data([item({ id: "task" })]), 1000);
         const next = updateStoredWorkItem(store, "task", {

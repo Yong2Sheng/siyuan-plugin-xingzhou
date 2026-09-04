@@ -71,7 +71,7 @@ export function getWorkItemProfile(item: WorkItem, tree: WorkItemTree): WorkItem
     };
     if (role === "transaction" || role === "idea") return {
         role, label: WORK_ITEM_ROLE_META[role].label, statusLabel: "执行状态", statuses: EXECUTION_STATUSES,
-        parentLabel: "上层工作项", showParent: true, showTopProject: true, showPlanDate: true, showDeadline: true,
+        parentLabel: "上层工作项", showParent: true, showTopProject: true, showPlanDate: role === "idea", showDeadline: true,
         showExecutionCost: true, showNextAction: true, showComplete: true, actionLabel: role === "idea" ? "想法说明／准备如何验证" : "本次行动细则",
     };
     return {

@@ -2,6 +2,31 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## 0.7.0 - 2026-09-04
+
+### Added
+
+- Added execution slices for Transactions. Set a target count and per-slice estimate, then schedule each slice independently from the detail calendar without creating child work items.
+- Added Scheduled, Completed, Missed, and Abandoned slice states. Progress is the percentage of target slices completed; missed and abandoned attempts remain in history while releasing a replacement slot.
+- Week now presents explicitly scheduled slices and supports completion and undo. Slice-enabled transactions are no longer duplicated mechanically across every date from planned start through deadline.
+- Life Rhythm automatically displays personal slices scheduled for the current date and can add a same-day slice from an in-progress transaction with immediate synchronization back to Projects & Tasks.
+- Transactions without a deadline can schedule and move slices from today onward; when present, a deadline remains the latest allowed date.
+
+### Changed
+
+- Daily records now use debounced autosave. Pending edits are flushed before changing dates, stages, or top-level modules; a failed save keeps the current view available for retry.
+- Research workdays now follow five stages: Morning, After lunch, Clock-out, After work, and 21:00. Clock-out contains boundary and status evaluation, while After work contains closure and personal tasks.
+- Training completion moved to Morning before training details. Details appear only when training is marked complete and are cleared when marked incomplete or as a rest day.
+- Returning from Life Rhythm restores the previous Projects & Tasks page, filters, hierarchy scope and expansion, selected work item, and scroll position. Links from daily tasks still focus their exact target.
+- Stabilized responsive widths and alignment for time, score, weight, personal-task, and result controls throughout Life Rhythm.
+
+### Fixed
+
+- Fixed the calendar remaining disabled after saving a slice count and eliminated transient calendar/detail layout shifts while scheduling.
+- Fixed controlled result selectors failing to show their first selection and removed layout movement caused by a temporary score-clear button.
+- Fixed the daily personal-task picker using a different order from hierarchy browsing, and fixed module switching unexpectedly selecting an item or narrowing the hierarchy to one area.
+- Fixed execution-slice calendars being unavailable for transactions without a deadline.
+
 ## 0.6.0 - 2026-09-03
 
 ### Added

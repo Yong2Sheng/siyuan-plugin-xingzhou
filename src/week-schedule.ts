@@ -1,11 +1,13 @@
 import { isClosed } from "./tree";
+import type { ExecutionSlice } from "./execution-slices";
 import type { WorkItem } from "./work-items";
 
-export type WeekOccurrencePhase = "single" | "start" | "ongoing" | "deadline" | "carry-in" | "carry-out";
+export type WeekOccurrencePhase = "slice" | "single" | "start" | "ongoing" | "deadline" | "carry-in" | "carry-out";
 
 export type WeekOccurrence = {
     item: WorkItem;
     phase: WeekOccurrencePhase;
+    slice?: ExecutionSlice;
 };
 
 export function groupWeekOccurrences(items: WorkItem[], weekStart: number): Map<string, WeekOccurrence[]> {
@@ -15,6 +17,15 @@ export function groupWeekOccurrences(items: WorkItem[], weekStart: number): Map<
     const result = new Map<string, WeekOccurrence[]>();
 
     for (const item of items) {
+        if (item.type === "事务") {
+            for (const slice of item.executionSlices ?? []) {
+                if (slice.scheduledDate < weekStartKey || slice.scheduledDate > weekEndKey) continue;
+                const occurrences = result.get(slice.scheduledDate) ?? [];
+                occurrences.push({ item, phase: "slice", slice });
+                result.set(slice.scheduledDate, occurrences);
+            }
+            continue;
+        }
         if (!item.planDate) continue;
         const closed = isClosed(item);
         if (closed && (item.completedDates?.length ?? 0) === 0) continue;
@@ -40,6 +51,7 @@ export function groupWeekOccurrences(items: WorkItem[], weekStart: number): Map<
 }
 
 export function weekOccurrenceLabel(phase: WeekOccurrencePhase): string {
+    if (phase === "slice") return "执行切片";
     if (phase === "single") return "当日";
     if (phase === "start") return "开始";
     if (phase === "deadline") return "截止";
@@ -49,7 +61,7 @@ export function weekOccurrenceLabel(phase: WeekOccurrencePhase): string {
 }
 
 export function isWeekOccurrenceCompact(phase: WeekOccurrencePhase): boolean {
-    return phase !== "single" && phase !== "start";
+    return phase !== "slice" && phase !== "single" && phase !== "start";
 }
 
 function occurrencePhase(dayKey: string, startKey: string, endKey: string, weekStartKey: string, weekEndKey: string): WeekOccurrencePhase {

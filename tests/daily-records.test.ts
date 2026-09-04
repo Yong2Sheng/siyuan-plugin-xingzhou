@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    cloneDailyRecord,
     createDailyRecord,
     createEmptyDailyStore,
     dailyBackupFileForRevision,
@@ -89,5 +90,32 @@ describe("生活节律内部数据库", () => {
 
         const saved = upsertDailyRecord(createEmptyDailyStore(900), record, 1100).records[0];
         expect(saved.fields.closureNeed).toBe("needed");
+    });
+
+    it("保存个人项目稳定引用与历史快照，并在克隆时隔离数组", () => {
+        const record = createDailyRecord("2026-09-04", "research-workday", 1000);
+        record.fields.personalProjectLinks = [{
+            workItemId: "project-1",
+            titleSnapshot: "完善行舟",
+            pathSnapshot: "个人系统 / 行舟",
+            typeSnapshot: "项目",
+        }, {
+            workItemId: "project-1",
+            titleSnapshot: "重复引用会被去重",
+            pathSnapshot: "",
+            typeSnapshot: "项目",
+        }];
+
+        const saved = upsertDailyRecord(createEmptyDailyStore(900), record, 1100).records[0];
+        expect(saved.fields.personalProjectLinks).toEqual([{
+            workItemId: "project-1",
+            titleSnapshot: "完善行舟",
+            pathSnapshot: "个人系统 / 行舟",
+            typeSnapshot: "项目",
+        }]);
+
+        const cloned = cloneDailyRecord(saved);
+        cloned.fields.personalProjectLinks[0].titleSnapshot = "修改克隆";
+        expect(saved.fields.personalProjectLinks[0].titleSnapshot).toBe("完善行舟");
     });
 });

@@ -1,4 +1,5 @@
 import { DEFAULT_ALL_ITEMS_VIEW_NAME, DEFAULT_INBOX_VIEW_NAME } from "./config";
+import type { ExecutionSlice } from "./execution-slices";
 import { requestSiYuan } from "./siyuan-api";
 
 export const FIELD_NAMES = {
@@ -87,6 +88,8 @@ export type WorkItemChanges = Partial<Record<EditableWorkItemField, string | num
     hardPrerequisites?: string[];
     softPrerequisites?: string[];
     completedDates?: string[];
+    sliceTargetCount?: number | null;
+    executionSlices?: ExecutionSlice[];
 };
 
 export type WorkItem = {
@@ -105,6 +108,10 @@ export type WorkItem = {
     softPrerequisiteIds?: string[];
     /** 在本周视图中逐日完成的本地日期（YYYY-MM-DD）。 */
     completedDates?: string[];
+    /** 事务需要完成的有效执行切片总数；失败或放弃的尝试不扩大分母。 */
+    sliceTargetCount?: number | null;
+    /** 事务的执行尝试。它们不是工作项，也不参与上下层关系。 */
+    executionSlices?: ExecutionSlice[];
     planDate: number | null;
     deadline: number | null;
     noDeadline: boolean;
@@ -122,6 +129,19 @@ export type WorkItemData = {
     items: WorkItem[];
     missingFields: string[];
     fields: Partial<Record<keyof typeof FIELD_NAMES, WorkItemField>>;
+};
+
+export type WorkItemViewState = {
+    page: "week" | "all" | "inbox" | "review";
+    filter: "all" | "active" | "future" | "closed";
+    includeClosed: boolean;
+    scope: "all" | string;
+    selectedId: string | null;
+    expandedIds: string[];
+    weekStart: number;
+    sidebarScrollTop: number;
+    treeScrollTop: number;
+    detailScrollTop: number;
 };
 
 export type InboxCaptureOptions = {

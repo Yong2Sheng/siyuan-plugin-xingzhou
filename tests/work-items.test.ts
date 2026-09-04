@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateDependencyUpdate } from "../src/dependencies";
-import { buildWorkItemTree, collectDescendantIds, hasActiveDescendant } from "../src/tree";
+import { buildWorkItemTree, collectDescendantIds, flattenWorkItemTree, hasActiveDescendant } from "../src/tree";
 import { buildInboxCapturePayload, findInboxViewId, parseRenderedAttributeView, type AttributeViewDefinition, type RenderedAttributeView, type WorkItem } from "../src/work-items";
 
 function renderedFixture(): RenderedAttributeView {
@@ -99,6 +99,17 @@ describe("buildWorkItemTree", () => {
         const second = item({ id: "second", title: "第二章", parentIds: ["parent"], sortOrder: 0 });
         const tree = buildWorkItemTree([parent, first, second]);
         expect(tree.children.get("parent")?.map((entry) => entry.id)).toEqual(["second", "first"]);
+    });
+
+    it("按层级浏览的深度优先顺序展开全部工作项", () => {
+        const domain = item({ id: "domain", title: "写小说", type: "长期领域", sortOrder: 0 });
+        const project = item({ id: "project", title: "第一季", parentIds: [domain.id], sortOrder: 0 });
+        const first = item({ id: "first", title: "第一章", parentIds: [project.id], sortOrder: 0 });
+        const second = item({ id: "second", title: "第二章", parentIds: [project.id], sortOrder: 1 });
+        const independent = item({ id: "independent", title: "独立事务", sortOrder: 1 });
+
+        expect(flattenWorkItemTree(buildWorkItemTree([second, independent, first, project, domain])).map((entry) => entry.id))
+            .toEqual(["domain", "project", "first", "second", "independent"]);
     });
 });
 

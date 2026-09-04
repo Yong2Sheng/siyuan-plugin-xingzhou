@@ -83,6 +83,23 @@ export function buildWorkItemTree(items: WorkItem[]): WorkItemTree {
     return { byId, children, roots, issues: dedupeIssues(issues) };
 }
 
+/** Return items in the same depth-first, sibling-aware order used by the hierarchy browser. */
+export function flattenWorkItemTree(tree: WorkItemTree): WorkItem[] {
+    const ordered: WorkItem[] = [];
+    const visited = new Set<string>();
+    const visit = (item: WorkItem) => {
+        if (visited.has(item.id)) return;
+        visited.add(item.id);
+        ordered.push(item);
+        for (const child of tree.children.get(item.id) ?? []) visit(child);
+    };
+
+    for (const root of tree.roots) visit(root);
+    // Malformed cyclic records have no traversable root; keep them available safely.
+    for (const item of tree.byId.values()) visit(item);
+    return ordered;
+}
+
 export function isActive(item: WorkItem): boolean {
     return ACTIVE_STATUSES.has(item.status);
 }

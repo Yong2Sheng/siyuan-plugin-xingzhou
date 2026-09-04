@@ -1,9 +1,23 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onMount, tick } from "svelte";
     import type { CaptureDialogMode, CaptureDialogRequest, CaptureDialogValues } from "./capture-dialog";
     import { prerequisiteIds, validateDependencyUpdate, type DependencyKind } from "./dependencies";
     import { continueMarkdownList, normalizeMarkdownOrderedLists } from "./markdown-editor";
     import { renderActionMarkdown } from "./markdown-renderer";
+    import ExecutionSlicePlanner from "./ExecutionSlicePlanner.svelte";
+    import {
+        availableSliceCount,
+        cancelScheduledSlice,
+        completedSliceCount,
+        expirePastSlices,
+        localDateKey,
+        moveScheduledSlice,
+        scheduleSlice,
+        setSliceOutcome,
+        sliceCompletionPercent,
+        undoCompletedSlice,
+        type ExecutionSlice,
+    } from "./execution-slices";
     import RoleBadge from "./RoleBadge.svelte";
     import { getAutomaticHierarchyStatusChanges } from "./status-hierarchy";
     import { automaticStatusForPlanDate } from "./status-schedule";
@@ -13,7 +27,7 @@
     import { buildWorkItemTree, collectDescendantIds, compareWorkItemOrder, hasActiveDescendant, hasOngoingDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
     import { groupWeekOccurrences, isWeekOccurrenceCompact, weekOccurrenceLabel } from "./week-schedule";
     import { deriveTopProjectId, getWorkItemProfile, needsDeadlineDecision, WORK_ITEM_ROLE_LEGEND } from "./work-item-role";
-    import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
+    import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData, WorkItemViewState } from "./work-items";
 
     export let load: () => Promise<WorkItemData>;
     export let captureInbox: (title: string, options?: InboxCaptureOptions) => Promise<WorkItemData>;
@@ -25,6 +39,8 @@
     export let openCaptureDialog: (request: CaptureDialogRequest) => void = () => undefined;
     export let openDocument: (blockId: string) => Promise<void>;
     export let embedded = false;
+    export let initialWorkItemId: string | null = null;
+    export let initialViewState: WorkItemViewState | null = null;
 
     type MainPage = "week" | "all" | "inbox" | "review";
     type ItemFilter = "all" | "active" | "future" | "closed";
@@ -71,6 +87,7 @@
     let editingAction: ActionField | null = null;
     let savingAction: ActionField | null = null;
     let savingInline: string | null = null;
+    let savingSlices = false;
     let completionUndo: CompletionUndo | null = null;
     let completionUndoTimer: ReturnType<typeof setTimeout> | null = null;
     let temporalRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -92,8 +109,32 @@
     let draggingId: string | null = null;
     let reordering = false;
     let reorderError = "";
+    let appliedInitialWorkItemId: string | null = null;
+    let appliedInitialViewState = false;
+    let sidebarElement: HTMLElement | null = null;
+    let treeScrollElement: HTMLElement | null = null;
+    let detailElement: HTMLElement | null = null;
 
     $: selected = selectedId ? tree.byId.get(selectedId) ?? null : null;
+
+    export function getSelectedWorkItemId(): string | null {
+        return selectedId;
+    }
+
+    export function getViewState(): WorkItemViewState {
+        return {
+            page,
+            filter,
+            includeClosed,
+            scope,
+            selectedId,
+            expandedIds: [...expandedIds],
+            weekStart,
+            sidebarScrollTop: sidebarElement?.scrollTop ?? 0,
+            treeScrollTop: treeScrollElement?.scrollTop ?? 0,
+            detailScrollTop: detailElement?.scrollTop ?? 0,
+        };
+    }
     $: todayFocusCounts = getTodayFocusCounts(data?.items ?? [], tree);
     $: selectedProfile = selected ? getWorkItemProfile(selected, tree) : null;
     $: deleteDescendantCount = deleteTarget ? Math.max(0, collectDescendantIds(deleteTarget.id, tree).size - 1) : 0;
@@ -156,8 +197,8 @@
         .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     $: weekDays = buildWeekDays(weekStart);
     $: weekItemsByDate = groupWeekOccurrences(data?.items ?? [], weekStart);
-    $: scheduledWeekIds = new Set([...weekItemsByDate.values()].flatMap((occurrences) => occurrences.map(({ item }) => item.id)));
-    $: scheduledWeekCount = scheduledWeekIds.size;
+    $: scheduledWeekIds = new Set([...weekItemsByDate.values()].flatMap((occurrences) => occurrences.filter(({ slice }) => !slice || slice.status === "scheduled").map(({ item }) => item.id)));
+    $: scheduledWeekCount = [...weekItemsByDate.values()].flat().filter(({ slice }) => !slice || slice.status === "scheduled").length;
     $: unscheduledWeekItems = getUnscheduledWeekItems(data?.items ?? []);
     $: activeWindowItems = getActiveWindowItems(data?.items ?? [], scheduledWeekIds);
     $: reviewActiveProjects = getReviewActiveProjects(data?.items ?? []);
@@ -166,13 +207,14 @@
     $: reviewCompletedThisWeek = getReviewCompletedThisWeek(data?.items ?? []);
     $: if (selected && selected.id !== draftSourceId) resetDetailDraft(selected);
 
+    Promise.resolve().then(() => void refresh());
+
     onMount(() => {
         try {
             includeClosed = localStorage.getItem(includeClosedStorageKey) === "true";
         } catch {
             includeClosed = false;
         }
-        void refresh();
         scheduleTemporalRefresh();
         return () => {
             clearCompletionUndo();
@@ -199,9 +241,17 @@
     }
 
     async function reconcileAutomaticStatuses(loaded: WorkItemData): Promise<WorkItemData> {
-        if (!loaded.fields.status) return loaded;
         let current = loaded;
         for (const original of loaded.items) {
+            if (original.type !== "事务") continue;
+            const expired = expirePastSlices(original);
+            if (!expired) continue;
+            const currentItem = current.items.find((item) => item.rowId === original.rowId);
+            if (currentItem) current = await saveItem(current, currentItem, { executionSlices: expired });
+        }
+        if (!loaded.fields.status) return current;
+        for (const original of loaded.items) {
+            if (original.type === "事务") continue;
             const targetStatus = automaticStatusForPlanDate(original.status, formatInputDate(original.planDate), formatInputDate(Date.now()));
             if (!targetStatus || targetStatus === original.status) continue;
             const currentItem = current.items.find((item) => item.rowId === original.rowId);
@@ -224,11 +274,42 @@
     }
 
     function applyData(nextData: WorkItemData) {
+        const hadData = Boolean(data);
+        const previouslyExpanded = expandedIds;
         data = nextData;
         tree = buildWorkItemTree(nextData.items);
-        selectedId = selectedId && tree.byId.has(selectedId) ? selectedId : nextData.items[0]?.id ?? null;
-        expandedIds = getDefaultExpandedIds(filter, nextData.items);
+        if (initialViewState && !appliedInitialViewState) {
+            page = initialViewState.page;
+            filter = initialViewState.filter;
+            includeClosed = initialViewState.includeClosed;
+            scope = initialViewState.scope === "all" || tree.byId.has(initialViewState.scope) ? initialViewState.scope : "all";
+            selectedId = initialViewState.selectedId && tree.byId.has(initialViewState.selectedId)
+                ? initialViewState.selectedId
+                : nextData.items[0]?.id ?? null;
+            expandedIds = new Set(initialViewState.expandedIds.filter((id) => tree.byId.has(id)));
+            weekStart = initialViewState.weekStart;
+            appliedInitialViewState = true;
+            restoreScrollPositions(initialViewState);
+        } else {
+            selectedId = selectedId && tree.byId.has(selectedId) ? selectedId : nextData.items[0]?.id ?? null;
+            expandedIds = hadData
+                ? new Set([...previouslyExpanded].filter((id) => tree.byId.has(id)))
+                : getDefaultExpandedIds(filter, nextData.items);
+        }
+        if (initialWorkItemId && appliedInitialWorkItemId !== initialWorkItemId) {
+            const requested = tree.byId.get(initialWorkItemId);
+            appliedInitialWorkItemId = initialWorkItemId;
+            if (requested) revealInboxItem(requested);
+        }
         loading = false;
+    }
+
+    function restoreScrollPositions(state: WorkItemViewState) {
+        void tick().then(() => {
+            if (sidebarElement) sidebarElement.scrollTop = state.sidebarScrollTop;
+            if (treeScrollElement) treeScrollElement.scrollTop = state.treeScrollTop;
+            if (detailElement) detailElement.scrollTop = state.detailScrollTop;
+        });
     }
 
     function sortSidebarItems(items: WorkItem[]): WorkItem[] {
@@ -540,7 +621,7 @@
     }
 
     async function saveInline(role: "title" | "type" | "status" | "parent" | "topProject" | "planDate" | "deadline" | "duration" | "energy", value: string) {
-        if (!data || !selected || savingInline) return;
+        if (!data || !selected || savingInline || savingSlices) return;
         if (role === "title" && !value.trim()) {
             detailDraft.title = selected.title;
             inlineError = "名称不能为空。";
@@ -575,6 +656,10 @@
                 if (data.fields.topProject) changes.topProject = null;
             } else if (data.fields.topProject) {
                 changes.topProject = deriveTopProjectId(selected.parentIds[0] ?? "", tree) || null;
+            }
+            if (value === "事务") {
+                changes.planDate = null;
+                changes.completedDates = [];
             }
         }
         if (role === "planDate") {
@@ -619,7 +704,7 @@
     }
 
     async function saveDependencies(kind: DependencyKind, ids: string[]) {
-        if (!data || !selected || savingInline) return;
+        if (!data || !selected || savingInline || savingSlices) return;
         const normalized = [...new Set(ids)];
         const validationError = validateDependencyUpdate(data.items, selected.id, kind, normalized);
         if (validationError) {
@@ -644,7 +729,7 @@
     }
 
     async function markSelectedComplete() {
-        if (!selected || savingInline) return;
+        if (!selected || savingInline || savingSlices) return;
         const previous = { rowId: selected.rowId, title: selected.title, status: selected.status };
         await saveInline("status", "已完成");
         const updated = data?.items.find((item) => item.rowId === previous.rowId);
@@ -660,7 +745,7 @@
     }
 
     async function undoCompletion() {
-        if (!data || !completionUndo || savingInline || undoingCompletion) return;
+        if (!data || !completionUndo || savingInline || savingSlices || undoingCompletion) return;
         const snapshot = completionUndo;
         const item = data.items.find((candidate) => candidate.rowId === snapshot.rowId);
         if (!item) {
@@ -694,9 +779,14 @@
     }
 
     async function saveDeadlineMode(mode: string) {
-        if (!data || !selected || savingInline) return;
+        if (!data || !selected || savingInline || savingSlices) return;
         detailDraft.deadlineMode = mode;
         if (mode === "date") return;
+        if (selected.type === "事务" && (selected.executionSlices ?? []).length > 0) {
+            detailDraft.deadlineMode = selected.deadline ? "date" : "pending";
+            inlineError = "已有执行记录时不能清除截止日期；请保留一个不早于所有切片的截止日期。";
+            return;
+        }
         if (!data.fields.noDeadline) {
             detailDraft.deadlineMode = selected.deadline ? "date" : "pending";
             inlineError = "内部数据字段暂不可用，无法明确保存为“无”。";
@@ -708,7 +798,12 @@
     }
 
     async function saveDeadlineDate(value: string) {
-        if (!data || !selected || savingInline) return;
+        if (!data || !selected || savingInline || savingSlices) return;
+        if (value && selected.type === "事务" && (selected.executionSlices ?? []).some((slice) => slice.scheduledDate > value)) {
+            detailDraft.deadline = formatInputDate(selected.deadline);
+            inlineError = "截止日期不能早于已有执行记录；请先取消或调整受影响的切片。";
+            return;
+        }
         detailDraft.deadline = value;
         if (!value) {
             detailDraft.deadlineMode = "pending";
@@ -723,7 +818,7 @@
     }
 
     async function saveDeadlineChanges(changes: WorkItemChanges) {
-        if (!data || !selected || savingInline) return;
+        if (!data || !selected || savingInline || savingSlices) return;
         const selectedRowId = selected.rowId;
         savingInline = "deadline";
         inlineError = "";
@@ -758,10 +853,70 @@
         }
     }
 
-    async function toggleWeekDateCompletion(item: WorkItem, dateKey: string) {
+    async function toggleLegacyWeekDateCompletion(item: WorkItem, dateKey: string) {
         const completedDates = new Set(item.completedDates ?? []);
         completedDates.has(dateKey) ? completedDates.delete(dateKey) : completedDates.add(dateKey);
         await updateWeekItem(item, { completedDates: [...completedDates].sort() });
+    }
+
+    async function saveSelectedSlices(changes: WorkItemChanges) {
+        if (!data || !selected || savingInline || savingSlices) return;
+        const selectedRowId = selected.rowId;
+        savingSlices = true;
+        inlineError = "";
+        try {
+            applyData(await saveItem(data, selected, changes));
+            const updated = data?.items.find((item) => item.rowId === selectedRowId);
+            if (updated) {
+                selectedId = updated.id;
+                resetDetailDraft(updated);
+            }
+        } catch (caught) {
+            inlineError = caught instanceof Error ? caught.message : String(caught);
+            throw caught;
+        } finally {
+            savingSlices = false;
+        }
+    }
+
+    async function updateWeekSlice(item: WorkItem, slice: ExecutionSlice, action: "complete" | "abandon" | "undo") {
+        const executionSlices = action === "undo"
+            ? undoCompletedSlice(item, slice.id)
+            : setSliceOutcome(item, slice.id, action === "complete" ? "completed" : "abandoned");
+        await updateWeekItem(item, { executionSlices });
+    }
+
+    async function scheduleWeekSlice(item: WorkItem, dateKey: string) {
+        try {
+            await updateWeekItem(item, { executionSlices: scheduleSlice(item, dateKey) });
+        } catch (caught) {
+            weekError = caught instanceof Error ? caught.message : String(caught);
+        }
+    }
+
+    async function changeWeekSliceDate(item: WorkItem, slice: ExecutionSlice, dateKey: string) {
+        try {
+            const executionSlices = dateKey
+                ? moveScheduledSlice(item, slice.id, dateKey)
+                : cancelScheduledSlice(item, slice.id);
+            await updateWeekItem(item, { executionSlices });
+        } catch (caught) {
+            weekError = caught instanceof Error ? caught.message : String(caught);
+        }
+    }
+
+    function handleWeekSliceAssignment(event: Event, item: WorkItem, slice: ExecutionSlice) {
+        const select = event.currentTarget as HTMLSelectElement;
+        const dateKey = select.value === "__clear" ? "" : select.value;
+        select.value = "";
+        void changeWeekSliceDate(item, slice, dateKey);
+    }
+
+    function handleNewWeekSliceAssignment(event: Event, item: WorkItem) {
+        const select = event.currentTarget as HTMLSelectElement;
+        const dateKey = select.value;
+        select.value = "";
+        if (dateKey) void scheduleWeekSlice(item, dateKey);
     }
 
     async function assignWeekDate(item: WorkItem, dateKey: string) {
@@ -809,7 +964,11 @@
     function getUnscheduledWeekItems(items: WorkItem[]): WorkItem[] {
         const excludedStatuses = new Set(["收件箱", "暂停", "将来", "将来／也许", "已完成", "已失败", "已取消", "已放弃"]);
         return items
-            .filter((item) => !item.planDate && (item.type === "事务" || item.type === "想法") && !excludedStatuses.has(item.status))
+            .filter((item) => {
+                if (excludedStatuses.has(item.status)) return false;
+                if (item.type === "事务") return Boolean(item.deadline && item.sliceTargetCount && availableSliceCount(item) > 0);
+                return item.type === "想法" && !item.planDate;
+            })
             .sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
     }
 
@@ -818,7 +977,7 @@
         const today = formatInputDate(Date.now());
         return items
             .filter((item) => {
-                if (scheduledIds.has(item.id) || (item.type !== "事务" && item.type !== "想法") || !item.planDate || !item.deadline || excludedStatuses.has(item.status)) return false;
+                if (scheduledIds.has(item.id) || item.type !== "想法" || !item.planDate || !item.deadline || excludedStatuses.has(item.status)) return false;
                 return formatInputDate(item.planDate) <= today && formatInputDate(item.deadline) >= today;
             })
             .sort((a, b) => (a.deadline ?? 0) - (b.deadline ?? 0) || a.title.localeCompare(b.title, "zh-CN"));
@@ -1020,6 +1179,13 @@
         return status;
     }
 
+    function sliceStatusLabel(status: ExecutionSlice["status"]): string {
+        if (status === "completed") return "✓ 已完成";
+        if (status === "missed") return "未完成";
+        if (status === "abandoned") return "已放弃";
+        return "已安排";
+    }
+
     function isToday(timestamp: number | null): boolean {
         if (!timestamp) return false;
         const date = new Date(timestamp);
@@ -1157,28 +1323,42 @@
                                     {#if (weekItemsByDate.get(day.key) ?? []).length === 0}
                                         <p class="xz-week-day-empty">暂无安排</p>
                                     {:else}
-                                        {#each weekItemsByDate.get(day.key) ?? [] as occurrence (occurrence.item.id)}
+                                        {#each weekItemsByDate.get(day.key) ?? [] as occurrence (`${occurrence.item.id}-${occurrence.slice?.id ?? occurrence.phase}`)}
                                             {@const item = occurrence.item}
+                                            {@const slice = occurrence.slice}
                                             {@const compactOccurrence = isWeekOccurrenceCompact(occurrence.phase)}
-                                            {@const dateCompleted = item.completedDates?.includes(day.key) ?? false}
-                                            <article class:xz-week-item--closed={isClosed(item)} class:xz-week-item--date-completed={dateCompleted} class:xz-week-item--continuation={compactOccurrence} class="xz-week-item" data-work-item-id={item.id} data-week-date={day.key} data-week-phase={occurrence.phase}>
+                                            {@const dateCompleted = slice ? slice.status === "completed" : item.completedDates?.includes(day.key) ?? false}
+                                            <article class:xz-week-item--closed={isClosed(item)} class:xz-week-item--date-completed={dateCompleted} class:xz-week-item--missed={slice?.status === "missed"} class:xz-week-item--abandoned={slice?.status === "abandoned"} class:xz-week-item--continuation={compactOccurrence} class="xz-week-item" data-work-item-id={item.id} data-week-date={day.key} data-week-phase={occurrence.phase}>
                                                 <button class="xz-week-item-title" type="button" on:click={() => revealInboxItem(item)}>{item.title}</button>
                                                 <div class="xz-week-item-meta">
                                                     <span class="xz-week-item-phase">{weekOccurrenceLabel(occurrence.phase)}</span>
-                                                    {#if dateCompleted}<span class="xz-week-item-date-done">✓ 当日已完成</span>{/if}
+                                                    {#if slice}<span class={`xz-week-slice-status ${slice.status}`}>{sliceStatusLabel(slice.status)}</span>{:else if dateCompleted}<span class="xz-week-item-date-done">✓ 当日已完成</span>{/if}
                                                     <span>{displayStatus(item.status) || "未设置"}</span>
-                                                    {#if !compactOccurrence && item.durationMinutes !== null}<span>{item.durationMinutes} 分钟</span>{/if}
+                                                    {#if slice}<span>{sliceCompletionPercent(item)}%</span>{/if}
+                                                    {#if !compactOccurrence && item.durationMinutes !== null}<span>{item.durationMinutes} 分钟／片</span>{/if}
                                                     {#if !compactOccurrence && item.energy}<span>{item.energy}精力</span>{/if}
                                                 </div>
                                                 <div class="xz-week-item-actions">
-                                                    {#if !compactOccurrence}
-                                                        <select aria-label={occurrence.phase === "start" ? `修改“${item.title}”的开始日` : `移动“${item.title}”`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekAssignment(event, item)}>
-                                                            <option value="">{occurrence.phase === "start" ? "修改开始日…" : "移动到…"}</option>
-                                                            {#each weekDays as targetDay}<option value={targetDay.key} disabled={Boolean(item.deadline && targetDay.key > formatInputDate(item.deadline))}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}
-                                                            <option value="__clear">{occurrence.phase === "start" ? "清除开始日" : "取消安排"}</option>
+                                                    {#if slice?.status === "scheduled"}
+                                                        <select aria-label={`移动“${item.title}”的执行切片`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekSliceAssignment(event, item, slice)}>
+                                                            <option value="">移动到…</option>
+                                                            {#each weekDays as targetDay}<option value={targetDay.key} disabled={targetDay.key < localDateKey() || Boolean(item.deadline && targetDay.key > formatInputDate(item.deadline))}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}
+                                                            <option value="__clear">取消安排</option>
                                                         </select>
+                                                        {#if day.key === localDateKey()}
+                                                            <button type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>完成</button>
+                                                            <button class="xz-week-abandon-button" type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "abandon")}>放弃</button>
+                                                        {/if}
+                                                    {:else if slice?.status === "completed"}
+                                                        <button class="xz-week-complete-button--done" type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "undo")}>撤销完成</button>
+                                                    {:else if !slice}
+                                                        {#if !compactOccurrence}<select aria-label={occurrence.phase === "start" ? `修改“${item.title}”的开始日` : `移动“${item.title}”`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekAssignment(event, item)}>
+                                                                <option value="">{occurrence.phase === "start" ? "修改开始日…" : "移动到…"}</option>
+                                                                {#each weekDays as targetDay}<option value={targetDay.key} disabled={Boolean(item.deadline && targetDay.key > formatInputDate(item.deadline))}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}
+                                                                <option value="__clear">{occurrence.phase === "start" ? "清除开始日" : "取消安排"}</option>
+                                                            </select>{/if}
+                                                        <button class:xz-week-complete-button--done={dateCompleted} type="button" aria-label={`${dateCompleted ? "撤销" : "完成"}“${item.title}”在 ${day.key} 的每日记录`} disabled={weekSavingIds.has(item.id)} on:click={() => void toggleLegacyWeekDateCompletion(item, day.key)}>{dateCompleted ? "撤销" : "完成"}</button>
                                                     {/if}
-                                                    <button class:xz-week-complete-button--done={dateCompleted} type="button" aria-label={`${dateCompleted ? "撤销" : "完成"}“${item.title}”在 ${day.key} 的每日记录`} disabled={weekSavingIds.has(item.id)} on:click={() => void toggleWeekDateCompletion(item, day.key)}>{dateCompleted ? "撤销" : "完成"}</button>
                                                 </div>
                                             </article>
                                         {/each}
@@ -1209,9 +1389,9 @@
                                         <h4><span>尚未选择日期</span><em>{unscheduledWeekItems.length} 项</em></h4>
                                         {#each unscheduledWeekItems as item (item.id)}
                                             <article class="xz-week-backlog-item" data-work-item-id={item.id}>
-                                                <button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type || "未分类"} · {displayStatus(item.status) || "未设置"}</span></button>
-                                                <select aria-label={`安排“${item.title}”`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekAssignment(event, item)}>
-                                                    <option value="">安排到…</option>{#each weekDays as targetDay}<option value={targetDay.key}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}
+                                                <button type="button" on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type === "事务" ? `${sliceCompletionPercent(item)}% · 待安排 ${availableSliceCount(item)} 片` : `${item.type || "未分类"} · ${displayStatus(item.status) || "未设置"}`}</span></button>
+                                                <select aria-label={`安排“${item.title}”`} disabled={weekSavingIds.has(item.id)} on:change={(event) => item.type === "事务" ? handleNewWeekSliceAssignment(event, item) : handleWeekAssignment(event, item)}>
+                                                    <option value="">{item.type === "事务" ? "安排一个切片到…" : "安排到…"}</option>{#each weekDays as targetDay}<option value={targetDay.key} disabled={targetDay.key < localDateKey() || Boolean(item.deadline && targetDay.key > formatInputDate(item.deadline))}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}
                                                 </select>
                                             </article>
                                         {/each}
@@ -1307,7 +1487,7 @@
         {/if}
 
         <main class="xz-workspace">
-            <aside class="xz-sidebar">
+            <aside class="xz-sidebar" bind:this={sidebarElement}>
                 <section class="xz-sidebar-group xz-sidebar-group--areas">
                     <h2><span>长期领域与想法</span><span class="xz-sidebar-group-actions"><small>{areaAndIdeaRoots.length}</small><button type="button" aria-label="添加长期领域或想法" title="添加长期领域或想法" on:click={() => void openSidebarCapture("areaOrIdea")}>＋</button></span></h2>
                     {#if areaAndIdeaRoots.length === 0}<p class="xz-sidebar-empty">暂无内容</p>{/if}
@@ -1355,7 +1535,7 @@
                         {#each WORK_ITEM_ROLE_LEGEND as role}<RoleBadge {role} compact />{/each}
                     </div>
                 </div>
-                <div class="xz-tree-scroll">
+                <div class="xz-tree-scroll" bind:this={treeScrollElement}>
                     {#if reorderError}<p class="xz-tree-order-error" role="alert">{reorderError}</p>{/if}
                     {#if visibleRoots.length === 0}
                         <div class="xz-empty"><p>当前范围没有符合条件的工作项。</p></div>
@@ -1381,7 +1561,7 @@
                 </div>
             </section>
 
-            <aside class="xz-detail">
+            <aside class="xz-detail" bind:this={detailElement}>
                 {#if selected}
                     <div class="xz-detail-header">
                         <div class="xz-detail-identity">
@@ -1422,13 +1602,17 @@
                             <label class="xz-deadline-field"><span>截止日期 {#if isOverdue(selected)}<em class="xz-date-hint xz-date-hint--overdue">已逾期</em>{:else if detailDraft.deadlineMode === "pending"}<em class="xz-date-hint xz-date-hint--pending">待确认</em>{/if}</span><div class="xz-deadline-control"><select class="b3-select" aria-label="截止日期设置" bind:value={detailDraft.deadlineMode} disabled={Boolean(savingInline)} on:change={() => void saveDeadlineMode(detailDraft.deadlineMode)}><option value="pending">待确认</option><option value="none" disabled={!data.fields.noDeadline}>无</option><option value="date">具体日期</option></select>{#if detailDraft.deadlineMode === "date"}<input class="b3-text-field" aria-label="具体截止日期" type="date" bind:value={detailDraft.deadline} disabled={Boolean(savingInline)} on:change={() => void saveDeadlineDate(detailDraft.deadline)} />{/if}</div></label>
                         {/if}
                         {#if selectedProfile?.showExecutionCost}
-                            <label><span>预计时长（分钟）</span><input class="b3-text-field" type="number" min="0" step="1" bind:value={detailDraft.duration} disabled={Boolean(savingInline)} on:change={() => void saveInline("duration", detailDraft.duration)} /></label>
+                            {#if selected.type !== "事务"}<label><span>预计时长（分钟）</span><input class="b3-text-field" type="number" min="0" step="1" bind:value={detailDraft.duration} disabled={Boolean(savingInline)} on:change={() => void saveInline("duration", detailDraft.duration)} /></label>{/if}
                             <label><span>所需精力</span><select class="b3-select" bind:value={detailDraft.energy} disabled={Boolean(savingInline)} on:change={() => void saveInline("energy", detailDraft.energy)}><option value="">—</option>{#each data.fields.energy?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
                         {/if}
                     </div>
                     {#if selectedProfile?.showDeadline && !data.fields.noDeadline}<p class="xz-missing-field"><strong>内部字段暂不可用</strong><span>请重新加载插件后再设置“无截止日期”。</span></p>{/if}
                     {#if savingInline}<p class="xz-inline-feedback">正在保存并复核……</p>{/if}
                     {#if inlineError}<p class="xz-save-error" role="alert">{inlineError}</p>{/if}
+
+                    {#if selected.type === "事务"}
+                        <ExecutionSlicePlanner item={selected} disabled={Boolean(savingInline)} save={saveSelectedSlices} />
+                    {/if}
 
                     <section class="xz-dependency-card">
                         <header>

@@ -8,6 +8,13 @@ export type TriState = "yes" | "no" | "not-applicable" | "";
 export type ResultState = "met" | "exceeded" | "missed" | "not-applicable" | "";
 export type ClosureNeed = "needed" | "not-needed" | "";
 
+export type DailyWorkItemLink = {
+    workItemId: string;
+    titleSnapshot: string;
+    pathSnapshot: string;
+    typeSnapshot: string;
+};
+
 export type DailyRecordFields = {
     lightsOffTime: string;
     wakeTime: string;
@@ -23,6 +30,7 @@ export type DailyRecordFields = {
     importantWorkPlan: string;
     dayAdjustments: string;
     trainingPlan: string;
+    personalProjectLinks: DailyWorkItemLink[];
     personalProjectPlan: string;
     restAndLifePlan: string;
     studyMaterial: string;
@@ -180,7 +188,13 @@ export function isWorkMetricApplicable(dayType: DailyDayType): boolean {
 }
 
 export function cloneDailyRecord(record: DailyRecord): DailyRecord {
-    return { ...record, fields: { ...record.fields } };
+    return {
+        ...record,
+        fields: {
+            ...record.fields,
+            personalProjectLinks: record.fields.personalProjectLinks.map((link) => ({ ...link })),
+        },
+    };
 }
 
 /**
@@ -208,7 +222,7 @@ function emptyDailyFields(): DailyRecordFields {
     return {
         lightsOffTime: "", wakeTime: "", lightsOffAt: "", wakeAt: "", sleepDurationMinutes: null, watchSleepScore: null,
         subjectiveSleepQuality: null, morningWeight: null, weightUnit: "kg", workStartTime: "",
-        plannedWorkEndTime: "", importantWorkPlan: "", dayAdjustments: "", trainingPlan: "",
+        plannedWorkEndTime: "", importantWorkPlan: "", dayAdjustments: "", trainingPlan: "", personalProjectLinks: [],
         personalProjectPlan: "", restAndLifePlan: "", studyMaterial: "", studyTopic: "", studyPlan: "",
         studyResult: "", actualWorkEndTime: "", keyWorkResult: "", trainingCompleted: "",
         importantWorkResult: "", personalProjectDurationMinutes: null, daytimeEnergy: null,
@@ -242,6 +256,7 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             weightUnit: fields.weightUnit === "lb" ? "lb" : "kg",
             keyWorkResult: resultState(fields.keyWorkResult),
             trainingCompleted: triState(fields.trainingCompleted),
+            personalProjectLinks: normalizeWorkItemLinks(fields.personalProjectLinks),
             personalProjectDurationMinutes: nullableNonnegativeNumber(fields.personalProjectDurationMinutes),
             daytimeEnergy: nullableScore(fields.daytimeEnergy),
             workEfficiency: nullableScore(fields.workEfficiency),
@@ -269,6 +284,27 @@ function stringFields(fields: Partial<DailyRecordFields>): Partial<DailyRecordFi
 
 function textValue(value: unknown): string {
     return typeof value === "string" ? value : "";
+}
+
+function normalizeWorkItemLinks(value: unknown): DailyWorkItemLink[] {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set<string>();
+    const result: DailyWorkItemLink[] = [];
+    for (const entry of value) {
+        if (!entry || typeof entry !== "object") continue;
+        const source = entry as Partial<DailyWorkItemLink>;
+        const workItemId = textValue(source.workItemId).trim();
+        const titleSnapshot = textValue(source.titleSnapshot).trim();
+        if (!workItemId || !titleSnapshot || seen.has(workItemId)) continue;
+        seen.add(workItemId);
+        result.push({
+            workItemId,
+            titleSnapshot,
+            pathSnapshot: textValue(source.pathSnapshot).trim(),
+            typeSnapshot: textValue(source.typeSnapshot).trim(),
+        });
+    }
+    return result;
 }
 
 function isDateKey(value: unknown): value is string {

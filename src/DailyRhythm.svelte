@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onDestroy } from "svelte";
     import {
         DAILY_RUBRICS,
         cloneDailyRecord,
@@ -12,16 +13,25 @@
         type DailyRecordStore,
         type DailyRubric,
         type ResultState,
+        type TriState,
     } from "./daily-records";
     import DurationSelect from "./DurationSelect.svelte";
+    import DailyWorkItemPicker from "./DailyWorkItemPicker.svelte";
     import ScoreInput from "./ScoreInput.svelte";
     import TimeSelect from "./TimeSelect.svelte";
+    import { slicesOnDate } from "./execution-slices";
+    import { buildWorkItemTree, flattenWorkItemTree } from "./tree";
+    import type { WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
 
     export let loadDaily: () => Promise<DailyRecordStore>;
     export let saveDaily: (record: DailyRecord) => Promise<DailyRecordStore>;
+    export let loadWorkItems: (() => Promise<WorkItemData>) | null = null;
+    export let saveWorkItem: ((data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData>) | null = null;
+    export let openWorkItem: (workItemId: string) => void = () => undefined;
 
     type View = "today" | "history" | "rubrics" | "timeline";
-    type Stage = "morning" | "learning" | "boundary" | "recovery" | "evening" | "all";
+    type Stage = "morning" | "learning" | "boundary" | "after-work" | "recovery" | "evening" | "all";
+    const AUTO_SAVE_DELAY_MS = 900;
 
     const dayTypes: Array<{ value: DailyDayType; label: string; guidance: string }> = [
         { value: "research-workday", label: "科研工作日", guidance: "记录完整科研工作、学习、下班边界和个人生活。" },
@@ -48,6 +58,12 @@
     let dirty = false;
     let error = "";
     let message = "";
+    let workItems: WorkItemData | null = null;
+    let workItemsLoading = false;
+    let workItemsError = "";
+    let editRevision = 0;
+    let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+    let saveTask: Promise<boolean> | null = null;
 
     $: workApplicable = isWorkMetricApplicable(draft.dayType);
     $: dayGuidance = dayTypes.find((entry) => entry.value === draft.dayType)?.guidance ?? "";
@@ -56,9 +72,15 @@
 
     Promise.resolve().then(() => void refresh());
 
+    onDestroy(() => {
+        clearAutoSaveTimer();
+        if (dirty) void saveNow();
+    });
+
     async function refresh() {
         loading = true;
         error = "";
+        void refreshWorkItems();
         try {
             applyStore(await loadDaily(), currentDate);
         } catch (caught) {
@@ -68,6 +90,26 @@
         }
     }
 
+    async function refreshWorkItems() {
+        if (!loadWorkItems) return;
+        workItemsLoading = true;
+        workItemsError = "";
+        try {
+            workItems = await loadWorkItems();
+        } catch (caught) {
+            workItemsError = `项目与事务读取失败：${caught instanceof Error ? caught.message : String(caught)}`;
+        } finally {
+            workItemsLoading = false;
+        }
+    }
+
+    function applyWorkItemChange(event: CustomEvent<{ data: WorkItemData; links: DailyRecord["fields"]["personalProjectLinks"] }>) {
+        workItems = event.detail.data;
+        draft.fields.personalProjectLinks = event.detail.links.map((link) => ({ ...link }));
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
     function applyStore(next: DailyRecordStore, date: string) {
         store = next;
         currentDate = date;
@@ -75,30 +117,49 @@
         dirty = false;
     }
 
-    function openDate(date: string) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    async function openDate(date: string): Promise<boolean> {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+        if (dirty && !(await flushAutoSave())) return false;
         currentDate = date;
         draft = cloneDailyRecord(store?.records.find((record) => record.date === date) ?? createDailyRecord(date));
         dirty = false;
         message = "";
         error = "";
+        return true;
     }
 
-    function shiftDate(days: number) {
+    async function shiftDate(days: number) {
         const date = new Date(`${currentDate}T12:00:00`);
         date.setDate(date.getDate() + days);
-        openDate(localDateKey(date));
+        await openDate(localDateKey(date));
     }
 
     function markDirty() {
         dirty = true;
+        editRevision += 1;
         message = "";
+        error = "";
+        scheduleAutoSave();
+    }
+
+    function scheduleAutoSave() {
+        clearAutoSaveTimer();
+        autoSaveTimer = setTimeout(() => {
+            autoSaveTimer = null;
+            void saveNow();
+        }, AUTO_SAVE_DELAY_MS);
+    }
+
+    function clearAutoSaveTimer() {
+        if (autoSaveTimer === null) return;
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
     }
 
     function changeDayType(dayType: string) {
         if (!dayTypes.some((entry) => entry.value === dayType)) return;
         draft.dayType = dayType as DailyDayType;
-        if (dayType === "holiday" && (stage === "learning" || stage === "boundary")) stage = "recovery";
+        if (dayType === "holiday" && (stage === "learning" || stage === "boundary" || stage === "after-work")) stage = "recovery";
         draft = { ...draft, fields: { ...draft.fields } };
         markDirty();
     }
@@ -111,28 +172,107 @@
         markDirty();
     }
 
-    function changeClosureNeed(value: string) {
-        const allowed: ClosureNeed[] = ["", "not-needed", "needed"];
-        if (!allowed.includes(value as ClosureNeed)) return;
-        draft.fields.closureNeed = value as ClosureNeed;
+    function changeTrainingCompleted(value: string) {
+        const allowed: TriState[] = ["", "yes", "no", "not-applicable"];
+        if (!allowed.includes(value as TriState)) return;
+        draft.fields.trainingCompleted = value as TriState;
+        if (value === "no" || value === "not-applicable") draft.fields.trainingPlan = "";
         draft = { ...draft, fields: { ...draft.fields } };
         markDirty();
     }
 
-    async function save() {
-        if (saving) return;
+    function changeClosureNeed(value: string) {
+        const allowed: ClosureNeed[] = ["", "not-needed", "needed"];
+        if (!allowed.includes(value as ClosureNeed)) return;
+        draft.fields.closureNeed = value as ClosureNeed;
+        if (value === "not-needed") {
+            draft.fields.closureObject = "";
+            draft.fields.closurePlannedMinutes = null;
+            draft.fields.closureNextStep = "";
+            draft.fields.closureActualMinutes = null;
+        }
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    export async function flushAutoSave(): Promise<boolean> {
+        clearAutoSaveTimer();
+        return dirty ? saveNow() : true;
+    }
+
+    function saveNow(): Promise<boolean> {
+        clearAutoSaveTimer();
+        if (saveTask) return saveTask;
+        if (!dirty) return Promise.resolve(true);
+        saveTask = saveLoop().finally(() => saveTask = null);
+        return saveTask;
+    }
+
+    async function saveLoop(): Promise<boolean> {
         saving = true;
         error = "";
         message = "";
         try {
-            const next = await saveDaily(cloneDailyRecord(draft));
-            applyStore(next, currentDate);
-            message = `${formatDate(currentDate)} 已保存并复核`;
+            while (dirty) {
+                const revision = editRevision;
+                syncPersonalProjectLinks();
+                const snapshot = cloneDailyRecord(draft);
+                const next = await saveDaily(snapshot);
+                store = next;
+                if (revision === editRevision) {
+                    dirty = false;
+                    message = `${formatDate(snapshot.date)} 已自动保存并复核`;
+                }
+            }
+            return true;
         } catch (caught) {
             error = caught instanceof Error ? caught.message : String(caught);
+            return false;
         } finally {
             saving = false;
         }
+    }
+
+    function syncPersonalProjectLinks() {
+        if (!workItems) return;
+        const tree = buildWorkItemTree(workItems.items);
+        draft.fields.personalProjectLinks = flattenWorkItemTree(tree)
+            .filter((item) => slicesOnDate(item, draft.date).length > 0)
+            .map((item) => ({
+                workItemId: item.id,
+                titleSnapshot: item.title,
+                pathSnapshot: workItemPath(item, tree.byId),
+                typeSnapshot: item.type,
+            }));
+        draft = { ...draft, fields: { ...draft.fields } };
+    }
+
+    function workItemPath(item: WorkItem, byId: Map<string, WorkItem>): string {
+        const titles: string[] = [];
+        const seen = new Set<string>([item.id]);
+        let parentId = item.parentIds[0];
+        while (parentId && !seen.has(parentId)) {
+            seen.add(parentId);
+            const parent = byId.get(parentId);
+            if (!parent) break;
+            if (parent.type !== "长期领域") titles.unshift(parent.title);
+            parentId = parent.parentIds[0];
+        }
+        return titles.join(" / ");
+    }
+
+    async function changeView(next: View) {
+        if (dirty && !(await flushAutoSave())) return;
+        view = next;
+    }
+
+    async function changeStage(next: Stage) {
+        if (dirty && !(await flushAutoSave())) return;
+        stage = next;
+    }
+
+    async function openHistoryRecord(date: string) {
+        if (await openDate(date)) view = "today";
     }
 
     function inspectRubric(event: CustomEvent<DailyRubric>) {
@@ -185,16 +325,16 @@
 <section class="xz-daily-module" on:input={markDirty} on:change={markDirty}>
     <div class="xz-daily-toolbar">
         <div class="xz-daily-date-nav">
-            <button type="button" aria-label="前一天" on:click={() => shiftDate(-1)}>‹</button>
-            <input type="date" aria-label="记录日期" value={currentDate} on:change|stopPropagation={(event) => openDate(event.currentTarget.value)} />
-            <button type="button" aria-label="后一天" on:click={() => shiftDate(1)}>›</button>
-            <button type="button" on:click={() => openDate(localDateKey())}>今天</button>
+            <button type="button" aria-label="前一天" on:click={() => void shiftDate(-1)}>‹</button>
+            <input type="date" aria-label="记录日期" value={currentDate} on:change|stopPropagation={(event) => void openDate(event.currentTarget.value)} />
+            <button type="button" aria-label="后一天" on:click={() => void shiftDate(1)}>›</button>
+            <button type="button" on:click={() => void openDate(localDateKey())}>今天</button>
         </div>
         <nav class="xz-daily-view-nav" aria-label="生活节律视图">
-            <button class:active={view === "today"} type="button" on:click={() => view = "today"}>今日记录</button>
-            <button class:active={view === "history"} type="button" on:click={() => view = "history"}>历史数据</button>
-            <button class:active={view === "rubrics"} type="button" on:click={() => view = "rubrics"}>评分标准</button>
-            <button class:active={view === "timeline"} type="button" on:click={() => view = "timeline"}>时间线</button>
+            <button class:active={view === "today"} type="button" on:click={() => void changeView("today")}>今日记录</button>
+            <button class:active={view === "history"} type="button" on:click={() => void changeView("history")}>历史数据</button>
+            <button class:active={view === "rubrics"} type="button" on:click={() => void changeView("rubrics")}>评分标准</button>
+            <button class:active={view === "timeline"} type="button" on:click={() => void changeView("timeline")}>时间线</button>
         </nav>
     </div>
 
@@ -209,14 +349,15 @@
         </div>
 
         <div class="xz-daily-progress" class:holiday={!workApplicable}>
-            <div><i>1</i><span><strong>早晨记录</strong><small>睡眠、身体与安排</small></span></div>
+            <div><i>1</i><span><strong>早晨记录</strong><small>睡眠、身体与科研安排</small></span></div>
             {#if workApplicable}
                 <div><i>2</i><span><strong>午饭后学习</strong><small>材料、主题与停点</small></span></div>
                 <div class:late={boundary?.late}><i>{boundary ? boundary.late ? "×" : "✓" : "3"}</i><span><strong>工作边界</strong><small>{boundary?.label ?? "等待下班记录"}</small></span></div>
+                <div><i>4</i><span><strong>下班后</strong><small>工作闭环与个人事务</small></span></div>
             {:else}
                 <div><i>2</i><span><strong>恢复与生活</strong><small>科研字段不适用</small></span></div>
             {/if}
-            <div><i>{workApplicable ? "4" : "3"}</i><span><strong>21:00 复盘</strong><small>生活结果与明日承接</small></span></div>
+            <div><i>{workApplicable ? "5" : "3"}</i><span><strong>21:00 复盘</strong><small>生活结果与明日承接</small></span></div>
         </div>
 
         <div class="xz-daily-layout">
@@ -224,10 +365,10 @@
                 <header class="xz-daily-record-header">
                     <div><h2>{formatDate(currentDate)}</h2><p>{dayTypeLabel(draft.dayType)} · {store?.records.some((record) => record.date === currentDate) ? "已有记录" : "尚未保存"}</p></div>
                     <nav class="xz-daily-stage-nav" aria-label="填写阶段">
-                        <button class:active={stage === "morning"} type="button" on:click={() => stage = "morning"}>早晨</button>
-                        {#if workApplicable}<button class:active={stage === "learning"} type="button" on:click={() => stage = "learning"}>午饭后</button><button class:active={stage === "boundary"} type="button" on:click={() => stage = "boundary"}>下班</button>{:else}<button class:active={stage === "recovery"} type="button" on:click={() => stage = "recovery"}>恢复</button>{/if}
-                        <button class:active={stage === "evening"} type="button" on:click={() => stage = "evening"}>21:00</button>
-                        <button class:active={stage === "all"} type="button" on:click={() => stage = "all"}>全部</button>
+                        <button class:active={stage === "morning"} type="button" on:click={() => void changeStage("morning")}>早晨</button>
+                        {#if workApplicable}<button class:active={stage === "learning"} type="button" on:click={() => void changeStage("learning")}>午饭后</button><button class:active={stage === "boundary"} type="button" on:click={() => void changeStage("boundary")}>下班</button><button class:active={stage === "after-work"} type="button" on:click={() => void changeStage("after-work")}>下班后</button>{:else}<button class:active={stage === "recovery"} type="button" on:click={() => void changeStage("recovery")}>恢复</button>{/if}
+                        <button class:active={stage === "evening"} type="button" on:click={() => void changeStage("evening")}>21:00</button>
+                        <button class:active={stage === "all"} type="button" on:click={() => void changeStage("all")}>全部</button>
                     </nav>
                 </header>
 
@@ -254,8 +395,8 @@
                                 <label><span>今天如何休息／个人生活重点</span><textarea bind:value={draft.fields.restAndLifePlan} placeholder="例如：散步、做饭、陪伴家人、完全离开科研"></textarea></label>
                             {/if}
                             <label><span>今日节奏与临时调整</span><textarea bind:value={draft.fields.dayAdjustments}></textarea></label>
-                            <label><span>今天的训练内容</span><textarea bind:value={draft.fields.trainingPlan}></textarea></label>
-                            <label><span>今天的个人项目</span><textarea bind:value={draft.fields.personalProjectPlan}></textarea></label>
+                            <label class:xz-daily-result-select={draft.fields.trainingCompleted === "yes"}><span>完成训练</span><select value={draft.fields.trainingCompleted} on:change|stopPropagation={(event) => changeTrainingCompleted(event.currentTarget.value)}><option value="">尚未填写</option><option value="yes">✓ 已完成</option><option value="no">× 未完成</option><option value="not-applicable">— 休息日</option></select></label>
+                            {#if draft.fields.trainingCompleted === "yes"}<label><span>今天的训练内容</span><textarea bind:value={draft.fields.trainingPlan}></textarea></label>{/if}
                         </div>
                     </section>
                 {/if}
@@ -284,18 +425,19 @@
                     <section class="xz-daily-form-section">
                         <h3>结果与状态评分</h3>
                         <div class="xz-daily-fields two">
-                            <label><span>关键工作结果</span><select value={draft.fields.keyWorkResult} on:change|stopPropagation={(event) => changeKeyWorkResult(event.currentTarget.value)}><option value="">尚未填写</option><option value="met">✓ 达标</option><option value="exceeded">★ 超预期</option><option value="missed">× 未达标</option></select></label>
-                            <label><span>完成训练</span><select bind:value={draft.fields.trainingCompleted}><option value="">尚未填写</option><option value="yes">✓ 已完成</option><option value="no">× 未完成</option><option value="not-applicable">— 休息日</option></select></label>
+                            <label class="xz-daily-result-select"><span>关键工作结果</span><select value={draft.fields.keyWorkResult} on:change|stopPropagation={(event) => changeKeyWorkResult(event.currentTarget.value)}><option value="">尚未填写</option><option value="met">✓ 达标</option><option value="exceeded">★ 超预期</option><option value="missed">× 未达标</option></select></label>
                             <label><span>今天最重要的工作结果</span><textarea bind:value={draft.fields.importantWorkResult}></textarea></label>
-                            <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
                             <ScoreInput bind:value={draft.fields.daytimeEnergy} rubric={rubricById.daytimeEnergy} on:inspect={inspectRubric} on:change={markDirty} />
                             <ScoreInput bind:value={draft.fields.workEfficiency} rubric={rubricById.workEfficiency} on:inspect={inspectRubric} on:change={markDirty} />
                             <ScoreInput bind:value={draft.fields.promotingStress} rubric={rubricById.promotingStress} on:inspect={inspectRubric} on:change={markDirty} />
                             <ScoreInput bind:value={draft.fields.depletingStress} rubric={rubricById.depletingStress} on:inspect={inspectRubric} on:change={markDirty} />
                         </div>
                     </section>
+                {/if}
+
+                {#if workApplicable && (stage === "after-work" || stage === "all")}
                     <section class="xz-daily-form-section">
-                        <h3>下班后工作闭环入口（按需）</h3>
+                        <h3>下班后工作闭环（按需）</h3>
                         <div class="xz-daily-fields two">
                             <label class="xz-daily-closure-choice">
                                 <span>本次是否需要工作闭环</span>
@@ -319,14 +461,43 @@
                             <p class="xz-daily-closure-note">确认是否需要闭环后再填写；“尚未确认”表示还没有完成判断。</p>
                         {/if}
                     </section>
+                    <section class="xz-daily-form-section">
+                        <h3>下班后个人安排</h3>
+                        <div class="xz-daily-fields two">
+                            <div class="xz-daily-personal-project-row">
+                                <DailyWorkItemPicker
+                                    data={workItems}
+                                    date={currentDate}
+                                    loading={workItemsLoading}
+                                    error={workItemsError}
+                                    {saveWorkItem}
+                                    {openWorkItem}
+                                    on:change={applyWorkItemChange}
+                                />
+                                <label class="xz-daily-project-note"><span>今晚个人事务补充说明（可选）</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder="可补充今晚准备如何推进这些个人事务"></textarea></label>
+                            </div>
+                            <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
+                        </div>
+                    </section>
                 {/if}
 
                 {#if !workApplicable && (stage === "recovery" || stage === "all")}
                     <section class="xz-daily-form-section">
                         <h3>恢复与生活</h3>
                         <div class="xz-daily-fields two">
+                            <div class="xz-daily-personal-project-row">
+                                <DailyWorkItemPicker
+                                    data={workItems}
+                                    date={currentDate}
+                                    loading={workItemsLoading}
+                                    error={workItemsError}
+                                    {saveWorkItem}
+                                    {openWorkItem}
+                                    on:change={applyWorkItemChange}
+                                />
+                                <label class="xz-daily-project-note"><span>今日个人事务补充说明（可选）</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder="可补充今天准备如何推进这些个人事务"></textarea></label>
+                            </div>
                             <ScoreInput bind:value={draft.fields.daytimeEnergy} rubric={rubricById.daytimeEnergy} on:inspect={inspectRubric} on:change={markDirty} />
-                            <label><span>完成训练</span><select bind:value={draft.fields.trainingCompleted}><option value="">尚未填写</option><option value="yes">✓ 已完成</option><option value="no">× 未完成</option><option value="not-applicable">— 休息日</option></select></label>
                             <label><span>今天的个人生活或兴趣项目结果</span><textarea bind:value={draft.fields.personalLifeResult}></textarea></label>
                             <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
                         </div>
@@ -354,8 +525,14 @@
                 {/if}
 
                 <footer class="xz-daily-save-bar">
-                    <div>{#if error}<span class="error" role="alert">{error}</span>{:else if message}<span class="success" role="status">{message}</span>{:else if dirty}<span>有尚未保存的修改</span>{/if}</div>
-                    <button class="b3-button" type="button" disabled={saving} on:click={() => void save()}>{saving ? "正在保存并复核…" : "保存今日记录"}</button>
+                    <div>
+                        {#if error}<span class="error" role="alert">自动保存失败：{error}</span>
+                        {:else if saving}<span role="status">正在自动保存并复核…</span>
+                        {:else if dirty}<span role="status">等待自动保存…</span>
+                        {:else if message}<span class="success" role="status">{message}</span>
+                        {:else}<span role="status">填写后将自动保存</span>{/if}
+                    </div>
+                    {#if error}<button class="b3-button" type="button" disabled={saving} on:click={() => void saveNow()}>重试保存</button>{/if}
                 </footer>
             </article>
 
@@ -368,7 +545,7 @@
     {:else if view === "history"}
         <section class="xz-daily-list-view">
             <header><div><span class="xz-section-kicker">插件内部数据库</span><h2>历史数据</h2></div><span>{store?.records.length ?? 0} 天</span></header>
-            {#if !store?.records.length}<div class="xz-daily-empty"><h3>还没有每日记录</h3><p>从 9 月 3 日开始手动录入即可；这里不会迁移旧文档数据。</p></div>{:else}{#each [...store.records].reverse() as record (record.date)}<button class="xz-daily-history-row" type="button" on:click={() => { openDate(record.date); view = "today"; }}><strong>{record.date}</strong><span>{dayTypeLabel(record.dayType)}</span><span>睡眠 {record.fields.sleepDurationMinutes === null ? "—" : `${Math.floor(record.fields.sleepDurationMinutes / 60)} 小时 ${record.fields.sleepDurationMinutes % 60} 分`}</span><span>精力 {record.fields.daytimeEnergy ?? "—"}</span><span>{statusFor(record)}</span></button>{/each}{/if}
+            {#if !store?.records.length}<div class="xz-daily-empty"><h3>还没有每日记录</h3><p>从 9 月 3 日开始手动录入即可；这里不会迁移旧文档数据。</p></div>{:else}{#each [...store.records].reverse() as record (record.date)}<button class="xz-daily-history-row" type="button" on:click={() => void openHistoryRecord(record.date)}><strong>{record.date}</strong><span>{dayTypeLabel(record.dayType)}</span><span>睡眠 {record.fields.sleepDurationMinutes === null ? "—" : `${Math.floor(record.fields.sleepDurationMinutes / 60)} 小时 ${record.fields.sleepDurationMinutes % 60} 分`}</span><span>精力 {record.fields.daytimeEnergy ?? "—"}</span><span>{statusFor(record)}</span></button>{/each}{/if}
         </section>
     {:else if view === "rubrics"}
         <section class="xz-daily-list-view">
