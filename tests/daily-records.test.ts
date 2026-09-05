@@ -87,9 +87,76 @@ describe("生活节律内部数据库", () => {
     it("旧记录已有闭环内容时自动识别为需要闭环", () => {
         const record = createDailyRecord("2026-09-03", "research-workday", 1000);
         record.fields.closureObject = "论文图表";
+        record.fields.closureNextStep = "明天整理图注";
 
         const saved = upsertDailyRecord(createEmptyDailyStore(900), record, 1100).records[0];
         expect(saved.fields.closureNeed).toBe("needed");
+        expect(saved.fields.closureHasNextStep).toBe("yes");
+        expect(saved.fields.closureNextStep).toBe("明天整理图注");
+    });
+
+    it("旧记录会从文字推断下班后工作和异常观察的判断状态", () => {
+        const record = createDailyRecord("2026-09-04", "research-workday", 1000);
+        record.fields.afterHoursWorkReason = "没有";
+        record.fields.anomalyOrObservation = "午后出现短暂头痛";
+
+        const saved = upsertDailyRecord(createEmptyDailyStore(900), record, 1100).records[0];
+        expect(saved.fields).toMatchObject({
+            afterHoursWorkOccurred: "no",
+            afterHoursWorkReason: "",
+            hasAnomalyOrObservation: "yes",
+            anomalyOrObservation: "午后出现短暂头痛",
+        });
+    });
+
+    it("明确选择没有时清除条件说明，选择有时保留说明", () => {
+        const record = createDailyRecord("2026-09-04", "research-workday", 1000);
+        record.fields.afterHoursWorkOccurred = "no";
+        record.fields.afterHoursWorkReason = "此前的原因";
+        record.fields.hasAnomalyOrObservation = "yes";
+        record.fields.anomalyOrObservation = "需要保留的观察";
+
+        const saved = upsertDailyRecord(createEmptyDailyStore(900), record, 1100).records[0];
+        expect(saved.fields.afterHoursWorkReason).toBe("");
+        expect(saved.fields.anomalyOrObservation).toBe("需要保留的观察");
+    });
+
+    it("计划熄灯可明确落在次日，自由安排会清空计划而不影响实际睡眠记录", () => {
+        const planned = createDailyRecord("2026-09-04", "research-workday", 1000);
+        planned.fields.bedtimePreparation = "yes";
+        planned.fields.plannedLightsOffDay = "next-day";
+        planned.fields.plannedLightsOffTime = "00:45";
+        expect(resolveSleepDateTimes(planned).fields.plannedLightsOffAt).toBe("2026-09-05T00:45");
+
+        planned.fields.bedtimePreparation = "free";
+        planned.fields.lightsOffTime = "00:30";
+        planned.fields.wakeTime = "08:30";
+        const free = upsertDailyRecord(createEmptyDailyStore(900), planned, 1100).records[0];
+        expect(free.fields).toMatchObject({
+            plannedLightsOffDay: "",
+            plannedLightsOffTime: "",
+            plannedLightsOffAt: "",
+            lightsOffAt: "2026-09-04T00:30",
+            wakeAt: "2026-09-04T08:30",
+        });
+    });
+
+    it("旧的计划熄灯时间会按夜间语义补上日期范围", () => {
+        const sameDay = createDailyRecord("2026-09-04", "research-workday", 1000);
+        sameDay.fields.bedtimePreparation = "yes";
+        sameDay.fields.plannedLightsOffTime = "23:30";
+        const afterMidnight = createDailyRecord("2026-09-04", "research-workday", 1000);
+        afterMidnight.fields.bedtimePreparation = "yes";
+        afterMidnight.fields.plannedLightsOffTime = "00:30";
+
+        expect(upsertDailyRecord(createEmptyDailyStore(900), sameDay, 1100).records[0].fields).toMatchObject({
+            plannedLightsOffDay: "same-day",
+            plannedLightsOffAt: "2026-09-04T23:30",
+        });
+        expect(upsertDailyRecord(createEmptyDailyStore(900), afterMidnight, 1100).records[0].fields).toMatchObject({
+            plannedLightsOffDay: "next-day",
+            plannedLightsOffAt: "2026-09-05T00:30",
+        });
     });
 
     it("保存个人项目稳定引用与历史快照，并在克隆时隔离数组", () => {

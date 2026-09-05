@@ -226,6 +226,126 @@ describe("行舟一级模块外壳", () => {
         expect(store.records[0].fields.closurePlannedMinutes).toBeNull();
     });
 
+    it("工作闭环先确认是否有下一步，有时才显示下一步输入框", async () => {
+        let store = createEmptyDailyStore(1000);
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
+        clickButton("下班后");
+        await tick();
+
+        const closureNeed = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("本次是否需要工作闭环"))
+            ?.querySelector("select") as HTMLSelectElement | undefined;
+        if (!closureNeed) throw new Error("没有找到工作闭环选择框");
+        closureNeed.value = "needed";
+        closureNeed.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+
+        const hasNextStep = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("是否有下一步安排"))
+            ?.querySelector("select") as HTMLSelectElement | undefined;
+        if (!hasNextStep) throw new Error("没有找到下一步判断选择框");
+        expect(document.body.textContent).not.toContain("下一步内容");
+
+        hasNextStep.value = "yes";
+        hasNextStep.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        const nextStep = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("下一步内容"))
+            ?.querySelector("textarea") as HTMLTextAreaElement | undefined;
+        if (!nextStep) throw new Error("选择有后没有显示下一步输入框");
+        nextStep.value = "明天整理图注";
+        nextStep.dispatchEvent(new Event("input", { bubbles: true }));
+
+        hasNextStep.value = "no";
+        hasNextStep.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.body.textContent).not.toContain("下一步内容");
+        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalledOnce(), { timeout: 2000 });
+        expect(saveDaily.mock.calls[0][0].fields).toMatchObject({ closureHasNextStep: "no", closureNextStep: "" });
+    });
+
+    it("先判断下班后工作和异常观察，再按需显示说明字段", async () => {
+        let store = createEmptyDailyStore(1000);
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
+        clickButton("21:00");
+        await tick();
+
+        const afterHours = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("下班后是否处理了工作"))
+            ?.querySelector("select") as HTMLSelectElement | undefined;
+        const anomaly = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("是否有其他异常或观察需要记录"))
+            ?.querySelector("select") as HTMLSelectElement | undefined;
+        if (!afterHours || !anomaly) throw new Error("没有找到条件判断选择框");
+        expect(document.body.textContent).not.toContain("处理工作的原因");
+        expect(document.body.textContent).not.toContain("异常或观察内容");
+
+        afterHours.value = "yes";
+        afterHours.dispatchEvent(new Event("change", { bubbles: true }));
+        anomaly.value = "no";
+        anomaly.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        const reason = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("处理工作的原因"))
+            ?.querySelector("textarea") as HTMLTextAreaElement | undefined;
+        if (!reason) throw new Error("选择是后没有显示原因输入框");
+        expect(document.body.textContent).not.toContain("异常或观察内容");
+        reason.value = "服务器任务需要在晚间确认";
+        reason.dispatchEvent(new Event("input", { bubbles: true }));
+
+        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalledOnce(), { timeout: 2000 });
+        expect(saveDaily.mock.calls[0][0].fields).toMatchObject({
+            afterHoursWorkOccurred: "yes",
+            afterHoursWorkReason: "服务器任务需要在晚间确认",
+            hasAnomalyOrObservation: "no",
+            anomalyOrObservation: "",
+        });
+    });
+
+    it("睡前可选择自由安排，也可明确设置次日熄灯计划", async () => {
+        let store = createEmptyDailyStore(1000);
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
+        clickButton("21:00");
+        await tick();
+
+        const bedtime = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("今晚的睡前安排"))
+            ?.querySelector("select") as HTMLSelectElement | undefined;
+        if (!bedtime) throw new Error("没有找到睡前安排选择框");
+        bedtime.value = "free";
+        bedtime.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.body.textContent).toContain("今晚自由安排");
+        expect(document.querySelector('[aria-label="计划熄灯时间小时"]')).toBeNull();
+
+        bedtime.value = "yes";
+        bedtime.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        const day = document.querySelector('[aria-label="计划熄灯日期"]') as HTMLSelectElement | null;
+        if (!day) throw new Error("没有找到计划熄灯日期选择框");
+        day.value = "next-day";
+        day.dispatchEvent(new Event("change", { bubbles: true }));
+        choose("计划熄灯时间小时", "00");
+        choose("计划熄灯时间分钟", "45");
+
+        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalledOnce(), { timeout: 2000 });
+        expect(saveDaily.mock.calls[0][0].fields).toMatchObject({
+            bedtimePreparation: "yes",
+            plannedLightsOffDay: "next-day",
+            plannedLightsOffTime: "00:45",
+        });
+        expect(store.records[0].fields.plannedLightsOffAt.slice(11)).toBe("00:45");
+    });
+
     it("连续输入会合并为一次自动保存", async () => {
         let store = createEmptyDailyStore(1000);
         const loadDaily = vi.fn().mockResolvedValue(store);

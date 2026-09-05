@@ -5,6 +5,9 @@ export const DAILY_PROFILE_VERSION = 1;
 export type DailyDayType = "research-workday" | "saturday-reset" | "sunday-half-day" | "holiday";
 export type WeightUnit = "kg" | "lb";
 export type TriState = "yes" | "no" | "not-applicable" | "";
+export type PresenceState = "yes" | "no" | "";
+export type BedtimePreparation = "yes" | "no" | "free" | "";
+export type PlannedLightsOffDay = "same-day" | "next-day" | "";
 export type ResultState = "met" | "exceeded" | "missed" | "not-applicable" | "";
 export type ClosureNeed = "needed" | "not-needed" | "";
 
@@ -49,16 +52,21 @@ export type DailyRecordFields = {
     closureNeed: ClosureNeed;
     closureObject: string;
     closurePlannedMinutes: number | null;
+    closureHasNextStep: PresenceState;
     closureNextStep: string;
     closureActualMinutes: number | null;
     personalLifeResult: string;
     bestThing: string;
     obstacleOrCost: string;
+    afterHoursWorkOccurred: PresenceState;
     afterHoursWorkReason: string;
     tomorrowFirstAction: string;
+    hasAnomalyOrObservation: PresenceState;
     anomalyOrObservation: string;
-    bedtimePreparation: TriState;
+    bedtimePreparation: BedtimePreparation;
+    plannedLightsOffDay: PlannedLightsOffDay;
     plannedLightsOffTime: string;
+    plannedLightsOffAt: string;
 };
 
 export type DailyRecord = {
@@ -208,6 +216,7 @@ export function resolveSleepDateTimes(record: DailyRecord): DailyRecord {
     next.fields.wakeAt = validTime(wakeTime) ? `${next.date}T${wakeTime}` : "";
     if (!validTime(lightsOffTime)) {
         next.fields.lightsOffAt = "";
+        resolvePlannedLightsOff(next);
         return next;
     }
     const lightsOffMinutes = clockMinutes(lightsOffTime);
@@ -215,7 +224,27 @@ export function resolveSleepDateTimes(record: DailyRecord): DailyRecord {
     const belongsToPreviousDay = wakeMinutes === null ? lightsOffMinutes >= 12 * 60 : lightsOffMinutes > wakeMinutes;
     const date = belongsToPreviousDay ? shiftDateKey(next.date, -1) : next.date;
     next.fields.lightsOffAt = `${date}T${lightsOffTime}`;
+    resolvePlannedLightsOff(next);
     return next;
+}
+
+function resolvePlannedLightsOff(record: DailyRecord): void {
+    const fields = record.fields;
+    if (fields.bedtimePreparation === "free") {
+        fields.plannedLightsOffDay = "";
+        fields.plannedLightsOffTime = "";
+        fields.plannedLightsOffAt = "";
+        return;
+    }
+    if (!validTime(fields.plannedLightsOffTime)) {
+        fields.plannedLightsOffAt = "";
+        return;
+    }
+    if (!fields.plannedLightsOffDay) {
+        fields.plannedLightsOffDay = clockMinutes(fields.plannedLightsOffTime) < 12 * 60 ? "next-day" : "same-day";
+    }
+    const date = fields.plannedLightsOffDay === "next-day" ? shiftDateKey(record.date, 1) : record.date;
+    fields.plannedLightsOffAt = `${date}T${fields.plannedLightsOffTime}`;
 }
 
 function emptyDailyFields(): DailyRecordFields {
@@ -227,9 +256,10 @@ function emptyDailyFields(): DailyRecordFields {
         studyResult: "", actualWorkEndTime: "", keyWorkResult: "", trainingCompleted: "",
         importantWorkResult: "", personalProjectDurationMinutes: null, daytimeEnergy: null,
         workEfficiency: null, promotingStress: null, depletingStress: null, closureNeed: "", closureObject: "",
-        closurePlannedMinutes: null, closureNextStep: "", closureActualMinutes: null,
-        personalLifeResult: "", bestThing: "", obstacleOrCost: "", afterHoursWorkReason: "",
-        tomorrowFirstAction: "", anomalyOrObservation: "", bedtimePreparation: "", plannedLightsOffTime: "",
+        closurePlannedMinutes: null, closureHasNextStep: "", closureNextStep: "", closureActualMinutes: null,
+        personalLifeResult: "", bestThing: "", obstacleOrCost: "", afterHoursWorkOccurred: "", afterHoursWorkReason: "",
+        tomorrowFirstAction: "", hasAnomalyOrObservation: "", anomalyOrObservation: "", bedtimePreparation: "",
+        plannedLightsOffDay: "", plannedLightsOffTime: "", plannedLightsOffAt: "",
     };
 }
 
@@ -240,6 +270,9 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
     const createdAt = finiteNumber(source.createdAt) ?? Date.now();
     const fields = source.fields as Partial<DailyRecordFields>;
     const normalizedClosureNeed = closureNeed(fields);
+    const normalizedClosureHasNextStep = presenceState(fields.closureHasNextStep, fields.closureNextStep);
+    const normalizedAfterHoursWork = presenceState(fields.afterHoursWorkOccurred, fields.afterHoursWorkReason);
+    const normalizedAnomaly = presenceState(fields.hasAnomalyOrObservation, fields.anomalyOrObservation);
     return resolveSleepDateTimes({
         date: source.date,
         dayType: source.dayType,
@@ -265,9 +298,15 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             closureNeed: normalizedClosureNeed,
             closureObject: normalizedClosureNeed === "not-needed" ? "" : textValue(fields.closureObject),
             closurePlannedMinutes: normalizedClosureNeed === "not-needed" ? null : nullableNonnegativeNumber(fields.closurePlannedMinutes),
-            closureNextStep: normalizedClosureNeed === "not-needed" ? "" : textValue(fields.closureNextStep),
+            closureHasNextStep: normalizedClosureNeed === "not-needed" ? "" : normalizedClosureHasNextStep,
+            closureNextStep: normalizedClosureNeed === "needed" && normalizedClosureHasNextStep === "yes" ? textValue(fields.closureNextStep) : "",
             closureActualMinutes: normalizedClosureNeed === "not-needed" ? null : nullableNonnegativeNumber(fields.closureActualMinutes),
-            bedtimePreparation: triState(fields.bedtimePreparation),
+            afterHoursWorkOccurred: normalizedAfterHoursWork,
+            afterHoursWorkReason: normalizedAfterHoursWork === "yes" ? textValue(fields.afterHoursWorkReason) : "",
+            hasAnomalyOrObservation: normalizedAnomaly,
+            anomalyOrObservation: normalizedAnomaly === "yes" ? textValue(fields.anomalyOrObservation) : "",
+            bedtimePreparation: bedtimePreparation(fields.bedtimePreparation),
+            plannedLightsOffDay: plannedLightsOffDay(fields.plannedLightsOffDay, fields.plannedLightsOffTime),
         },
     });
 }
@@ -277,7 +316,7 @@ function stringFields(fields: Partial<DailyRecordFields>): Partial<DailyRecordFi
         "lightsOffTime", "wakeTime", "lightsOffAt", "wakeAt", "workStartTime", "plannedWorkEndTime", "importantWorkPlan", "dayAdjustments",
         "trainingPlan", "personalProjectPlan", "restAndLifePlan", "studyMaterial", "studyTopic", "studyPlan", "studyResult",
         "actualWorkEndTime", "importantWorkResult", "closureObject", "closureNextStep", "personalLifeResult", "bestThing",
-        "obstacleOrCost", "afterHoursWorkReason", "tomorrowFirstAction", "anomalyOrObservation", "plannedLightsOffTime",
+        "obstacleOrCost", "afterHoursWorkReason", "tomorrowFirstAction", "anomalyOrObservation", "plannedLightsOffTime", "plannedLightsOffAt",
     ];
     return Object.fromEntries(keys.map((key) => [key, typeof fields[key] === "string" ? fields[key] : ""])) as Partial<DailyRecordFields>;
 }
@@ -317,6 +356,23 @@ function isDayType(value: unknown): value is DailyDayType {
 
 function triState(value: unknown): TriState {
     return value === "yes" || value === "no" || value === "not-applicable" ? value : "";
+}
+
+function bedtimePreparation(value: unknown): BedtimePreparation {
+    return value === "yes" || value === "no" || value === "free" ? value : "";
+}
+
+function plannedLightsOffDay(value: unknown, time: unknown): PlannedLightsOffDay {
+    if (value === "same-day" || value === "next-day") return value;
+    if (typeof time !== "string" || !validTime(time)) return "";
+    return clockMinutes(time) < 12 * 60 ? "next-day" : "same-day";
+}
+
+function presenceState(value: unknown, legacyText: unknown): PresenceState {
+    if (value === "yes" || value === "no") return value;
+    const text = textValue(legacyText).trim();
+    if (!text) return "";
+    return /^(无|没有|否|none)[。.!！]?$/i.test(text) ? "no" : "yes";
 }
 
 function resultState(value: unknown): ResultState {

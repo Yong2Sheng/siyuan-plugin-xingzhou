@@ -7,11 +7,14 @@
         defaultDayType,
         isWorkMetricApplicable,
         resolveSleepDateTimes,
+        type BedtimePreparation,
         type ClosureNeed,
         type DailyDayType,
         type DailyRecord,
         type DailyRecordStore,
         type DailyRubric,
+        type PlannedLightsOffDay,
+        type PresenceState,
         type ResultState,
         type TriState,
     } from "./daily-records";
@@ -188,9 +191,60 @@
         if (value === "not-needed") {
             draft.fields.closureObject = "";
             draft.fields.closurePlannedMinutes = null;
+            draft.fields.closureHasNextStep = "";
             draft.fields.closureNextStep = "";
             draft.fields.closureActualMinutes = null;
         }
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    function changeClosureHasNextStep(value: string) {
+        const allowed: PresenceState[] = ["", "yes", "no"];
+        if (!allowed.includes(value as PresenceState)) return;
+        draft.fields.closureHasNextStep = value as PresenceState;
+        if (value === "no") draft.fields.closureNextStep = "";
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    function changeAfterHoursWorkOccurred(value: string) {
+        const allowed: PresenceState[] = ["", "yes", "no"];
+        if (!allowed.includes(value as PresenceState)) return;
+        draft.fields.afterHoursWorkOccurred = value as PresenceState;
+        if (value === "no") draft.fields.afterHoursWorkReason = "";
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    function changeHasAnomalyOrObservation(value: string) {
+        const allowed: PresenceState[] = ["", "yes", "no"];
+        if (!allowed.includes(value as PresenceState)) return;
+        draft.fields.hasAnomalyOrObservation = value as PresenceState;
+        if (value === "no") draft.fields.anomalyOrObservation = "";
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    function changeBedtimePreparation(value: string) {
+        const allowed: BedtimePreparation[] = ["", "yes", "no", "free"];
+        if (!allowed.includes(value as BedtimePreparation)) return;
+        draft.fields.bedtimePreparation = value as BedtimePreparation;
+        if (value === "free") {
+            draft.fields.plannedLightsOffDay = "";
+            draft.fields.plannedLightsOffTime = "";
+            draft.fields.plannedLightsOffAt = "";
+        } else if (value && !draft.fields.plannedLightsOffDay) {
+            draft.fields.plannedLightsOffDay = "same-day";
+        }
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    function changePlannedLightsOffDay(value: string) {
+        const allowed: PlannedLightsOffDay[] = ["", "same-day", "next-day"];
+        if (!allowed.includes(value as PlannedLightsOffDay)) return;
+        draft.fields.plannedLightsOffDay = value as PlannedLightsOffDay;
         draft = { ...draft, fields: { ...draft.fields } };
         markDirty();
     }
@@ -308,6 +362,12 @@
         if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return "";
         const date = new Date(`${value.slice(0, 10)}T12:00:00`);
         return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+    }
+
+    function shortDateWithOffset(date: string, days: number): string {
+        const parsed = new Date(`${date}T12:00:00`);
+        parsed.setDate(parsed.getDate() + days);
+        return `${parsed.getMonth() + 1} 月 ${parsed.getDate()} 日`;
     }
 
     function calculateBoundary(planned: string, actual: string): { late: boolean; difference: number; label: string } | null {
@@ -452,8 +512,13 @@
                             <div class="xz-daily-fields two xz-daily-closure-details">
                                 <label><span>对象／材料</span><textarea bind:value={draft.fields.closureObject} placeholder="只记录待整理入口，不在这里展开执行"></textarea></label>
                                 <div class="xz-daily-field"><span>预计时间</span><DurationSelect bind:value={draft.fields.closurePlannedMinutes} maxHours={4} ariaLabel="工作闭环预计时间" /></div>
-                                <label><span>是否有下一步安排</span><textarea bind:value={draft.fields.closureNextStep} placeholder="写清下一步，不开始下一步"></textarea></label>
-                                <div class="xz-daily-field"><span>实际闭环时长</span><DurationSelect bind:value={draft.fields.closureActualMinutes} maxHours={4} ariaLabel="工作闭环实际时长" /></div>
+                                <div class="xz-daily-closure-bottom">
+                                    <div class="xz-daily-decision-column">
+                                        <label><span>是否有下一步安排</span><select value={draft.fields.closureHasNextStep} on:change|stopPropagation={(event) => changeClosureHasNextStep(event.currentTarget.value)}><option value="">尚未确认</option><option value="no">没有</option><option value="yes">有</option></select></label>
+                                        {#if draft.fields.closureHasNextStep === "yes"}<label><span>下一步内容</span><textarea bind:value={draft.fields.closureNextStep} placeholder="写清下一步，不开始下一步"></textarea></label>{/if}
+                                    </div>
+                                    <div class="xz-daily-field"><span>实际闭环时长</span><DurationSelect bind:value={draft.fields.closureActualMinutes} maxHours={4} ariaLabel="工作闭环实际时长" /></div>
+                                </div>
                             </div>
                         {:else if draft.fields.closureNeed === "not-needed"}
                             <p class="xz-daily-closure-note">今天不需要下班后工作闭环；相关时间按“不适用”保存，不计为 0 分钟。</p>
@@ -511,15 +576,39 @@
                             {#if workApplicable}<label><span>今天的个人生活或兴趣项目结果</span><textarea bind:value={draft.fields.personalLifeResult}></textarea></label>{/if}
                             <label><span>今天做得最好的一件事</span><textarea bind:value={draft.fields.bestThing}></textarea></label>
                             <label><span>今天最大的阻碍或消耗</span><textarea bind:value={draft.fields.obstacleOrCost}></textarea></label>
-                            {#if workApplicable}<label><span>如果下班后处理了工作，原因</span><textarea bind:value={draft.fields.afterHoursWorkReason} placeholder="没有则留空"></textarea></label><label><span>明天开始工作时的第一个动作</span><textarea bind:value={draft.fields.tomorrowFirstAction}></textarea></label>{/if}
-                            <label><span>其他需要记录的异常或观察</span><textarea bind:value={draft.fields.anomalyOrObservation}></textarea></label>
+                            {#if workApplicable}<label><span>明天开始工作时的第一个动作</span><textarea bind:value={draft.fields.tomorrowFirstAction}></textarea></label>{/if}
+                            {#if workApplicable}
+                                <div class="xz-daily-decision-pair">
+                                    <div class="xz-daily-decision-column">
+                                        <label><span>下班后是否处理了工作</span><select value={draft.fields.afterHoursWorkOccurred} on:change|stopPropagation={(event) => changeAfterHoursWorkOccurred(event.currentTarget.value)}><option value="">尚未确认</option><option value="no">否</option><option value="yes">是</option></select></label>
+                                        {#if draft.fields.afterHoursWorkOccurred === "yes"}<label><span>处理工作的原因</span><textarea bind:value={draft.fields.afterHoursWorkReason} placeholder="记录为什么需要在下班后继续处理工作"></textarea></label>{/if}
+                                    </div>
+                                    <div class="xz-daily-decision-column">
+                                        <label><span>是否有其他异常或观察需要记录</span><select value={draft.fields.hasAnomalyOrObservation} on:change|stopPropagation={(event) => changeHasAnomalyOrObservation(event.currentTarget.value)}><option value="">尚未确认</option><option value="no">否</option><option value="yes">是</option></select></label>
+                                        {#if draft.fields.hasAnomalyOrObservation === "yes"}<label><span>异常或观察内容</span><textarea bind:value={draft.fields.anomalyOrObservation} placeholder="记录今天值得保留的异常、变化或观察"></textarea></label>{/if}
+                                    </div>
+                                </div>
+                            {:else}
+                                <label><span>是否有其他异常或观察需要记录</span><select value={draft.fields.hasAnomalyOrObservation} on:change|stopPropagation={(event) => changeHasAnomalyOrObservation(event.currentTarget.value)}><option value="">尚未确认</option><option value="no">否</option><option value="yes">是</option></select></label>
+                                {#if draft.fields.hasAnomalyOrObservation === "yes"}<label><span>异常或观察内容</span><textarea bind:value={draft.fields.anomalyOrObservation} placeholder="记录今天值得保留的异常、变化或观察"></textarea></label>{/if}
+                            {/if}
                         </div>
                     </section>
                     <section class="xz-daily-form-section">
                         <h3>睡前准备</h3>
                         <div class="xz-daily-fields two">
-                            <label><span>21:00 开始睡前准备</span><select bind:value={draft.fields.bedtimePreparation}><option value="">尚未填写</option><option value="yes">✓ 是</option><option value="no">× 否</option></select></label>
-                            <div class="xz-daily-field"><span>计划熄灯时间</span><TimeSelect bind:value={draft.fields.plannedLightsOffTime} ariaLabel="计划熄灯时间" /></div>
+                            <label><span>今晚的睡前安排</span><select value={draft.fields.bedtimePreparation} on:change|stopPropagation={(event) => changeBedtimePreparation(event.currentTarget.value)}><option value="">尚未选择</option><option value="yes">按计划准备</option><option value="no">不进行睡前准备</option><option value="free">自由安排，不记录计划</option></select></label>
+                            {#if draft.fields.bedtimePreparation === "yes" || draft.fields.bedtimePreparation === "no"}
+                                <div class="xz-daily-field">
+                                    <span class="xz-daily-label-with-note">计划熄灯 {#if resolvedSleep.fields.plannedLightsOffAt}<small>{shortDateFromLocalDateTime(resolvedSleep.fields.plannedLightsOffAt)}</small>{/if}</span>
+                                    <div class="xz-daily-lights-off-inline">
+                                        <select aria-label="计划熄灯日期" value={draft.fields.plannedLightsOffDay} on:change|stopPropagation={(event) => changePlannedLightsOffDay(event.currentTarget.value)}><option value="same-day">{shortDateWithOffset(currentDate, 0)}（当晚）</option><option value="next-day">{shortDateWithOffset(currentDate, 1)}（次日）</option></select>
+                                        <TimeSelect bind:value={draft.fields.plannedLightsOffTime} ariaLabel="计划熄灯时间" />
+                                    </div>
+                                </div>
+                            {:else if draft.fields.bedtimePreparation === "free"}
+                                <p class="xz-daily-bedtime-note">今晚自由安排，不设置计划熄灯时间；明早仍可记录实际睡眠。</p>
+                            {/if}
                         </div>
                     </section>
                 {/if}

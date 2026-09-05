@@ -10,8 +10,9 @@ Xingzhou is a self-contained SiYuan system for personal action and daily rhythm.
 
 - Separate top-level Projects & Tasks and Life Rhythm modules, each with its own second-level navigation.
 - Daily profiles for research workdays, Saturday reset, Sunday half-day research, and holidays, with weekday defaults and per-date overrides.
-- Daily forms follow a Morning / After lunch / Clock-out / After work / 21:00 timeline and save automatically. Sleep duration uses hour/minute selectors, weight supports kg/lb, and lights-off and wake values retain explicit cross-day dates.
-- Training details appear only after training is marked complete. The after-work closure flow distinguishes Pending, Not needed, and Needed; details appear only when needed, and not-needed durations remain not applicable rather than becoming zero.
+- Daily forms follow a Morning / After lunch / Clock-out / After work / 21:00 timeline and save automatically. Sleep duration uses hour/minute selectors, weight supports kg/lb, and actual lights-off and wake values retain explicit cross-day dates. A bedtime plan can target the same evening or the next day, or use Free arrangement without recording a planned lights-off time.
+- Training details appear only after training is marked complete. The after-work closure flow distinguishes Pending, Not needed, and Needed, then asks whether a next step exists before showing its text field. Not-needed durations remain not applicable rather than becoming zero.
+- The 21:00 review first asks whether work continued after hours and whether there was an anomaly or observation. Explanatory fields appear only for Yes, so No no longer requires typing placeholders such as “none.”
 - Holiday records treat work metrics as not applicable instead of failed or zero-valued.
 - Transactions can be divided into a target number of execution slices with a per-slice estimate and independently scheduled on a calendar. Completion is shown as a percentage; missed and abandoned attempts remain in history while releasing a replacement slot.
 - A deadline acts only as the latest schedulable date. Transactions without a deadline can still schedule and move slices from today onward.

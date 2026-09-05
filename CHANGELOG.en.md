@@ -2,6 +2,24 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## Unreleased
+
+### Added
+
+- Added Free arrangement for bedtime, allowing users to intentionally skip bedtime preparation and a planned lights-off value while still recording actual sleep the next morning.
+- Added Same evening / Next day selection for planned lights-off and persist the resulting full local date-time, removing ambiguity after midnight.
+
+### Changed
+
+- After-hours work and anomaly/observation prompts in the 21:00 review now use Pending / No / Yes decisions. Explanation fields appear only for Yes, while No clears details that no longer apply.
+- Closure next steps now use Pending / No / Yes; the next-step text field appears only when Yes is selected.
+- Reworked the two-column 21:00 and bedtime layouts so paired decisions, conditional details, and lights-off date/time controls remain aligned.
+
+### Compatibility
+
+- Existing after-hours reasons, anomaly observations, and closure next-step text are inferred as Yes; legacy placeholders such as “none” are normalized to explicit No states.
+- Existing planned lights-off times gain a date using nighttime semantics: before midnight means the same evening, while after midnight means the next day.
+
 ## 0.7.0 - 2026-09-04
 
 ### Added

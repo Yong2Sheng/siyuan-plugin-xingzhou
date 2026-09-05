@@ -931,6 +931,13 @@
 .xz-daily-closure-choice { width: min(100%, var(--xz-daily-structured-width)); }
 .xz-daily-closure-details { margin-top: 12px; }
 .xz-daily-closure-note { box-sizing: border-box; width: min(100%, 680px); margin: 12px 0 0; padding: 10px 12px; border-left: 3px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; line-height: 1.6; }
+.xz-daily-closure-bottom { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 10px; }
+.xz-daily-decision-pair { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.xz-daily-decision-column { min-width: 0; display: grid; align-content: start; gap: 10px; }
+.xz-daily-decision-column > label { min-width: 0; display: grid; align-content: start; gap: 6px; color: var(--xingzhou-muted); font-size: 14px; }
+.xz-daily-lights-off-inline { min-width: 0; display: grid; grid-template-columns: minmax(150px, .9fr) minmax(210px, 1.1fr); align-items: center; gap: 8px; }
+.xz-daily-lights-off-inline > .xz-daily-time-select { width: 100%; }
+.xz-daily-bedtime-note { box-sizing: border-box; min-height: 42px; display: flex; align-items: center; margin: 22px 0 0; padding: 8px 10px; border-left: 3px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; }
 .xz-daily-personal-project-row { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .xz-daily-project-picker { min-width: 0; display: grid; align-content: start; gap: 7px; color: var(--xingzhou-muted); font-size: 14px; }
 .xz-daily-project-picker__heading { min-height: 22px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
@@ -1058,7 +1065,8 @@
     .xz-module-nav button { min-width: 145px; }
     .xz-daily-date-nav, .xz-daily-view-nav, .xz-daily-stage-nav { flex-wrap: wrap; }
     .xz-daily-progress, .xz-daily-progress.holiday, .xz-daily-fields.two, .xz-daily-fields.three { grid-template-columns: 1fr; }
-    .xz-daily-personal-project-row { grid-template-columns: 1fr; }
+    .xz-daily-personal-project-row, .xz-daily-decision-pair, .xz-daily-lights-off-inline, .xz-daily-closure-bottom { grid-template-columns: 1fr; }
+    .xz-daily-bedtime-note { margin-top: 0; }
     .xz-daily-history-row, .xz-daily-rubric-row, .xz-daily-timeline-row { grid-template-columns: 1fr 1fr; }
     .xz-slice-config, .xz-slice-progress-row { grid-template-columns: 1fr; }
     .xz-capture-row { flex-direction: column; }
