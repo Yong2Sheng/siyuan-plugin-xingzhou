@@ -24,6 +24,7 @@
         dragstate: { id: string | null };
         reorder: { draggedId: string; targetId: string; position: DropPosition };
         move: { id: string; direction: -1 | 1 };
+        actions: { id: string; event: MouseEvent };
     }>();
 
     $: children = (tree.children.get(item.id) ?? []).filter((child) => visibleIds.has(child.id));
@@ -129,6 +130,13 @@
                 on:click|stopPropagation={() => dispatch("move", { id: item.id, direction: 1 })}
             >↓</button>
         </span>
+        <button
+            type="button"
+            class="xz-tree-menu-button"
+            aria-label={`打开“${item.title}”的操作菜单`}
+            title="更多操作"
+            on:click|stopPropagation={(event) => dispatch("actions", { id: item.id, event })}
+        >⋯</button>
     </div>
 
     {#if expanded}
@@ -149,6 +157,7 @@
                     on:dragstate
                     on:reorder
                     on:move
+                    on:actions
                 />
             {/each}
         </div>

@@ -10,6 +10,12 @@ export type ExecutionSlice = {
     updatedAt: number;
 };
 
+export type ExecutionSliceDayLoad = {
+    count: number;
+    minutes: number;
+    unestimatedCount: number;
+};
+
 export function normalizeExecutionSlices(value: unknown): ExecutionSlice[] {
     if (!Array.isArray(value)) return [];
     const ids = new Set<string>();
@@ -36,6 +42,15 @@ export function completedSliceCount(item: WorkItem): number {
     return (item.executionSlices ?? []).filter((slice) => slice.status === "completed").length;
 }
 
+const SLICE_STARTABLE_STATUSES = new Set(["收件箱", "待开始", "已计划"]);
+
+/** 首次实际完成切片时推进准备状态；后续手动选择的状态保持优先。 */
+export function automaticStatusForSliceCompletion(item: WorkItem, nextSlices: ExecutionSlice[]): string | null {
+    if (!SLICE_STARTABLE_STATUSES.has(item.status)) return null;
+    if (completedSliceCount(item) > 0) return null;
+    return nextSlices.some((slice) => slice.status === "completed") ? "进行中" : null;
+}
+
 export function scheduledSliceCount(item: WorkItem): number {
     return (item.executionSlices ?? []).filter((slice) => slice.status === "scheduled").length;
 }
@@ -52,6 +67,30 @@ export function sliceCompletionPercent(item: WorkItem): number {
 
 export function slicesOnDate(item: WorkItem, date: string): ExecutionSlice[] {
     return (item.executionSlices ?? []).filter((slice) => slice.scheduledDate === date).sort(compareSlices);
+}
+
+/**
+ * Summarize committed daily workload across every transaction. Missed and
+ * abandoned attempts no longer occupy capacity, while completed work still
+ * represents time that was committed on that date.
+ */
+export function executionSliceLoadsByDate(items: WorkItem[]): Map<string, ExecutionSliceDayLoad> {
+    const loads = new Map<string, ExecutionSliceDayLoad>();
+    for (const item of items) {
+        if (item.type !== "事务") continue;
+        for (const slice of item.executionSlices ?? []) {
+            if (slice.status !== "scheduled" && slice.status !== "completed") continue;
+            const current = loads.get(slice.scheduledDate) ?? { count: 0, minutes: 0, unestimatedCount: 0 };
+            current.count += 1;
+            if (item.durationMinutes === null || !Number.isFinite(item.durationMinutes) || item.durationMinutes < 0) {
+                current.unestimatedCount += 1;
+            } else {
+                current.minutes += item.durationMinutes;
+            }
+            loads.set(slice.scheduledDate, current);
+        }
+    }
+    return loads;
 }
 
 export function scheduleSlice(item: WorkItem, date: string, id = createExecutionSliceId(), now = Date.now()): ExecutionSlice[] {

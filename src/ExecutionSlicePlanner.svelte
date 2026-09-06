@@ -3,6 +3,7 @@
         availableSliceCount,
         cancelScheduledSlice,
         completedSliceCount,
+        executionSliceLoadsByDate,
         localDateKey,
         scheduleSlice,
         setSliceOutcome,
@@ -10,12 +11,15 @@
         slicesOnDate,
         validateSliceTarget,
         type ExecutionSlice,
+        type ExecutionSliceDayLoad,
     } from "./execution-slices";
     import type { WorkItem, WorkItemChanges } from "./work-items";
 
     export let item: WorkItem;
+    export let items: WorkItem[] = [];
     export let disabled = false;
     export let save: (changes: WorkItemChanges) => Promise<void> = async () => undefined;
+    export let complete: () => Promise<void> = async () => undefined;
 
     type CalendarDay = {
         key: string;
@@ -25,6 +29,7 @@
         isPast: boolean;
         afterDeadline: boolean;
         slice: ExecutionSlice | null;
+        load: ExecutionSliceDayLoad;
     };
 
     const today = localDateKey();
@@ -46,9 +51,26 @@
     $: completed = completedSliceCount(item);
     $: available = availableSliceCount(item);
     $: percent = sliceCompletionPercent(item);
-    $: calendarDays = buildCalendarDays(monthCursor, item);
+    $: readyToComplete = target > 0
+        && completed >= target
+        && !["已完成", "已失败", "已取消", "已放弃"].includes(item.status);
+    $: loadItems = items.some((candidate) => candidate.id === item.id) ? items : [...items, item];
+    $: loadsByDate = executionSliceLoadsByDate(loadItems);
+    $: calendarDays = buildCalendarDays(monthCursor, item, loadsByDate);
     $: monthLabel = `${monthCursor.getFullYear()} 年 ${monthCursor.getMonth() + 1} 月`;
     $: todaySlice = slicesOnDate(item, today)[0] ?? null;
+    $: investmentSummary = target && item.durationMinutes !== null
+        ? `预计总投入 ${target * item.durationMinutes} 分钟`
+        : "总投入待计算";
+    $: planningSummary = todaySlice?.status === "scheduled"
+        ? "今天已有执行切片；今天结束后未处理会自动记为“未完成”"
+        : !target
+            ? "设置目标切片数后，即可点击日历安排执行日期"
+            : !item.deadline
+                ? `未设置截止日期，可从今天起自由安排；还有 ${available} 个切片待安排`
+                : available > 0
+                    ? `还有 ${available} 个切片待安排`
+                    : "所有有效切片均已完成或安排";
 
     async function saveTarget() {
         const raw = String(targetDraft).trim();
@@ -110,6 +132,19 @@
         }
     }
 
+    async function completeTransaction() {
+        if (saving || disabled || !readyToComplete) return;
+        saving = true;
+        error = "";
+        try {
+            await complete();
+        } catch (caught) {
+            error = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            saving = false;
+        }
+    }
+
     function canSchedule(day: CalendarDay): boolean {
         return day.inMonth && !day.isPast && !day.afterDeadline && target > 0 && available > 0;
     }
@@ -118,7 +153,7 @@
         monthCursor = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + offset, 1);
     }
 
-    function buildCalendarDays(month: Date, workItem: WorkItem): CalendarDay[] {
+    function buildCalendarDays(month: Date, workItem: WorkItem, dailyLoads: Map<string, ExecutionSliceDayLoad>): CalendarDay[] {
         const first = new Date(month.getFullYear(), month.getMonth(), 1);
         const mondayOffset = (first.getDay() + 6) % 7;
         const start = new Date(first);
@@ -136,6 +171,7 @@
                 isPast: key < today,
                 afterDeadline: Boolean(deadline && key > deadline),
                 slice: slicesOnDate(workItem, key)[0] ?? null,
+                load: dailyLoads.get(key) ?? { count: 0, minutes: 0, unestimatedCount: 0 },
             };
         });
     }
@@ -151,31 +187,58 @@
         if (status === "abandoned") return "已放弃";
         return "已安排";
     }
+
+    function loadMinutesLabel(load: ExecutionSliceDayLoad): string {
+        if (load.unestimatedCount > 0 && load.minutes === 0) return "未估时";
+        return `${load.unestimatedCount > 0 ? "≥" : ""}${load.minutes}分`;
+    }
+
+    function loadDescription(load: ExecutionSliceDayLoad): string {
+        if (!load.count) return "";
+        const estimate = load.unestimatedCount > 0
+            ? load.minutes > 0
+                ? `已知预计时长至少 ${load.minutes} 分钟，其中 ${load.unestimatedCount} 片未估时`
+                : `${load.unestimatedCount} 片均未设置预计时长`
+            : `预计 ${load.minutes} 分钟`;
+        return `当日共 ${load.count} 片，${estimate}`;
+    }
 </script>
 
 <section class="xz-slice-card" aria-busy={saving}>
     <header>
-        <div><h3>执行切片</h3><p>切片属于当前事务，不会成为上下层工作项。</p></div>
-        <strong class="xz-slice-arranged">已完成 {completed}／{target || "—"}</strong>
+        <div class="xz-slice-heading">
+            <div><h3>执行切片</h3><strong>{investmentSummary}</strong></div>
+            <p>切片属于当前事务，不会成为上下层工作项。</p>
+        </div>
+        <div class="xz-slice-header-meta">
+            <strong class="xz-slice-arranged">已完成 {completed}／{target || "—"}</strong>
+            <span class="xz-slice-available">待安排 {target ? available : "—"}</span>
+            <div class="xz-slice-legend"><span><i class="scheduled"></i>已安排</span><span><i class="completed"></i>已完成</span><span><i class="missed"></i>未完成</span><span><i class="abandoned"></i>已放弃</span></div>
+        </div>
     </header>
 
     <div class="xz-slice-progress-row">
         <div><strong>{percent}%</strong><span>事务完成度</span></div>
         <div class="xz-slice-progress" role="progressbar" aria-label="事务完成度" aria-valuemin="0" aria-valuemax="100" aria-valuenow={percent}><i style={`width: ${percent}%`}></i></div>
-        <span>{target && item.durationMinutes !== null ? `预计总投入 ${target * item.durationMinutes} 分钟` : "设置切片数量和每片时长后计算总投入"}</span>
+        <div class="xz-slice-progress-summary">
+            <small>{planningSummary}</small>
+            {#if todaySlice?.status === "scheduled"}
+                <span class="xz-slice-actions"><button type="button" disabled={saving || disabled} on:click={() => void finishToday("completed")}>完成</button><button class="abandon" type="button" disabled={saving || disabled} on:click={() => void finishToday("abandoned")}>放弃本次切片</button></span>
+            {/if}
+        </div>
     </div>
+
+    {#if readyToComplete}
+        <div class="xz-slice-completion-prompt" role="status">
+            <span>目标切片已全部完成，事务是否也已完成？</span>
+            <button type="button" disabled={saving || disabled} on:click={() => void completeTransaction()}>完成事务</button>
+        </div>
+    {/if}
 
     <div class="xz-slice-config">
         <label><span>目标切片数</span><input class="b3-text-field" aria-label="目标切片数" type="number" min="1" max="366" step="1" bind:value={targetDraft} {disabled} on:change={() => void saveTarget()} /></label>
         <label><span>每片预计时长（分钟）</span><input class="b3-text-field" aria-label="每片预计时长（分钟）" type="number" min="0" step="1" bind:value={durationDraft} {disabled} on:change={() => void saveDuration()} /></label>
-        <label><span>待安排</span><input class="b3-text-field xz-slice-readonly" aria-label="待安排切片数" type="text" value={target ? `${available} 个切片` : "先设置目标数量"} readonly tabindex="-1" /></label>
     </div>
-
-    {#if !target}
-        <p class="xz-slice-guidance">设置目标切片数后，即可点击日历安排执行日期。</p>
-    {:else if !item.deadline}
-        <p class="xz-slice-guidance">未设置截止日期，可从今天起自由安排执行切片。</p>
-    {/if}
 
     <div class="xz-slice-layout">
         <div class="xz-slice-calendar">
@@ -192,26 +255,26 @@
                         class:abandoned={day.slice?.status === "abandoned"}
                         class="xz-slice-day"
                         type="button"
-                        aria-label={`${day.key}${day.slice ? `，${statusLabel(day.slice.status)}` : ""}`}
+                        aria-label={`${day.key}${day.slice ? `，当前事务${statusLabel(day.slice.status)}` : ""}${day.load.count ? `，${loadDescription(day.load)}` : ""}`}
+                        title={day.load.count ? loadDescription(day.load) : undefined}
                         aria-pressed={Boolean(day.slice)}
                         disabled={disabled || (!day.slice?.status && !canSchedule(day)) || Boolean(day.slice && day.slice.status !== "scheduled")}
                         on:click={() => void toggleDate(day)}
                     >
-                        <span>{day.day}</span>
-                        {#if day.slice}<small>{statusLabel(day.slice.status)}</small>{:else if item.deadline && day.key === localDateKey(item.deadline)}<small>截止</small>{/if}
+                        <span class="xz-slice-day-heading">
+                            <span>{day.day}</span>
+                            {#if day.slice}<i class:scheduled={day.slice.status === "scheduled"} class:completed={day.slice.status === "completed"} class:missed={day.slice.status === "missed"} class:abandoned={day.slice.status === "abandoned"} class="xz-slice-day-status" aria-hidden="true"></i>{/if}
+                        </span>
+                        {#if day.load.count}
+                            <small class="xz-slice-day-load"><strong>{loadMinutesLabel(day.load)}</strong><span class="xz-slice-day-count">{day.load.count}片</span></small>
+                        {:else if day.slice}
+                            <small>{statusLabel(day.slice.status)}</small>
+                        {:else if item.deadline && day.key === localDateKey(item.deadline)}<small>截止</small>{/if}
                     </button>
                 {/each}
             </div>
         </div>
 
-        <aside class="xz-slice-side">
-            {#if todaySlice?.status === "scheduled"}
-                <div><strong>今天已有执行切片</strong><p>今天结束后仍未处理，将自动记为“未完成”。</p><span class="xz-slice-actions"><button type="button" disabled={saving || disabled} on:click={() => void finishToday("completed")}>完成</button><button class="abandon" type="button" disabled={saving || disabled} on:click={() => void finishToday("abandoned")}>放弃本次切片</button></span></div>
-            {:else}
-                <div><strong>{available > 0 ? `还有 ${available} 个切片待安排` : target ? "所有有效切片均已完成或安排" : "尚未配置切片"}</strong><p>未完成和放弃会保留历史，但会重新释放一个待安排名额。</p></div>
-            {/if}
-            <div class="xz-slice-legend"><span><i class="scheduled"></i>已安排</span><span><i class="completed"></i>已完成</span><span><i class="missed"></i>未完成</span><span><i class="abandoned"></i>已放弃</span></div>
-        </aside>
     </div>
     {#if error}<p class="xz-save-error" role="alert">{error}</p>{/if}
 </section>

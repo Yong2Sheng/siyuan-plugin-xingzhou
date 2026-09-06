@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
     availableSliceCount,
+    automaticStatusForSliceCompletion,
     cancelScheduledSlice,
     expirePastSlices,
+    executionSliceLoadsByDate,
     moveScheduledSlice,
     scheduleSlice,
     setSliceOutcome,
@@ -55,6 +57,15 @@ describe("事务执行切片", () => {
         expect(sliceCompletionPercent(item({ executionSlices: abandoned }))).toBe(50);
     });
 
+    it("首次完成切片只把准备状态推进为进行中，并尊重手动状态", () => {
+        const scheduled = scheduleSlice(item({ status: "待开始" }), "2026-09-04", "first", TODAY);
+        const before = item({ status: "待开始", executionSlices: scheduled });
+        const completed = setSliceOutcome(before, "first", "completed", TODAY);
+        expect(automaticStatusForSliceCompletion(before, completed)).toBe("进行中");
+        expect(automaticStatusForSliceCompletion(item({ status: "暂停", executionSlices: scheduled }), completed)).toBeNull();
+        expect(automaticStatusForSliceCompletion(item({ status: "待开始", executionSlices: completed }), completed)).toBeNull();
+    });
+
     it("跨日后把未处理的过去安排标为未完成并释放名额", () => {
         const past = [{ id: "past", scheduledDate: "2026-09-03", status: "scheduled" as const, completedAt: null, updatedAt: 1 }];
         const expired = expirePastSlices(item({ executionSlices: past }), "2026-09-04", TODAY);
@@ -70,5 +81,32 @@ describe("事务执行切片", () => {
         ];
         expect(validateSliceTarget(item({ executionSlices }), 1)).toContain("至少需要保留 2 个切片");
         expect(validateSliceTarget(item({ executionSlices }), 2)).toBeNull();
+    });
+
+    it("按日期汇总已安排和已完成切片的数量与预计时长", () => {
+        const first = item({
+            id: "first",
+            durationMinutes: 30,
+            executionSlices: [
+                { id: "scheduled", scheduledDate: "2026-09-05", status: "scheduled", completedAt: null, updatedAt: 1 },
+                { id: "missed", scheduledDate: "2026-09-05", status: "missed", completedAt: null, updatedAt: 2 },
+            ],
+        });
+        const second = item({
+            id: "second",
+            durationMinutes: 45,
+            executionSlices: [{ id: "completed", scheduledDate: "2026-09-05", status: "completed", completedAt: 3, updatedAt: 3 }],
+        });
+        const unestimated = item({
+            id: "third",
+            durationMinutes: null,
+            executionSlices: [{ id: "unknown", scheduledDate: "2026-09-05", status: "scheduled", completedAt: null, updatedAt: 4 }],
+        });
+
+        expect(executionSliceLoadsByDate([first, second, unestimated]).get("2026-09-05")).toEqual({
+            count: 3,
+            minutes: 75,
+            unestimatedCount: 1,
+        });
     });
 });

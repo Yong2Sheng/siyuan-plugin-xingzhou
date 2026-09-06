@@ -21,10 +21,16 @@ describe("行舟一级模块外壳", () => {
     });
 
     it("把项目与事务和生活节律放在不同一级模块", async () => {
-        component = new AppShell({ target: document.body, props: props() });
-        expect(document.querySelector(".xz-module-nav")?.textContent).toContain("项目与事务");
+        const properties = props();
+        component = new AppShell({ target: document.body, props: properties });
+        expect(document.querySelector(".xz-shell-header .xz-module-nav")?.textContent).toContain("项目与事务");
         expect(document.querySelector(".xz-module-nav")?.textContent).toContain("生活节律");
+        expect(document.querySelector(".xz-app > .xz-header")).toBeNull();
+        expect(document.querySelector(".xz-shell-actions")?.textContent).toContain("添加");
         expect(document.querySelector(".xz-main-nav")?.textContent).toContain("本周");
+
+        clickButton("添加");
+        expect(properties.openCaptureDialog).toHaveBeenCalledOnce();
 
         clickButton("生活节律");
         await tick();

@@ -7,6 +7,7 @@
     import ExecutionSlicePlanner from "./ExecutionSlicePlanner.svelte";
     import {
         availableSliceCount,
+        automaticStatusForSliceCompletion,
         cancelScheduledSlice,
         completedSliceCount,
         expirePastSlices,
@@ -35,7 +36,12 @@
     export let deleteItem: (data: WorkItemData, item: WorkItem) => Promise<WorkItemData>;
     export let reorderItems: (data: WorkItemData, parentId: string | null, orderedIds: string[]) => Promise<WorkItemData>
         = async (currentData) => currentData;
-    export let openItemMenu: (event: MouseEvent, onDelete: () => void, addChild?: { label: string; onClick: () => void }) => void = (_event, onDelete) => onDelete();
+    export let openItemMenu: (
+        event: MouseEvent,
+        onDelete: () => void,
+        addChild?: { label: string; onClick: () => void },
+        actions?: Array<{ label: string; icon?: string; onClick: () => void }>,
+    ) => void = (_event, onDelete) => onDelete();
     export let openCaptureDialog: (request: CaptureDialogRequest) => void = () => undefined;
     export let openDocument: (blockId: string) => Promise<void>;
     export let embedded = false;
@@ -71,16 +77,18 @@
     let todayFocusCounts = new Map<string, number>();
     let visibleIds = new Set<string>();
     let visibleRoots: WorkItem[] = [];
-    let loading = true;
+    export let loading = true;
     let error = "";
     let selectedId: string | null = null;
     let scope: "all" | string = "all";
+    let scopeDrawerOpen = false;
+    let compactDetailOpen = false;
     let expandedIds = new Set<string>();
     let inboxDraft = "";
     let capturing = false;
     let captureError = "";
     let captureMessage = "";
-    let quickCaptureNotice = "";
+    export let quickCaptureNotice = "";
     let weekStart = startOfWeek(Date.now());
     let weekSavingIds = new Set<string>();
     let weekError = "";
@@ -222,7 +230,7 @@
         };
     });
 
-    async function refresh() {
+    export async function refresh() {
         loading = true;
         error = "";
         try {
@@ -371,7 +379,7 @@
         return item.type === "长期领域" || item.type === "项目";
     }
 
-    function openQuickCapture(parent: WorkItem | null = null) {
+    export function openQuickCapture(parent: WorkItem | null = null) {
         const mode: CaptureDialogMode = parent ? "child" : "global";
         openCaptureDialog({
             mode,
@@ -431,6 +439,7 @@
             scope = item.parentIds[0] || item.id;
         }
         selectedId = item.id;
+        compactDetailOpen = true;
         const next = new Set(expandedIds);
         const seen = new Set<string>();
         let parentId: string | undefined = item.parentIds[0];
@@ -440,6 +449,18 @@
             parentId = tree.byId.get(parentId)?.parentIds[0];
         }
         expandedIds = next;
+    }
+
+    function selectScopeItem(item: WorkItem) {
+        scope = item.id;
+        selectedId = item.id;
+        scopeDrawerOpen = false;
+        compactDetailOpen = true;
+    }
+
+    function selectTreeItem(id: string) {
+        selectedId = id;
+        compactDetailOpen = true;
     }
 
     function isInsideScope(item: WorkItem, scopeId: "all" | string): boolean {
@@ -465,12 +486,21 @@
             return;
         }
         const item = tree.byId.get(itemId);
-        if (item) {
-            const addChild = canAddChild(item)
-                ? { label: item.type === "长期领域" ? "添加顶层项目…" : "添加下级工作项…", onClick: () => void openQuickCapture(item) }
-                : undefined;
-            openItemMenu(event, () => requestDelete(item), addChild);
-        }
+        if (item) openActionsMenu(event, item);
+    }
+
+    function openActionsMenu(event: MouseEvent, item: WorkItem) {
+        const addChild = canAddChild(item)
+            ? { label: item.type === "长期领域" ? "添加顶层项目…" : "添加下级工作项…", onClick: () => void openQuickCapture(item) }
+            : undefined;
+        const parentId = item.parentIds[0] ?? null;
+        const siblings = (parentId ? tree.children.get(parentId) ?? [] : tree.roots)
+            .filter((candidate) => visibleIds.has(candidate.id));
+        const index = siblings.findIndex((candidate) => candidate.id === item.id);
+        const actions: Array<{ label: string; icon?: string; onClick: () => void }> = [];
+        if (!reordering && index > 0) actions.push({ label: "上移", icon: "iconUp", onClick: () => moveSibling(item.id, -1) });
+        if (!reordering && index >= 0 && index < siblings.length - 1) actions.push({ label: "下移", icon: "iconDown", onClick: () => moveSibling(item.id, 1) });
+        openItemMenu(event, () => requestDelete(item), addChild, actions);
     }
 
     function handleWindowKeydown(event: KeyboardEvent) {
@@ -843,7 +873,7 @@
         weekSavingIds = new Set(weekSavingIds).add(item.id);
         weekError = "";
         try {
-            applyData(await reconcileAutomaticStatuses(await saveItem(data, item, changes)));
+            applyData(await reconcileAutomaticStatuses(await saveItem(data, item, withAutomaticSliceStatus(item, changes))));
         } catch (caught) {
             weekError = caught instanceof Error ? caught.message : String(caught);
         } finally {
@@ -865,7 +895,7 @@
         savingSlices = true;
         inlineError = "";
         try {
-            applyData(await saveItem(data, selected, changes));
+            applyData(await saveItem(data, selected, withAutomaticSliceStatus(selected, changes)));
             const updated = data?.items.find((item) => item.rowId === selectedRowId);
             if (updated) {
                 selectedId = updated.id;
@@ -877,6 +907,12 @@
         } finally {
             savingSlices = false;
         }
+    }
+
+    function withAutomaticSliceStatus(item: WorkItem, changes: WorkItemChanges): WorkItemChanges {
+        if (!changes.executionSlices || changes.status !== undefined) return changes;
+        const status = automaticStatusForSliceCompletion(item, changes.executionSlices);
+        return status ? { ...changes, status } : changes;
     }
 
     async function updateWeekSlice(item: WorkItem, slice: ExecutionSlice, action: "complete" | "abandon" | "undo") {
@@ -1214,8 +1250,8 @@
 <svelte:window on:contextmenu={handleContextMenu} on:keydown={handleWindowKeydown} />
 
 <div class="xz-app">
-    <header class:xz-header--embedded={embedded} class="xz-header">
-        {#if !embedded}<div><div class="xz-eyebrow">个人行动与生活系统</div><h1>行舟</h1></div>{/if}
+    {#if !embedded}<header class="xz-header">
+        <div><div class="xz-eyebrow">个人行动与生活系统</div><h1>行舟</h1></div>
         <div class="xz-header-actions">
             {#if quickCaptureNotice}<span class="xz-quick-capture-notice" aria-live="polite">{quickCaptureNotice}</span>{/if}
             <span class="xz-data-source">插件内部数据</span>
@@ -1226,15 +1262,39 @@
                 <svg><use href="#iconRefresh"></use></svg>{loading ? "读取中" : "刷新"}
             </button>
         </div>
-    </header>
+    </header>{/if}
 
-    <nav class="xz-main-nav" aria-label="主页面">
-        {#each mainPages as entry}
-            <button class:active={page === entry.id} type="button" on:click={() => page = entry.id}>
-                {entry.label}
-            </button>
-        {/each}
-    </nav>
+    <div class="xz-project-toolbar">
+        <nav class="xz-main-nav" aria-label="主页面">
+            {#each mainPages as entry}
+                <button class:active={page === entry.id} type="button" on:click={() => page = entry.id}>
+                    {entry.label}
+                </button>
+            {/each}
+        </nav>
+        {#if page === "all" && data}
+            <div class="xz-secondary-bar">
+                <div class="xz-filter-controls">
+                    <div class="xz-segmented">
+                        {#each itemFilters as entry}
+                            <button class:active={filter === entry.id} type="button" on:click={() => setFilter(entry.id)}>{entry.label}</button>
+                        {/each}
+                    </div>
+                    <button class:active={includeClosed && filter === "all"} class="xz-include-closed-toggle" type="button" aria-pressed={includeClosed && filter === "all"} disabled={filter !== "all"} title={filter === "all" ? "控制“全部”中是否包含已经结束的工作项" : "此开关仅作用于“全部”筛选"} on:click={toggleIncludeClosed}>
+                        {includeClosed && filter === "all" ? "✓ " : ""}包含已结束
+                    </button>
+                </div>
+                <div class="xz-secondary-actions">
+                    {#if filter === "active"}
+                        <button class="xz-link-button" type="button" on:click={expandActivePaths}>展开活跃路径</button>
+                    {:else}
+                        <button class="xz-link-button" type="button" on:click={expandAllVisible}>全部展开</button>
+                    {/if}
+                    <button class="xz-link-button" type="button" on:click={collapseAll}>全部收起</button>
+                </div>
+            </div>
+        {/if}
+    </div>
 
     {#if page === "inbox"}
         <main class="xz-inbox-page">
@@ -1458,27 +1518,6 @@
             <button class="b3-button" type="button" on:click={() => void refresh()}>重试</button>
         </main>
     {:else if data}
-        <div class="xz-secondary-bar">
-            <div class="xz-filter-controls">
-                <div class="xz-segmented">
-                    {#each itemFilters as entry}
-                        <button class:active={filter === entry.id} type="button" on:click={() => setFilter(entry.id)}>{entry.label}</button>
-                    {/each}
-                </div>
-                <button class:active={includeClosed && filter === "all"} class="xz-include-closed-toggle" type="button" aria-pressed={includeClosed && filter === "all"} disabled={filter !== "all"} title={filter === "all" ? "控制“全部”中是否包含已经结束的工作项" : "此开关仅作用于“全部”筛选"} on:click={toggleIncludeClosed}>
-                    {includeClosed && filter === "all" ? "✓ " : ""}包含已结束
-                </button>
-            </div>
-            <div class="xz-secondary-actions">
-                {#if filter === "active"}
-                    <button class="xz-link-button" type="button" on:click={expandActivePaths}>展开活跃路径</button>
-                {:else}
-                    <button class="xz-link-button" type="button" on:click={expandAllVisible}>全部展开</button>
-                {/if}
-                <button class="xz-link-button" type="button" on:click={collapseAll}>全部收起</button>
-            </div>
-        </div>
-
         {#if data.missingFields.includes("本次行动细则")}
             <div class="xz-notice"><strong>数据提示：</strong>内部数据缺少“本次行动细则”字段，请重新加载插件以恢复完整字段定义。</div>
         {/if}
@@ -1486,13 +1525,15 @@
             <div class="xz-notice xz-notice--warning"><strong>关系检查：</strong>发现 {tree.issues.length} 个需要人工确认的层级关系问题。插件只提示，不会自动修正。</div>
         {/if}
 
-        <main class="xz-workspace">
-            <aside class="xz-sidebar" bind:this={sidebarElement}>
+        <main class:xz-workspace--scope-open={scopeDrawerOpen} class:xz-workspace--detail-open={compactDetailOpen} class="xz-workspace">
+            {#if scopeDrawerOpen}<button class="xz-scope-backdrop" type="button" aria-label="关闭范围选择" on:click={() => scopeDrawerOpen = false}></button>{/if}
+            <aside class:xz-sidebar--open={scopeDrawerOpen} class="xz-sidebar" bind:this={sidebarElement}>
+                <button class="xz-scope-drawer-close" type="button" on:click={() => scopeDrawerOpen = false}>关闭范围</button>
                 <section class="xz-sidebar-group xz-sidebar-group--areas">
                     <h2><span>长期领域与想法</span><span class="xz-sidebar-group-actions"><small>{areaAndIdeaRoots.length}</small><button type="button" aria-label="添加长期领域或想法" title="添加长期领域或想法" on:click={() => void openSidebarCapture("areaOrIdea")}>＋</button></span></h2>
                     {#if areaAndIdeaRoots.length === 0}<p class="xz-sidebar-empty">暂无内容</p>{/if}
                     {#each areaAndIdeaRoots as item (item.id)}
-                        <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
+                        <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => selectScopeItem(item)}>
                             <span>{item.title}</span><small>{item.status || "未设置"}</small>
                         </button>
                     {/each}
@@ -1501,7 +1542,7 @@
                     <h2><span>顶层项目</span><span class="xz-sidebar-group-actions"><small>{topLevelProjects.length}</small><button type="button" aria-label="添加顶层项目" title="添加顶层项目" on:click={() => void openSidebarCapture("topProject")}>＋</button></span></h2>
                     {#if topLevelProjects.length === 0}<p class="xz-sidebar-empty">暂无内容</p>{/if}
                     {#each topLevelProjects as item (item.id)}
-                        <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
+                        <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => selectScopeItem(item)}>
                             <span>{item.title}</span><small>{item.status || "未设置"}</small>
                         </button>
                     {/each}
@@ -1510,7 +1551,7 @@
                     <h2><span>独立事务</span><span class="xz-sidebar-group-actions"><small>{independentTransactions.length}</small><button type="button" aria-label="添加独立事务" title="添加独立事务" on:click={() => void openSidebarCapture("transaction")}>＋</button></span></h2>
                     {#if independentTransactions.length === 0}<p class="xz-sidebar-empty">暂无内容</p>{/if}
                     {#each independentTransactions as item (item.id)}
-                        <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
+                        <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => selectScopeItem(item)}>
                             <span>{item.title}</span><small>{item.status || "未设置"}</small>
                         </button>
                     {/each}
@@ -1519,7 +1560,7 @@
                     <section class="xz-sidebar-group xz-sidebar-group--uncategorized">
                         <h2><span>待归类</span><small>{uncategorizedRoots.length}</small></h2>
                         {#each uncategorizedRoots as item (item.id)}
-                            <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => { scope = item.id; selectedId = item.id; }}>
+                            <button class:active={scope === item.id} class="xz-scope-button" type="button" data-work-item-id={item.id} on:click={() => selectScopeItem(item)}>
                                 <span>{item.title}</span><small>{item.type || "未分类"}</small>
                             </button>
                         {/each}
@@ -1530,7 +1571,7 @@
 
             <section class="xz-tree-panel">
                 <div class="xz-panel-heading">
-                    <div><span>层级浏览</span><small>{filter === "active" ? "只展开活跃路径" : "当前筛选默认完整展开"}</small></div>
+                    <div class="xz-panel-heading-main"><button class="xz-tablet-scope-button" type="button" aria-expanded={scopeDrawerOpen} on:click={() => scopeDrawerOpen = !scopeDrawerOpen}>范围</button><div><span>层级浏览</span><small>{filter === "active" ? "只展开活跃路径" : "当前筛选默认完整展开"}</small></div></div>
                     <div class="xz-role-legend" aria-label="层级颜色含义">
                         {#each WORK_ITEM_ROLE_LEGEND as role}<RoleBadge {role} compact />{/each}
                     </div>
@@ -1550,20 +1591,25 @@
                                 {todayFocusCounts}
                                 {draggingId}
                                 reorderDisabled={reordering}
-                                on:select={(event) => selectedId = event.detail.id}
+                                on:select={(event) => selectTreeItem(event.detail.id)}
                                 on:toggle={(event) => toggle(event.detail.id)}
                                 on:dragstate={(event) => draggingId = event.detail.id}
                                 on:reorder={(event) => void reorderRelative(event.detail.draggedId, event.detail.targetId, event.detail.position)}
                                 on:move={(event) => moveSibling(event.detail.id, event.detail.direction)}
+                                on:actions={(event) => {
+                                    const item = tree.byId.get(event.detail.id);
+                                    if (item) openActionsMenu(event.detail.event, item);
+                                }}
                             />
                         {/each}
                     {/if}
                 </div>
             </section>
 
-            <aside class="xz-detail" bind:this={detailElement}>
+            <aside class:xz-detail--open={compactDetailOpen} class="xz-detail" bind:this={detailElement}>
                 {#if selected}
                     <div class="xz-detail-header">
+                        <button class="xz-detail-back-button" type="button" on:click={() => compactDetailOpen = false}>‹ 返回列表</button>
                         <div class="xz-detail-identity">
                             <div class="xz-detail-role-row">
                                 {#if selectedProfile}<RoleBadge role={selectedProfile.role} />{/if}
@@ -1582,6 +1628,7 @@
                             </div>
                             <div class="xz-detail-title-row" data-work-item-id={selected.id}>
                                 <input class="xz-inline-title" aria-label="名称" bind:value={detailDraft.title} disabled={Boolean(savingInline)} on:blur={() => void saveInline("title", detailDraft.title)} on:keydown={(event) => event.key === "Enter" && event.currentTarget.blur()} />
+                                <button class="xz-detail-menu-button" type="button" aria-label={`打开“${selected.title}”的操作菜单`} title="更多操作" on:click={(event) => openActionsMenu(event, selected)}>⋯</button>
                             </div>
                         </div>
                     </div>
@@ -1611,7 +1658,7 @@
                     {#if inlineError}<p class="xz-save-error" role="alert">{inlineError}</p>{/if}
 
                     {#if selected.type === "事务"}
-                        <ExecutionSlicePlanner item={selected} disabled={Boolean(savingInline)} save={saveSelectedSlices} />
+                        <ExecutionSlicePlanner item={selected} items={data.items} disabled={Boolean(savingInline)} save={saveSelectedSlices} complete={() => markSelectedComplete()} />
                     {/if}
 
                     <section class="xz-dependency-card">

@@ -41,6 +41,46 @@ describe("执行切片配置", () => {
         await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
         expect(save.mock.calls[0][0].executionSlices).toHaveLength(1);
     });
+
+    it("显示所有事务在同一天的切片数量和预计时间", async () => {
+        const date = new Date();
+        date.setHours(12, 0, 0, 0);
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        const current = transaction({
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "current", scheduledDate: key, status: "scheduled", completedAt: null, updatedAt: 1 }],
+        });
+        const another = transaction({
+            id: "another",
+            rowId: "another",
+            durationMinutes: 35,
+            executionSlices: [{ id: "another-slice", scheduledDate: key, status: "completed", completedAt: 2, updatedAt: 2 }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: current, items: [current, another] } });
+        await tick();
+
+        const today = document.querySelector<HTMLButtonElement>(".xz-slice-day.today");
+        expect(today?.querySelector(".xz-slice-day-load")?.textContent).toContain("55分");
+        expect(today?.querySelector(".xz-slice-day-count")?.textContent).toBe("2片");
+        expect(today?.getAttribute("aria-label")).toContain("当日共 2 片，预计 55 分钟");
+        expect(document.querySelector(".xz-slice-card > header .xz-slice-legend")?.textContent).toContain("已安排");
+        expect(document.querySelector(".xz-slice-side")).toBeNull();
+    });
+
+    it("所有目标切片完成后提示确认事务完成", async () => {
+        const complete = vi.fn().mockResolvedValue(undefined);
+        const finished = transaction({
+            status: "进行中",
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "done", scheduledDate: "2026-09-04", status: "completed", completedAt: 2, updatedAt: 2 }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: finished, complete } });
+        await tick();
+
+        expect(document.querySelector(".xz-slice-completion-prompt")?.textContent).toContain("事务是否也已完成");
+        ([...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "完成事务") as HTMLButtonElement).click();
+        await vi.waitFor(() => expect(complete).toHaveBeenCalledOnce());
+    });
 });
 
 function transaction(overrides: Partial<WorkItem> = {}): WorkItem {

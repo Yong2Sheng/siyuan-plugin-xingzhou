@@ -78,12 +78,13 @@ describe("XingzhouApp", () => {
         const captureInbox = vi.fn()
             .mockResolvedValueOnce(baseData)
             .mockResolvedValueOnce({ ...baseData, items: [domain, project] });
+        const openItemMenu = vi.fn();
         const captureRequests: CaptureDialogRequest[] = [];
         component = new XingzhouApp({
             target: document.body,
             props: {
                 load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox, saveItem: vi.fn(), deleteItem: vi.fn(),
-                openDocument: vi.fn(), openCaptureDialog: (request) => captureRequests.push(request),
+                openDocument: vi.fn(), openItemMenu, openCaptureDialog: (request) => captureRequests.push(request),
             },
         });
 
@@ -92,6 +93,11 @@ describe("XingzhouApp", () => {
         await captureRequests[0].onSubmit({ title: "随手记下的想法" });
         await vi.waitFor(() => expect(captureInbox).toHaveBeenNthCalledWith(1, "随手记下的想法", undefined));
         await vi.waitFor(() => expect(document.querySelector(".xz-add-child-button"), document.body.innerHTML).not.toBeNull());
+
+        (document.querySelector(".xz-tree-menu-button") as HTMLButtonElement).click();
+        (document.querySelector(".xz-detail-menu-button") as HTMLButtonElement).click();
+        expect(openItemMenu).toHaveBeenCalledTimes(2);
+        expect(openItemMenu.mock.calls[0][2]?.label).toBe("添加顶层项目…");
 
         (document.querySelector(".xz-add-child-button") as HTMLButtonElement).click();
         expect(captureRequests[1]?.mode).toBe("child");
@@ -329,6 +335,8 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-meta-grid--editable")?.textContent).not.toContain("计划开始日");
         expect(document.querySelector(".xz-meta-grid--editable")?.textContent).not.toContain("每片预计时长");
         expect(document.querySelector('[aria-label="每片预计时长（分钟）"]')).toBeInstanceOf(HTMLInputElement);
+        expect(document.querySelector('[aria-label="待安排切片数"]')).toBeNull();
+        expect(document.querySelector(".xz-slice-header-meta")?.textContent).toContain("待安排");
         expect(document.querySelector(".xz-detail-header-actions .xz-tag--today")).toBeNull();
         expect(document.querySelector(".xz-complete-button")?.textContent?.trim()).toBe("✓ 标记为完成");
         expect(document.querySelector(".xz-detail-role-actions .xz-complete-button")).not.toBeNull();
@@ -336,6 +344,16 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-dependency-setup")).toBeNull();
         expect(document.querySelector('select[aria-label="添加完成后开始依赖"]')).toBeInstanceOf(HTMLSelectElement);
         expect(document.querySelector('select[aria-label="添加需先行依赖"]')).toBeInstanceOf(HTMLSelectElement);
+
+        expect(document.querySelector(".xz-workspace")?.classList.contains("xz-workspace--detail-open")).toBe(true);
+        (document.querySelector(".xz-tablet-scope-button") as HTMLButtonElement).click();
+        await tick();
+        expect(document.querySelector(".xz-workspace")?.classList.contains("xz-workspace--scope-open")).toBe(true);
+        (document.querySelector(".xz-scope-backdrop") as HTMLButtonElement).click();
+        (document.querySelector(".xz-detail-back-button") as HTMLButtonElement).click();
+        await tick();
+        expect(document.querySelector(".xz-workspace")?.classList.contains("xz-workspace--scope-open")).toBe(false);
+        expect(document.querySelector(".xz-workspace")?.classList.contains("xz-workspace--detail-open")).toBe(false);
 
         saveItem.mockClear();
         (document.querySelector(".xz-complete-button") as HTMLButtonElement).click();
@@ -407,7 +425,7 @@ describe("XingzhouApp", () => {
         tomorrow.setDate(tomorrow.getDate() + 1);
         const scheduled = {
             id: "scheduled", rowId: "scheduled", title: "今天处理合同", documentId: null, detached: true,
-            type: "事务", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            type: "事务", status: "待开始", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
             planDate: null, deadline: tomorrow.getTime(), noDeadline: false, durationMinutes: 30, energy: "低", updatedAt: Date.now(),
             sliceTargetCount: 2,
             executionSlices: [{ id: "today-slice", scheduledDate: localDateKey(today), status: "scheduled" as const, completedAt: null, updatedAt: Date.now() }],
@@ -482,6 +500,7 @@ describe("XingzhouApp", () => {
         [...(sliceCard?.querySelectorAll<HTMLButtonElement>(".xz-week-item-actions button") ?? [])].find((button) => button.textContent === "完成")?.click();
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
         expect(saveItem.mock.calls[0][2].executionSlices?.[0]).toMatchObject({ id: "today-slice", status: "completed" });
+        expect(saveItem.mock.calls[0][2].status).toBe("进行中");
         await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="scheduled"][data-week-date="${todayKey}"]`)?.classList.contains("xz-week-item--date-completed")).toBe(true));
         expect(document.querySelector(`[data-work-item-id="scheduled"] .xz-week-slice-status`)?.textContent).toContain("已完成");
 

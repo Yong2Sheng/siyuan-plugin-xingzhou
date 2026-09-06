@@ -140,7 +140,12 @@ export default class XingzhouPlugin extends Plugin {
                                 });
                                 plugin.dialogs.add(dialog);
                             },
-                            openItemMenu: (event: MouseEvent, onDelete: () => void, addChild?: { label: string; onClick: () => void }) => {
+                            openItemMenu: (
+                                event: MouseEvent,
+                                onDelete: () => void,
+                                addChild?: { label: string; onClick: () => void },
+                                actions: Array<{ label: string; icon?: string; onClick: () => void }> = [],
+                            ) => {
                                 event.preventDefault();
                                 event.stopPropagation();
                                 const menu = new Menu("xingzhou-work-item-actions-menu");
@@ -150,8 +155,15 @@ export default class XingzhouPlugin extends Plugin {
                                         label: addChild.label,
                                         click: addChild.onClick,
                                     });
-                                    menu.addSeparator();
                                 }
+                                for (const action of actions) {
+                                    menu.addItem({
+                                        icon: action.icon,
+                                        label: action.label,
+                                        click: action.onClick,
+                                    });
+                                }
+                                if (addChild || actions.length > 0) menu.addSeparator();
                                 menu.addItem({
                                     icon: "iconTrashcan",
                                     label: "删除工作项…",
