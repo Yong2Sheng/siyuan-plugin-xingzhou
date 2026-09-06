@@ -4,6 +4,12 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
+### Changed
+
+- Professional study after lunch now begins with a No / Yes decision. Book, topic, plan, and result fields appear only when study is planned, and explicitly selecting No clears details that no longer apply.
+- Today's Life Rhythm record now shows stage completeness and a missing-fields review. Free-form navigation remains available, stage buttons distinguish not started, incomplete, complete, and no-check-needed states, and each key omission can jump to and focus its field; ordinary notes remain optional.
+- The nutrition manager now separates Daily Goals and Food Templates into distinct cards: side by side on wide panes and stacked on tablets or narrow panes, making goal settings clearly separate from template entry.
+
 ## 1.0.0 - 2026-09-06
 
 ### Added

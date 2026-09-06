@@ -38,6 +38,7 @@ export type DailyRecordFields = {
     personalProjectLinks: DailyWorkItemLink[];
     personalProjectPlan: string;
     restAndLifePlan: string;
+    professionalStudyPlanned: PresenceState;
     studyMaterial: string;
     studyTopic: string;
     studyPlan: string;
@@ -254,7 +255,7 @@ function emptyDailyFields(): DailyRecordFields {
         lightsOffTime: "", wakeTime: "", lightsOffAt: "", wakeAt: "", sleepDurationMinutes: null, watchSleepScore: null,
         subjectiveSleepQuality: null, morningWeight: null, weightUnit: "kg", workStartTime: "",
         plannedWorkEndTime: "", importantWorkPlan: "", saturdayReviewOccurred: "", hasDayAdjustments: "", dayAdjustments: "", trainingPlan: "", personalProjectLinks: [],
-        personalProjectPlan: "", restAndLifePlan: "", studyMaterial: "", studyTopic: "", studyPlan: "",
+        personalProjectPlan: "", restAndLifePlan: "", professionalStudyPlanned: "", studyMaterial: "", studyTopic: "", studyPlan: "",
         studyResult: "", actualWorkEndTime: "", keyWorkResult: "", trainingCompleted: "",
         importantWorkResult: "", personalProjectDurationMinutes: null, daytimeEnergy: null,
         workEfficiency: null, promotingStress: null, depletingStress: null, closureNeed: "", closureObject: "",
@@ -274,6 +275,7 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
     const normalizedClosureNeed = closureNeed(fields);
     const normalizedSaturdayReview = saturdayReviewOccurred(fields, source.dayType);
     const normalizedDayAdjustments = presenceState(fields.hasDayAdjustments, fields.dayAdjustments);
+    const normalizedProfessionalStudy = presenceState(fields.professionalStudyPlanned, [fields.studyMaterial, fields.studyTopic, fields.studyPlan, fields.studyResult].map(textValue).join(""));
     const normalizedClosureHasNextStep = presenceState(fields.closureHasNextStep, fields.closureNextStep);
     const normalizedAfterHoursWork = presenceState(fields.afterHoursWorkOccurred, fields.afterHoursWorkReason);
     const normalizedAnomaly = presenceState(fields.hasAnomalyOrObservation, fields.anomalyOrObservation);
@@ -301,6 +303,11 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             importantWorkResult: normalizedSaturdayReview === "no" ? "" : textValue(fields.importantWorkResult),
             hasDayAdjustments: normalizedDayAdjustments,
             dayAdjustments: normalizedDayAdjustments === "yes" ? textValue(fields.dayAdjustments) : "",
+            professionalStudyPlanned: normalizedProfessionalStudy,
+            studyMaterial: normalizedProfessionalStudy === "yes" ? textValue(fields.studyMaterial) : "",
+            studyTopic: normalizedProfessionalStudy === "yes" ? textValue(fields.studyTopic) : "",
+            studyPlan: normalizedProfessionalStudy === "yes" ? textValue(fields.studyPlan) : "",
+            studyResult: normalizedProfessionalStudy === "yes" ? textValue(fields.studyResult) : "",
             personalProjectLinks: normalizeWorkItemLinks(fields.personalProjectLinks),
             personalProjectDurationMinutes: nullableNonnegativeNumber(fields.personalProjectDurationMinutes),
             daytimeEnergy: nullableScore(fields.daytimeEnergy),

@@ -120,6 +120,18 @@ describe("生活节律内部数据库", () => {
         expect(cleared.fields).toMatchObject({ hasDayAdjustments: "no", dayAdjustments: "" });
     });
 
+    it("旧学习记录自动推断为有安排，明确没有时清空学习字段", () => {
+        const legacy = createDailyRecord("2026-09-06", "sunday-half-day", 1000);
+        legacy.fields.studyMaterial = "统计学习方法";
+        legacy.fields.studyTopic = "第五章";
+        const migrated = upsertDailyRecord(createEmptyDailyStore(900), legacy, 1100).records[0];
+        expect(migrated.fields).toMatchObject({ professionalStudyPlanned: "yes", studyMaterial: "统计学习方法", studyTopic: "第五章" });
+
+        migrated.fields.professionalStudyPlanned = "no";
+        const cleared = upsertDailyRecord(createEmptyDailyStore(1200), migrated, 1300).records[0];
+        expect(cleared.fields).toMatchObject({ professionalStudyPlanned: "no", studyMaterial: "", studyTopic: "", studyPlan: "", studyResult: "" });
+    });
+
     it("周六旧记录会从复盘内容推断已复盘，明确未复盘时清空工作字段", () => {
         const legacy = createDailyRecord("2026-09-05", "saturday-reset", 1000);
         legacy.fields.workStartTime = "09:00";

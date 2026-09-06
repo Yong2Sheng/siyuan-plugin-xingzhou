@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onDestroy } from "svelte";
+    import { onDestroy, tick } from "svelte";
     import {
         DAILY_RUBRICS,
         cloneDailyRecord,
@@ -29,6 +29,12 @@
     import { buildWorkItemTree, flattenWorkItemTree } from "./tree";
     import type { WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
     import { createDefaultChecklistStore, type ChecklistStore } from "./checklist";
+    import {
+        calculateDailyCompletion,
+        type DailyCompletionStage,
+        type DailyMissingItem,
+        type DailyStageCompletion,
+    } from "./daily-completion";
 
     export let loadDaily: () => Promise<DailyRecordStore>;
     export let saveDaily: (record: DailyRecord) => Promise<DailyRecordStore>;
@@ -75,12 +81,14 @@
     let editRevision = 0;
     let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
     let saveTask: Promise<boolean> | null = null;
+    let missingOpen = false;
 
     $: workApplicable = isWorkMetricApplicable(draft.dayType);
     $: isSaturdayReset = draft.dayType === "saturday-reset";
     $: dayGuidance = dayTypes.find((entry) => entry.value === draft.dayType)?.guidance ?? "";
     $: boundary = calculateBoundary(draft.fields.plannedWorkEndTime, draft.fields.actualWorkEndTime);
     $: resolvedSleep = resolveSleepDateTimes(draft);
+    $: completion = calculateDailyCompletion(draft);
 
     Promise.resolve().then(() => void refresh());
 
@@ -176,6 +184,19 @@
         if (!dayTypes.some((entry) => entry.value === dayType)) return;
         draft.dayType = dayType as DailyDayType;
         if (dayType === "holiday" && (stage === "learning" || stage === "boundary" || stage === "after-work")) stage = "recovery";
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    function changeProfessionalStudyPlanned(value: string) {
+        if (!["", "yes", "no"].includes(value)) return;
+        draft.fields.professionalStudyPlanned = value as PresenceState;
+        if (value !== "yes") {
+            draft.fields.studyMaterial = "";
+            draft.fields.studyTopic = "";
+            draft.fields.studyPlan = "";
+            draft.fields.studyResult = "";
+        }
         draft = { ...draft, fields: { ...draft.fields } };
         markDirty();
     }
@@ -363,6 +384,45 @@
         stage = next;
     }
 
+    function stageCompletion(target: DailyCompletionStage): DailyStageCompletion {
+        return completion.stages.find((entry) => entry.stage === target) ?? {
+            stage: target,
+            label: target,
+            state: "not-started",
+            missing: [],
+        };
+    }
+
+    function completionStatusLabel(target: DailyCompletionStage): string {
+        const entry = stageCompletion(target);
+        if (entry.state === "complete") return "已完成";
+        if (entry.state === "not-applicable") return "无需检查";
+        if (entry.state === "not-started") return "未开始";
+        return `待补 ${entry.missing.length} 项`;
+    }
+
+    function completionBadge(target: DailyCompletionStage): string {
+        const entry = stageCompletion(target);
+        if (entry.state === "complete") return "✓";
+        if (entry.state === "not-applicable") return "—";
+        if (entry.state === "not-started") return "○";
+        return String(entry.missing.length);
+    }
+
+    async function inspectMissing(item: DailyMissingItem) {
+        await changeStage(item.stage);
+        if (stage !== item.stage) return;
+        missingOpen = false;
+        await tick();
+        const candidates = [...document.querySelectorAll<HTMLElement>(".xz-daily-record .xz-daily-form-section label, .xz-daily-record .xz-daily-field, .xz-daily-record .xz-daily-score")];
+        const target = candidates.find((candidate) => candidate.textContent?.includes(item.focusLabel));
+        if (!target) return;
+        target.classList.add("xz-daily-field-focus");
+        target.scrollIntoView?.({ block: "center", behavior: "smooth" });
+        target.querySelector<HTMLElement>("input, select, textarea, button")?.focus();
+        window.setTimeout(() => target.classList.remove("xz-daily-field-focus"), 1600);
+    }
+
     async function openHistoryRecord(date: string) {
         if (await openDate(date)) view = "today";
     }
@@ -466,13 +526,30 @@
             <article class="xz-daily-record">
                 <header class="xz-daily-record-header">
                     <div><h2>{formatDate(currentDate)}</h2><p>{dayTypeLabel(draft.dayType)} · {store?.records.some((record) => record.date === currentDate) ? "已有记录" : "尚未保存"}</p></div>
-                    <nav class="xz-daily-stage-nav" aria-label="填写阶段">
-                        <button class:active={stage === "morning"} type="button" on:click={() => void changeStage("morning")}>早晨</button>
-                        {#if workApplicable}<button class:active={stage === "learning"} type="button" on:click={() => void changeStage("learning")}>{isSaturdayReset ? "上午复盘" : "午饭后"}</button><button class:active={stage === "boundary"} type="button" on:click={() => void changeStage("boundary")}>{isSaturdayReset ? "中午下班" : "下班"}</button><button class:active={stage === "after-work"} type="button" on:click={() => void changeStage("after-work")}>{isSaturdayReset ? "自由时间" : "下班后"}</button>{:else}<button class:active={stage === "recovery"} type="button" on:click={() => void changeStage("recovery")}>恢复</button>{/if}
-                        <button class:active={stage === "evening"} type="button" on:click={() => void changeStage("evening")}>21:00</button>
-                        <button class:active={stage === "all"} type="button" on:click={() => void changeStage("all")}>全部</button>
-                    </nav>
+                    <div class="xz-daily-header-actions">
+                        <div class="xz-daily-completion-summary" aria-live="polite">
+                            <span>完成 <strong>{completion.completedCount}/{completion.applicableCount}</strong>{#if completion.missing.length}<em>待补 {completion.missing.length} 项</em>{:else}<em class="complete">已补齐</em>{/if}</span>
+                            <button type="button" class:active={missingOpen} on:click={() => missingOpen = !missingOpen}>{missingOpen ? "收起待补" : "检查待补"}</button>
+                        </div>
+                        <nav class="xz-daily-stage-nav" aria-label="填写阶段">
+                            <button class={`completion-${stageCompletion("morning").state}`} class:active={stage === "morning"} data-completion={completionBadge("morning")} aria-label={`早晨，${completionStatusLabel("morning")}`} title={completionStatusLabel("morning")} type="button" on:click={() => void changeStage("morning")}>早晨</button>
+                            {#if workApplicable}<button class={`completion-${stageCompletion("learning").state}`} class:active={stage === "learning"} data-completion={completionBadge("learning")} aria-label={`${isSaturdayReset ? "上午复盘" : "午饭后"}，${completionStatusLabel("learning")}`} title={completionStatusLabel("learning")} type="button" on:click={() => void changeStage("learning")}>{isSaturdayReset ? "上午复盘" : "午饭后"}</button><button class={`completion-${stageCompletion("boundary").state}`} class:active={stage === "boundary"} data-completion={completionBadge("boundary")} aria-label={`${isSaturdayReset ? "中午下班" : "下班"}，${completionStatusLabel("boundary")}`} title={completionStatusLabel("boundary")} type="button" on:click={() => void changeStage("boundary")}>{isSaturdayReset ? "中午下班" : "下班"}</button><button class={`completion-${stageCompletion("after-work").state}`} class:active={stage === "after-work"} data-completion={completionBadge("after-work")} aria-label={`${isSaturdayReset ? "自由时间" : "下班后"}，${completionStatusLabel("after-work")}`} title={completionStatusLabel("after-work")} type="button" on:click={() => void changeStage("after-work")}>{isSaturdayReset ? "自由时间" : "下班后"}</button>{:else}<button class={`completion-${stageCompletion("recovery").state}`} class:active={stage === "recovery"} data-completion={completionBadge("recovery")} aria-label={`恢复，${completionStatusLabel("recovery")}`} title={completionStatusLabel("recovery")} type="button" on:click={() => void changeStage("recovery")}>恢复</button>{/if}
+                            <button class={`completion-${stageCompletion("evening").state}`} class:active={stage === "evening"} data-completion={completionBadge("evening")} aria-label={`21:00，${completionStatusLabel("evening")}`} title={completionStatusLabel("evening")} type="button" on:click={() => void changeStage("evening")}>21:00</button>
+                            <button class:active={stage === "all"} type="button" on:click={() => void changeStage("all")}>全部</button>
+                        </nav>
+                    </div>
                 </header>
+
+                {#if missingOpen}
+                    <section class="xz-daily-missing-panel" aria-label="待补项目">
+                        <header><div><strong>{completion.missing.length ? `还有 ${completion.missing.length} 项待补` : "今日关键记录已补齐"}</strong><small>{completion.missing.length ? "只检查关键字段；备注和补充说明仍是可选项。" : "普通备注与补充说明无需填写。"}</small></div><button type="button" aria-label="关闭待补项目" on:click={() => missingOpen = false}>×</button></header>
+                        {#if completion.missing.length}
+                            <div>{#each completion.missing as item (item.stage + item.id)}<button type="button" on:click={() => void inspectMissing(item)}><span>{stageCompletion(item.stage).label}</span><strong>{item.label}</strong><i>›</i></button>{/each}</div>
+                        {:else}
+                            <p>没有遗漏的关键字段，可以按自己的需要继续补充其他内容。</p>
+                        {/if}
+                    </section>
+                {/if}
 
                 {#if stage === "morning" || stage === "all"}
                     <section class="xz-daily-form-section">
@@ -525,12 +602,19 @@
                             {/if}
                         {:else}
                             <h3>午饭后专业学习安排</h3>
-                            <div class="xz-daily-fields two">
-                                <label><span>书目／材料</span><input bind:value={draft.fields.studyMaterial} /></label>
-                                <label><span>章节／主题</span><input bind:value={draft.fields.studyTopic} /></label>
-                                <label><span>学习安排</span><textarea bind:value={draft.fields.studyPlan}></textarea></label>
-                                <label><span>完成时长与页码／停点</span><textarea bind:value={draft.fields.studyResult}></textarea></label>
-                            </div>
+                            <div class="xz-daily-fields two"><label><span>午饭后是否安排专业学习</span><select value={draft.fields.professionalStudyPlanned} on:change|stopPropagation={(event) => changeProfessionalStudyPlanned(event.currentTarget.value)}><option value="">尚未确认</option><option value="no">没有</option><option value="yes">有</option></select></label></div>
+                            {#if draft.fields.professionalStudyPlanned === "yes"}
+                                <div class="xz-daily-fields two xz-daily-closure-details">
+                                    <label><span>书目／材料</span><input bind:value={draft.fields.studyMaterial} /></label>
+                                    <label><span>章节／主题</span><input bind:value={draft.fields.studyTopic} /></label>
+                                    <label><span>学习安排</span><textarea bind:value={draft.fields.studyPlan}></textarea></label>
+                                    <label><span>完成时长与页码／停点</span><textarea bind:value={draft.fields.studyResult}></textarea></label>
+                                </div>
+                            {:else if draft.fields.professionalStudyPlanned === "no"}
+                                <p class="xz-daily-closure-note">午饭后没有专业学习安排，无需填写学习内容。</p>
+                            {:else}
+                                <p class="xz-daily-closure-note">先确认午饭后是否安排专业学习，再填写相应内容。</p>
+                            {/if}
                         {/if}
                     </section>
                 {/if}

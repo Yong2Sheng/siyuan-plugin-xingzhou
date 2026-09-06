@@ -53,6 +53,13 @@ describe("营养摄入界面", () => {
         expect(document.querySelector(".xz-nutrition-template-grid")).not.toBeNull();
         expect(document.querySelector(".xz-nutrition-today")?.textContent).toContain("当日已吃");
         expect(document.body.textContent).toContain("2026 年 9 月 5 日");
+
+        clickButton("管理模板与目标");
+        await tick();
+        const managerCards = [...document.querySelectorAll(".xz-nutrition-manager-card")];
+        expect(managerCards).toHaveLength(2);
+        expect(managerCards[0].textContent).toContain("每日目标");
+        expect(managerCards[1].textContent).toContain("新建常用模板");
     });
 
     it("按实际量记录时自动按模板基准比例换算", async () => {

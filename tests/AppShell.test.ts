@@ -165,6 +165,50 @@ describe("行舟一级模块外壳", () => {
         expect([...document.querySelectorAll("label")].some((label) => label.textContent?.includes("完成训练"))).toBe(false);
     });
 
+    it("先确认午饭后是否安排专业学习，再按需显示输入框", async () => {
+        const properties = props();
+        component = new DailyRhythm({ target: document.body, props: { loadDaily: properties.loadDaily, saveDaily: properties.saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
+
+        clickButton("午饭后");
+        await vi.waitFor(() => expect(document.body.textContent).toContain("午饭后是否安排专业学习"));
+        expect(document.body.textContent).not.toContain("书目／材料");
+
+        const decision = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("午饭后是否安排专业学习"))
+            ?.querySelector("select") as HTMLSelectElement;
+        decision.value = "yes";
+        decision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.body.textContent).toContain("书目／材料");
+        expect(document.body.textContent).toContain("完成时长与页码／停点");
+
+        decision.value = "no";
+        decision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.body.textContent).not.toContain("书目／材料");
+        expect(document.body.textContent).toContain("无需填写学习内容");
+    });
+
+    it("显示各阶段完整度，并可从待补清单跳到对应阶段", async () => {
+        const properties = props();
+        component = new DailyRhythm({ target: document.body, props: { loadDaily: properties.loadDaily, saveDaily: properties.saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
+
+        expect(document.querySelector<HTMLButtonElement>('.xz-daily-stage-nav button[aria-label^="早晨，"]')?.getAttribute("aria-label")).toContain("未开始");
+        clickButton("检查待补");
+        await tick();
+        expect(document.querySelector(".xz-daily-missing-panel")?.textContent).toContain("只检查关键字段");
+
+        const studyMissing = [...document.querySelectorAll<HTMLButtonElement>(".xz-daily-missing-panel > div > button")]
+            .find((button) => button.textContent?.includes("是否安排专业学习"));
+        if (!studyMissing) throw new Error("没有找到专业学习待补项目");
+        studyMissing.click();
+        await vi.waitFor(() => expect(document.body.textContent).toContain("午饭后专业学习安排"));
+        expect(document.activeElement?.closest("label")?.textContent).toContain("午饭后是否安排专业学习");
+        expect(document.querySelector(".xz-daily-missing-panel")).toBeNull();
+    });
+
     it("先确认训练完成状态，仅在已完成时填写训练内容", async () => {
         let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);

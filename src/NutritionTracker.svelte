@@ -359,26 +359,28 @@
 
         {#if managerOpen}
             <section class="xz-nutrition-manager">
-                <div class="xz-nutrition-goals">
-                    <h3>每日目标</h3>
+                <section class="xz-nutrition-manager-card xz-nutrition-goals">
+                    <header><h3>每日目标</h3><p>用于计算当天的摄入进度，不会创建食物记录。</p></header>
                     <label><span>热量目标（kcal）</span><input class="b3-text-field" type="number" min="1" bind:value={calorieGoalDraft} placeholder="不设置" /></label>
                     <label><span>蛋白质目标（g）</span><input class="b3-text-field" type="number" min="1" step="0.1" bind:value={proteinGoalDraft} placeholder="不设置" /></label>
                     <button type="button" disabled={saving} on:click={() => void saveGoals()}>保存目标</button>
-                </div>
-                <div class="xz-nutrition-template-editor">
-                    <h3>{editingTemplateId ? "编辑常用模板" : "新建常用模板"}</h3>
-                    <div class="xz-nutrition-food-fields">
-                        <label class="name"><span>食物名称</span><input class="b3-text-field" bind:value={templateDraft.name} placeholder="例如：训练后奶昔" /></label>
-                        <label><span>基准量</span><input class="b3-text-field" type="number" min="0.01" step="any" bind:value={templateDraft.baseAmount} placeholder="113" /></label>
-                        <label><span>单位</span><input class="b3-text-field" bind:value={templateDraft.unit} placeholder="ml／g／份" /></label>
-                        <label><span>热量 kcal</span><input class="b3-text-field" type="number" min="0" bind:value={templateDraft.caloriesKcal} /></label>
-                        <label><span>蛋白质 g</span><input class="b3-text-field" type="number" min="0" step="0.1" bind:value={templateDraft.proteinGrams} /></label>
-                        <label><span>碳水 g</span><input class="b3-text-field" type="number" min="0" step="0.1" bind:value={templateDraft.carbsGrams} /></label>
-                        <label><span>脂肪 g</span><input class="b3-text-field" type="number" min="0" step="0.1" bind:value={templateDraft.fatGrams} /></label>
+                </section>
+                <section class="xz-nutrition-manager-card xz-nutrition-template-card">
+                    <div class="xz-nutrition-template-editor">
+                        <header><h3>{editingTemplateId ? "编辑常用模板" : "新建常用模板"}</h3><p>保存经常食用的组合，之后可以一键或按实际份量记录。</p></header>
+                        <div class="xz-nutrition-food-fields">
+                            <label class="name"><span>食物名称</span><input class="b3-text-field" bind:value={templateDraft.name} placeholder="例如：训练后奶昔" /></label>
+                            <label><span>基准量</span><input class="b3-text-field" type="number" min="0.01" step="any" bind:value={templateDraft.baseAmount} placeholder="113" /></label>
+                            <label><span>单位</span><input class="b3-text-field" bind:value={templateDraft.unit} placeholder="ml／g／份" /></label>
+                            <label><span>热量 kcal</span><input class="b3-text-field" type="number" min="0" bind:value={templateDraft.caloriesKcal} /></label>
+                            <label><span>蛋白质 g</span><input class="b3-text-field" type="number" min="0" step="0.1" bind:value={templateDraft.proteinGrams} /></label>
+                            <label><span>碳水 g</span><input class="b3-text-field" type="number" min="0" step="0.1" bind:value={templateDraft.carbsGrams} /></label>
+                            <label><span>脂肪 g</span><input class="b3-text-field" type="number" min="0" step="0.1" bind:value={templateDraft.fatGrams} /></label>
+                        </div>
+                        <div class="xz-nutrition-editor-actions"><button class="primary" type="button" disabled={saving} on:click={() => void saveTemplate()}>{editingTemplateId ? "保存修改" : "建立模板"}</button>{#if editingTemplateId}<button type="button" on:click={cancelTemplateEdit}>取消编辑</button>{/if}</div>
                     </div>
-                    <div class="xz-nutrition-editor-actions"><button class="primary" type="button" disabled={saving} on:click={() => void saveTemplate()}>{editingTemplateId ? "保存修改" : "建立模板"}</button>{#if editingTemplateId}<button type="button" on:click={cancelTemplateEdit}>取消编辑</button>{/if}</div>
-                </div>
-                {#if store.templates.length > 0}<div class="xz-nutrition-template-list">{#each store.templates as template (template.id)}<div><span><strong>{template.name}</strong><small>每 {formatAmount(template.baseAmount, template.unit)} · {formatNumber(template.values.caloriesKcal)} kcal · 蛋白质 {formatNumber(template.values.proteinGrams)}g · 碳水 {formatNumber(template.values.carbsGrams)}g · 脂肪 {formatNumber(template.values.fatGrams)}g</small></span><button type="button" on:click={() => editTemplate(template)}>编辑</button><button class="danger" type="button" on:click={() => void deleteTemplate(template)}>删除</button></div>{/each}</div>{/if}
+                    {#if store.templates.length > 0}<div class="xz-nutrition-template-list">{#each store.templates as template (template.id)}<div><span><strong>{template.name}</strong><small>每 {formatAmount(template.baseAmount, template.unit)} · {formatNumber(template.values.caloriesKcal)} kcal · 蛋白质 {formatNumber(template.values.proteinGrams)}g · 碳水 {formatNumber(template.values.carbsGrams)}g · 脂肪 {formatNumber(template.values.fatGrams)}g</small></span><button type="button" on:click={() => editTemplate(template)}>编辑</button><button class="danger" type="button" on:click={() => void deleteTemplate(template)}>删除</button></div>{/each}</div>{/if}
+                </section>
             </section>
         {/if}
 
