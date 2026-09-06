@@ -48,7 +48,7 @@
     export let initialWorkItemId: string | null = null;
     export let initialViewState: WorkItemViewState | null = null;
 
-    type MainPage = "week" | "all" | "inbox" | "review";
+    type MainPage = "week" | "all" | "review";
     type ItemFilter = "all" | "active" | "future" | "closed";
     type WeekDay = { timestamp: number; key: string; label: string; dateLabel: string; isToday: boolean };
     type ActionField = "currentAction" | "nextAction";
@@ -57,7 +57,6 @@
     const mainPages: Array<{ id: MainPage; label: string }> = [
         { id: "all", label: "全部" },
         { id: "week", label: "本周" },
-        { id: "inbox", label: "收件箱" },
         { id: "review", label: "整理" },
     ];
     const itemFilters: Array<{ id: ItemFilter; label: string }> = [
@@ -84,10 +83,7 @@
     let scopeDrawerOpen = false;
     let compactDetailOpen = false;
     let expandedIds = new Set<string>();
-    let inboxDraft = "";
     let capturing = false;
-    let captureError = "";
-    let captureMessage = "";
     export let quickCaptureNotice = "";
     let weekStart = startOfWeek(Date.now());
     let weekSavingIds = new Set<string>();
@@ -201,15 +197,14 @@
             ? (data?.items ?? []).filter((item) => item.id !== deleteTargetId && prerequisiteIds(item).includes(deleteTargetId)).length
             : 0;
     }
-    $: inboxItems = [...(data?.items.filter((item) => item.status === "收件箱") ?? [])]
-        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     $: weekDays = buildWeekDays(weekStart);
     $: weekItemsByDate = groupWeekOccurrences(data?.items ?? [], weekStart);
     $: scheduledWeekIds = new Set([...weekItemsByDate.values()].flatMap((occurrences) => occurrences.filter(({ slice }) => !slice || slice.status === "scheduled").map(({ item }) => item.id)));
     $: scheduledWeekCount = [...weekItemsByDate.values()].flat().filter(({ slice }) => !slice || slice.status === "scheduled").length;
     $: unscheduledWeekItems = getUnscheduledWeekItems(data?.items ?? []);
     $: activeWindowItems = getActiveWindowItems(data?.items ?? [], scheduledWeekIds);
-    $: reviewActiveProjects = getReviewActiveProjects(data?.items ?? []);
+    $: reviewFocusedDomains = getReviewFocusedDomains(data?.items ?? []);
+    $: reviewOngoingProjects = getReviewOngoingProjects(data?.items ?? []);
     $: reviewDateItems = getReviewDateItems(data?.items ?? []);
     $: reviewMissingActionItems = getReviewMissingActionItems(data?.items ?? [], new Set(reviewDateItems.map((item) => item.id)));
     $: reviewCompletedThisWeek = getReviewCompletedThisWeek(data?.items ?? []);
@@ -287,7 +282,7 @@
         data = nextData;
         tree = buildWorkItemTree(nextData.items);
         if (initialViewState && !appliedInitialViewState) {
-            page = initialViewState.page;
+            page = initialViewState.page === "inbox" ? "all" : initialViewState.page;
             filter = initialViewState.filter;
             includeClosed = initialViewState.includeClosed;
             scope = initialViewState.scope === "all" || tree.byId.has(initialViewState.scope) ? initialViewState.scope : "all";
@@ -358,38 +353,21 @@
         }
     }
 
-    async function submitInbox() {
-        const title = inboxDraft.trim();
-        if (!title || capturing) return;
-        capturing = true;
-        captureError = "";
-        captureMessage = "";
-        try {
-            applyData(await captureInbox(title));
-            inboxDraft = "";
-            captureMessage = `已加入收件箱：${title}`;
-        } catch (caught) {
-            captureError = caught instanceof Error ? caught.message : String(caught);
-        } finally {
-            capturing = false;
-        }
-    }
-
     function canAddChild(item: WorkItem): boolean {
         return item.type === "长期领域" || item.type === "项目";
     }
 
-    export function openQuickCapture(parent: WorkItem | null = null) {
-        const mode: CaptureDialogMode = parent ? "child" : "global";
+    function openChildCapture(parent: WorkItem) {
+        const mode: CaptureDialogMode = "child";
         openCaptureDialog({
             mode,
-            parent: parent ? { id: parent.id, title: parent.title, type: parent.type } : undefined,
+            parent: { id: parent.id, title: parent.title, type: parent.type },
             areas: longTermAreas.map(({ id, title, type }) => ({ id, title, type })),
             onSubmit: (values) => submitQuickCapture(mode, parent, values),
         });
     }
 
-    function openSidebarCapture(mode: Exclude<CaptureDialogMode, "global" | "child">) {
+    function openSidebarCapture(mode: Exclude<CaptureDialogMode, "child">) {
         openCaptureDialog({
             mode,
             areas: longTermAreas.map(({ id, title, type }) => ({ id, title, type })),
@@ -425,7 +403,7 @@
             const created = refreshed.items.find((item) => !previousIds.has(item.id));
             quickCaptureNotice = mode === "child" && parent
                 ? `已在“${parent.title}”下创建：${title}`
-                : mode === "global" ? `已加入收件箱：${title}` : `已创建：${title}`;
+                : `已创建：${title}`;
             if (created && options) revealInboxItem(created, true);
         } finally {
             capturing = false;
@@ -491,7 +469,7 @@
 
     function openActionsMenu(event: MouseEvent, item: WorkItem) {
         const addChild = canAddChild(item)
-            ? { label: item.type === "长期领域" ? "添加顶层项目…" : "添加下级工作项…", onClick: () => void openQuickCapture(item) }
+            ? { label: item.type === "长期领域" ? "添加顶层项目…" : "添加下级工作项…", onClick: () => void openChildCapture(item) }
             : undefined;
         const parentId = item.parentIds[0] ?? null;
         const siblings = (parentId ? tree.children.get(parentId) ?? [] : tree.roots)
@@ -504,11 +482,6 @@
     }
 
     function handleWindowKeydown(event: KeyboardEvent) {
-        if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "i") {
-            event.preventDefault();
-            openQuickCapture();
-            return;
-        }
         if (event.key !== "Escape") return;
         if (deleteTarget && !deleting) {
             deleteTarget = null;
@@ -1014,7 +987,13 @@
             .sort((a, b) => (a.deadline ?? 0) - (b.deadline ?? 0) || a.title.localeCompare(b.title, "zh-CN"));
     }
 
-    function getReviewActiveProjects(items: WorkItem[]): WorkItem[] {
+    function getReviewFocusedDomains(items: WorkItem[]): WorkItem[] {
+        return items
+            .filter((item) => item.type === "长期领域" && item.status === "重点投入")
+            .sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+    }
+
+    function getReviewOngoingProjects(items: WorkItem[]): WorkItem[] {
         return items
             .filter((item) => {
                 if (item.type !== "项目" || (item.status !== "进行中" && item.status !== "活跃")) return false;
@@ -1250,9 +1229,6 @@
         <div class="xz-header-actions">
             {#if quickCaptureNotice}<span class="xz-quick-capture-notice" aria-live="polite">{quickCaptureNotice}</span>{/if}
             <span class="xz-data-source">插件内部数据</span>
-            <button class="b3-button b3-button--outline xz-global-capture-button" type="button" on:click={() => void openQuickCapture()}>
-                ＋ 添加
-            </button>
             <button class="b3-button b3-button--outline" type="button" on:click={() => void refresh()} disabled={loading}>
                 <svg><use href="#iconRefresh"></use></svg>{loading ? "读取中" : "刷新"}
             </button>
@@ -1291,64 +1267,7 @@
         {/if}
     </div>
 
-    {#if page === "inbox"}
-        <main class="xz-inbox-page">
-            <section class="xz-inbox-hero">
-                <div>
-                    <span class="xz-section-kicker">快速捕获</span>
-                    <h2>先记下来，之后再整理</h2>
-                    <p>这里只要求一个名称。类型、上层项目、日期和下一步行动，可以留到每周整理时再补。</p>
-                </div>
-            </section>
-
-            <form class="xz-capture-card" on:submit|preventDefault={() => void submitInbox()}>
-                <label for="xz-inbox-input">突然想到什么？</label>
-                <div class="xz-capture-row">
-                    <input
-                        id="xz-inbox-input"
-                        class="b3-text-field"
-                        type="text"
-                        bind:value={inboxDraft}
-                        placeholder="例如：整理书桌上的旧合同"
-                        autocomplete="off"
-                        disabled={capturing}
-                    />
-                    <button class="b3-button" type="submit" disabled={capturing || !inboxDraft.trim()}>
-                        {capturing ? "正在保存…" : "加入收件箱"}
-                    </button>
-                </div>
-                <p class="xz-capture-hint">按 Enter 即可保存为行舟内部工作项，状态自动设为“收件箱”。</p>
-                {#if captureMessage}<p class="xz-capture-feedback xz-capture-feedback--success" aria-live="polite">{captureMessage}</p>{/if}
-                {#if captureError}<p class="xz-capture-feedback xz-capture-feedback--error" aria-live="assertive">{captureError}</p>{/if}
-            </form>
-
-            <section class="xz-inbox-list-panel">
-                <div class="xz-inbox-list-heading">
-                    <div><span class="xz-section-kicker">等待整理</span><h2>收件箱</h2></div>
-                    <span>{inboxItems.length} 项</span>
-                </div>
-                {#if loading && !data}
-                    <div class="xz-state"><span class="xz-spinner"></span><p>正在读取收件箱……</p></div>
-                {:else if error && !data}
-                    <div class="xz-state xz-error"><h2>暂时无法读取收件箱</h2><p>{error}</p><button class="b3-button" type="button" on:click={() => void refresh()}>重试</button></div>
-                {:else if inboxItems.length === 0}
-                    <div class="xz-inbox-empty"><div class="xz-empty-icon">舟</div><h3>收件箱是空的</h3><p>现在没有等待归类的事项。想到新内容时，直接在上方写下名称即可。</p></div>
-                {:else}
-                    <div class="xz-inbox-list">
-                        {#each inboxItems as item (item.id)}
-                            <article class="xz-inbox-item" data-work-item-id={item.id}>
-                                <button class="xz-inbox-item-main" type="button" on:click={() => revealInboxItem(item)}>
-                                    <span class="xz-inbox-item-title">{item.title}</span>
-                                    <span class="xz-inbox-item-meta">{item.type || "未分类"} · {item.updatedAt ? formatDate(item.updatedAt) : "刚刚捕获"}</span>
-                                </button>
-                                <button class="xz-link-button" type="button" on:click={() => revealInboxItem(item)}>查看详情</button>
-                            </article>
-                        {/each}
-                    </div>
-                {/if}
-            </section>
-        </main>
-    {:else if page === "week"}
+    {#if page === "week"}
         <main class="xz-week-page">
             <header class="xz-week-header">
                 <div>
@@ -1470,22 +1389,22 @@
                 <div class="xz-state xz-error"><h2>暂时无法进行整理</h2><p>{error}</p><button class="b3-button" type="button" on:click={() => void refresh()}>重试</button></div>
             {:else if data}
                 <section class="xz-review-summary" aria-label="整理概况">
-                    <div><strong>{inboxItems.length}</strong><span>收件箱</span></div>
-                    <div class:xz-review-metric--warning={reviewActiveProjects.length > 3}><strong>{reviewActiveProjects.length}<small> / 3</small></strong><span>活跃顶层项目</span></div>
+                    <div><strong>{reviewFocusedDomains.length}</strong><span>重点投入的长期领域</span></div>
+                    <div class:xz-review-metric--warning={reviewOngoingProjects.length > 3}><strong>{reviewOngoingProjects.length}<small> / 3</small></strong><span>进行中的顶层项目</span></div>
                     <div><strong>{reviewDateItems.length}</strong><span>日期待确认</span></div>
                     <div><strong>{reviewMissingActionItems.length}</strong><span>缺少行动细则</span></div>
                     <div class="xz-review-metric--positive"><strong>{reviewCompletedThisWeek.length}</strong><span>本周已结束</span></div>
                 </section>
 
                 <div class="xz-review-steps">
-                    <section class:xz-review-step--ready={inboxItems.length === 0} class="xz-review-step">
-                        <header><span class="xz-review-step-number">1</span><div><h3>清空收件箱</h3><p>补充类型和状态，或确认暂时放到“将来”。</p></div><em>{inboxItems.length === 0 ? "已就绪" : `${inboxItems.length} 项`}</em></header>
-                        {#if inboxItems.length > 0}<div class="xz-review-item-list">{#each inboxItems as item (item.id)}<button type="button" data-work-item-id={item.id} on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.type || "未分类"} · 收件箱</span></button>{/each}</div>{/if}
+                    <section class:xz-review-step--ready={reviewFocusedDomains.length > 0} class="xz-review-step">
+                        <header><span class="xz-review-step-number">1</span><div><h3>确认重视什么</h3><p>列出投入状态为“重点投入”的长期领域，明确近期需要优先关注的生活与责任方向。</p></div><em>{reviewFocusedDomains.length === 0 ? "暂无重点领域" : `${reviewFocusedDomains.length} 个重点领域`}</em></header>
+                        {#if reviewFocusedDomains.length > 0}<div class="xz-review-item-list">{#each reviewFocusedDomains as item (item.id)}<button type="button" data-work-item-id={item.id} on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{item.status}</span></button>{/each}</div>{/if}
                     </section>
 
-                    <section class:xz-review-step--warning={reviewActiveProjects.length > 3} class:xz-review-step--ready={reviewActiveProjects.length > 0 && reviewActiveProjects.length <= 3} class="xz-review-step">
-                        <header><span class="xz-review-step-number">2</span><div><h3>确认当前投入方向</h3><p>活跃顶层项目原则上不超过 2–3 个；长期领域不计入数量。</p></div><em>{reviewActiveProjects.length > 3 ? "需要收敛" : reviewActiveProjects.length === 0 ? "尚未选择" : "数量合适"}</em></header>
-                        {#if reviewActiveProjects.length > 0}<div class="xz-review-item-list">{#each reviewActiveProjects as item (item.id)}<button type="button" data-work-item-id={item.id} on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{displayStatus(item.status)}</span></button>{/each}</div>{/if}
+                    <section class:xz-review-step--warning={reviewOngoingProjects.length > 3} class:xz-review-step--ready={reviewOngoingProjects.length > 0 && reviewOngoingProjects.length <= 3} class="xz-review-step">
+                        <header><span class="xz-review-step-number">2</span><div><h3>确认正在做什么</h3><p>列出项目状态为“进行中”的顶层项目；建议同时推进不超过 2–3 个。</p></div><em>{reviewOngoingProjects.length > 3 ? "并行项目过多" : reviewOngoingProjects.length === 0 ? "暂无进行中项目" : "数量合适"}</em></header>
+                        {#if reviewOngoingProjects.length > 0}<div class="xz-review-item-list">{#each reviewOngoingProjects as item (item.id)}<button type="button" data-work-item-id={item.id} on:click={() => revealInboxItem(item)}><strong>{item.title}</strong><span>{displayStatus(item.status)}</span></button>{/each}</div>{/if}
                     </section>
 
                     <section class:xz-review-step--ready={reviewDateItems.length === 0} class="xz-review-step">
@@ -1610,7 +1529,7 @@
                                 {#if selectedProfile}<RoleBadge role={selectedProfile.role} />{/if}
                                 <div class="xz-detail-role-actions">
                                     {#if canAddChild(selected)}
-                                        <button class="xz-add-child-button" type="button" on:click={() => void openQuickCapture(selected)}>
+                                        <button class="xz-add-child-button" type="button" on:click={() => void openChildCapture(selected)}>
                                             ＋ {selected.type === "长期领域" ? "添加顶层项目" : "添加下级"}
                                         </button>
                                     {/if}

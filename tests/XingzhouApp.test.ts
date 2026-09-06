@@ -41,28 +41,30 @@ describe("XingzhouApp", () => {
         expect(document.body.textContent).toContain("正在读取行舟内部数据");
     });
 
-    it("收件箱页显示真实捕获表单而不是占位说明", async () => {
+    it("移除收件箱与全局添加入口，并把旧收件箱视图恢复到全部", async () => {
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(),
+                load: vi.fn().mockResolvedValue({
+                    attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view", items: [], missingFields: [], fields: {},
+                }),
                 captureInbox: vi.fn(),
                 saveItem: vi.fn(),
                 deleteItem: vi.fn(),
                 openDocument: vi.fn(),
+                initialViewState: {
+                    page: "inbox", filter: "all", includeClosed: false, scope: "all", selectedId: null,
+                    expandedIds: [], weekStart: Date.now(), sidebarScrollTop: 0, treeScrollTop: 0, detailScrollTop: 0,
+                },
             },
         });
-
-        const inboxTab = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱");
-        inboxTab?.click();
-        await tick();
-
-        expect(document.querySelector("#xz-inbox-input")).toBeInstanceOf(HTMLInputElement);
-        expect(document.body.textContent).toContain("先记下来，之后再整理");
-        expect(document.body.textContent).not.toContain("这个页面仍在规划中");
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        expect([...document.querySelectorAll(".xz-main-nav button")].map((button) => button.textContent?.trim())).toEqual(["全部", "本周", "整理"]);
+        expect(document.querySelector(".xz-global-capture-button")).toBeNull();
+        expect(document.querySelector("#xz-inbox-input")).toBeNull();
     });
 
-    it("提供全局快速添加，并能在长期领域下上下文创建顶层项目", async () => {
+    it("能在长期领域下通过上下文创建顶层项目", async () => {
         const domain = {
             id: "domain", rowId: "domain", title: "写小说", documentId: null, detached: true,
             type: "长期领域", status: "重点投入", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
@@ -73,25 +75,19 @@ describe("XingzhouApp", () => {
             items: [domain], missingFields: [], fields: {},
         };
         const project = {
-            ...domain, id: "project", rowId: "project", title: "完成第一卷", type: "项目", status: "收件箱", parentIds: [domain.id],
+            ...domain, id: "project", rowId: "project", title: "完成第一卷", type: "项目", status: "待开始", parentIds: [domain.id],
         };
-        const captureInbox = vi.fn()
-            .mockResolvedValueOnce(baseData)
-            .mockResolvedValueOnce({ ...baseData, items: [domain, project] });
+        const captureInbox = vi.fn().mockResolvedValueOnce({ ...baseData, items: [domain, project] });
         const openItemMenu = vi.fn();
         const captureRequests: CaptureDialogRequest[] = [];
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox, saveItem: vi.fn(), deleteItem: vi.fn(),
+                load: vi.fn().mockResolvedValue(baseData), captureInbox, saveItem: vi.fn(), deleteItem: vi.fn(),
                 openDocument: vi.fn(), openItemMenu, openCaptureDialog: (request) => captureRequests.push(request),
             },
         });
 
-        (document.querySelector(".xz-global-capture-button") as HTMLButtonElement).click();
-        expect(captureRequests[0]?.mode).toBe("global");
-        await captureRequests[0].onSubmit({ title: "随手记下的想法" });
-        await vi.waitFor(() => expect(captureInbox).toHaveBeenNthCalledWith(1, "随手记下的想法", undefined));
         await vi.waitFor(() => expect(document.querySelector(".xz-add-child-button"), document.body.innerHTML).not.toBeNull());
 
         (document.querySelector(".xz-tree-menu-button") as HTMLButtonElement).click();
@@ -100,10 +96,10 @@ describe("XingzhouApp", () => {
         expect(openItemMenu.mock.calls[0][2]?.label).toBe("添加顶层项目…");
 
         (document.querySelector(".xz-add-child-button") as HTMLButtonElement).click();
-        expect(captureRequests[1]?.mode).toBe("child");
-        expect(captureRequests[1]?.parent).toMatchObject({ id: "domain", title: "写小说", type: "长期领域" });
-        await captureRequests[1].onSubmit({ title: "完成第一卷", type: "项目" });
-        await vi.waitFor(() => expect(captureInbox).toHaveBeenNthCalledWith(2, "完成第一卷", {
+        expect(captureRequests[0]?.mode).toBe("child");
+        expect(captureRequests[0]?.parent).toMatchObject({ id: "domain", title: "写小说", type: "长期领域" });
+        await captureRequests[0].onSubmit({ title: "完成第一卷", type: "项目" });
+        await vi.waitFor(() => expect(captureInbox).toHaveBeenCalledWith("完成第一卷", {
             type: "项目", status: "待开始", parentId: "domain", topProjectId: "",
         }));
         await vi.waitFor(() => expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("完成第一卷"));
@@ -116,25 +112,21 @@ describe("XingzhouApp", () => {
             planDate: null, deadline: null, noDeadline: false, durationMinutes: null, energy: "", updatedAt: Date.now(),
         };
         const project = { ...domain, id: "project", rowId: "project", title: "恶魔的尾巴", type: "项目", status: "进行中", parentIds: [domain.id] };
-        const child = { ...domain, id: "child", rowId: "child", title: "世界观构建", type: "项目", status: "收件箱", parentIds: [project.id], topProjectIds: [project.id] };
+        const child = { ...domain, id: "child", rowId: "child", title: "世界观构建", type: "项目", status: "待开始", parentIds: [project.id], topProjectIds: [project.id] };
         const baseData = {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
             items: [domain, project], missingFields: [], fields: {},
         };
         const captureRequests: CaptureDialogRequest[] = [];
-        const captureInbox = vi.fn()
-            .mockResolvedValueOnce(baseData)
-            .mockResolvedValueOnce({ ...baseData, items: [domain, project, child] });
+        const captureInbox = vi.fn().mockResolvedValueOnce({ ...baseData, items: [domain, project, child] });
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox,
+                load: vi.fn().mockResolvedValue(baseData), captureInbox,
                 saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
                 openCaptureDialog: (request) => captureRequests.push(request),
             },
         });
-        (document.querySelector(".xz-global-capture-button") as HTMLButtonElement).click();
-        await captureRequests[0].onSubmit({ title: "初始化长期领域视图" });
         await vi.waitFor(() => expect(
             document.querySelector('.xz-sidebar-group--areas [data-work-item-id="domain"]'),
             document.body.innerHTML,
@@ -145,8 +137,8 @@ describe("XingzhouApp", () => {
         (document.querySelector('.xz-tree-node[data-work-item-id="project"] .xz-tree-main') as HTMLButtonElement).click();
         await tick();
         (document.querySelector(".xz-add-child-button") as HTMLButtonElement).click();
-        expect(captureRequests[1]?.parent).toMatchObject({ id: "project", title: "恶魔的尾巴" });
-        await captureRequests[1].onSubmit({ title: "世界观构建", type: "项目" });
+        expect(captureRequests[0]?.parent).toMatchObject({ id: "project", title: "恶魔的尾巴" });
+        await captureRequests[0].onSubmit({ title: "世界观构建", type: "项目" });
         await tick();
 
         expect(document.querySelector('.xz-sidebar-group--areas [data-work-item-id="domain"]')?.classList.contains("active")).toBe(true);
@@ -173,18 +165,16 @@ describe("XingzhouApp", () => {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
             items: [base, idea, project, subproject, transaction, independent, completedIndependent], missingFields: [], fields: {},
         };
-        const captureInbox = vi.fn().mockResolvedValue(workItemData);
+        const captureInbox = vi.fn().mockResolvedValue({ ...workItemData, items: [...workItemData.items, { ...project, id: "new-project", rowId: "new-project", title: "准备第二卷" }] });
         const captureRequests: CaptureDialogRequest[] = [];
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox,
+                load: vi.fn().mockResolvedValue(workItemData), captureInbox,
                 saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
                 openCaptureDialog: (request) => captureRequests.push(request),
             },
         });
-        (document.querySelector(".xz-global-capture-button") as HTMLButtonElement).click();
-        await captureRequests[0].onSubmit({ title: "初始化侧栏测试" });
         await vi.waitFor(() => expect(document.querySelector(".xz-sidebar")).not.toBeNull());
 
         const sidebar = document.querySelector(".xz-sidebar") as HTMLElement;
@@ -206,10 +196,10 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-tree-scroll")?.textContent).toContain("绘制贸易路线");
 
         (sidebar.querySelector('button[aria-label="添加顶层项目"]') as HTMLButtonElement).click();
-        expect(captureRequests[1]?.mode).toBe("topProject");
-        expect(captureRequests[1]?.areas).toEqual([{ id: "domain", title: "写小说", type: "长期领域" }]);
-        await captureRequests[1].onSubmit({ title: "准备第二卷", areaId: "domain" });
-        await vi.waitFor(() => expect(captureInbox).toHaveBeenNthCalledWith(2, "准备第二卷", {
+        expect(captureRequests[0]?.mode).toBe("topProject");
+        expect(captureRequests[0]?.areas).toEqual([{ id: "domain", title: "写小说", type: "长期领域" }]);
+        await captureRequests[0].onSubmit({ title: "准备第二卷", areaId: "domain" });
+        await vi.waitFor(() => expect(captureInbox).toHaveBeenCalledWith("准备第二卷", {
             type: "项目", status: "待开始", parentId: "domain",
         }));
 
@@ -241,18 +231,14 @@ describe("XingzhouApp", () => {
             items: [parent, { ...first, sortOrder: 1 }, { ...second, sortOrder: 0 }],
         };
         const reorderItems = vi.fn().mockResolvedValue(reorderedData);
-        const captureRequests: CaptureDialogRequest[] = [];
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(() => new Promise<never>(() => undefined)),
-                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(),
+                load: vi.fn().mockResolvedValue(workItemData),
+                captureInbox: vi.fn(), saveItem: vi.fn(),
                 deleteItem: vi.fn(), reorderItems, openDocument: vi.fn(),
-                openCaptureDialog: (request) => captureRequests.push(request),
             },
         });
-        (document.querySelector(".xz-global-capture-button") as HTMLButtonElement).click();
-        await captureRequests[0].onSubmit({ title: "载入排序测试" });
         await vi.waitFor(() => expect(document.querySelectorAll(".xz-drag-handle"), document.body.innerHTML).toHaveLength(3));
         const moveUp = document.querySelector<HTMLButtonElement>('[aria-label="上移“第一章”"]');
         const moveDown = document.querySelector<HTMLButtonElement>('[aria-label="下移“第一章”"]');
@@ -266,7 +252,7 @@ describe("XingzhouApp", () => {
         await vi.waitFor(() => expect(document.querySelector(".xz-tree-children .xz-tree-title")?.textContent).toBe("第二章"));
     });
 
-    it("从收件箱查看独立条目时精确高亮，并允许直接编辑内部字段", async () => {
+    it("旧收件箱状态条目仍在全部视图精确显示，并允许直接编辑内部字段", async () => {
         const item = {
             id: "item-1", rowId: "item-1", title: "清理房间中的垃圾", documentId: null, detached: true,
             type: "事务", status: "收件箱", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
@@ -309,23 +295,16 @@ describe("XingzhouApp", () => {
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(() => new Promise<never>(() => undefined)),
-                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(),
+                load: vi.fn().mockResolvedValue(workItemData),
+                captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(),
             },
         });
-        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
-        await tick();
-        const input = document.querySelector("#xz-inbox-input") as HTMLInputElement;
-        input.value = "清理房间中的垃圾";
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        await tick();
-        (document.querySelector(".xz-capture-card") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-        await vi.waitFor(() => expect(document.body.textContent).toContain("查看详情"));
-        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "查看详情")?.click();
-        await tick();
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
 
         const exactScope = [...document.querySelectorAll(".xz-sidebar .xz-scope-button")]
             .find((button) => button.textContent?.includes("清理房间中的垃圾"));
+        (exactScope as HTMLButtonElement | undefined)?.click();
+        await tick();
         expect(exactScope?.classList.contains("active"), document.body.textContent ?? "").toBe(true);
         expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("清理房间中的垃圾");
         expect(document.querySelector(".xz-tree-row.selected .xz-today-focus")?.textContent).toBe("今日");
@@ -469,18 +448,11 @@ describe("XingzhouApp", () => {
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(() => new Promise<never>(() => undefined)),
-                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(),
+                load: vi.fn().mockResolvedValue(workItemData),
+                captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(),
             },
         });
-        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
-        await tick();
-        const input = document.querySelector("#xz-inbox-input") as HTMLInputElement;
-        input.value = "初始化测试数据";
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        await tick();
-        (document.querySelector(".xz-capture-card") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-        await vi.waitFor(() => expect(document.body.textContent).toContain("已加入收件箱：初始化测试数据"));
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
 
         [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "本周")?.click();
         await tick();
@@ -535,21 +507,10 @@ describe("XingzhouApp", () => {
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(), deleteItem, openItemMenu,
+                load: vi.fn().mockResolvedValue(workItemData), captureInbox: vi.fn(), saveItem: vi.fn(), deleteItem, openItemMenu,
                 openDocument: vi.fn(),
             },
         });
-
-        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
-        await tick();
-        const input = document.querySelector("#xz-inbox-input") as HTMLInputElement;
-        input.value = "初始化删除测试";
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        await tick();
-        (document.querySelector(".xz-capture-card") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-        await vi.waitFor(() => expect(document.body.textContent).toContain("已加入收件箱：初始化删除测试"));
-        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "全部")?.click();
-        await tick();
         await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="domain"]'), document.body.innerHTML).not.toBeNull());
         const detail = document.querySelector(".xz-detail") as HTMLElement;
         expect(detail.querySelector('.xz-role-badge[data-role="domain"]')?.textContent).toBe("长期领域");
@@ -580,7 +541,8 @@ describe("XingzhouApp", () => {
             type: "事务", status: "待开始", currentAction: "已有行动", nextAction: "", parentIds: [], topProjectIds: [],
             planDate: null, deadline: null, noDeadline: true, durationMinutes: 30, energy: "低", updatedAt: now,
         };
-        const domain = { ...base, id: "domain", rowId: "domain", title: "创作", type: "长期领域", status: "进行中" };
+        const domain = { ...base, id: "domain", rowId: "domain", title: "创作", type: "长期领域", status: "重点投入" };
+        const maintainedDomain = { ...base, id: "maintained-domain", rowId: "maintained-domain", title: "家庭", type: "长期领域", status: "持续维持" };
         const projects = [1, 2, 3, 4].map((number) => ({
             ...base, id: `project-${number}`, rowId: `project-${number}`, title: `活跃项目 ${number}`, type: "项目", status: "进行中", parentIds: ["domain"],
         }));
@@ -589,7 +551,7 @@ describe("XingzhouApp", () => {
         const completed = { ...base, id: "completed", rowId: "completed", title: "本周完成的事务", status: "已完成" };
         const workItemData = {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
-            items: [domain, ...projects, inbox, overdue, completed], missingFields: [],
+            items: [domain, maintainedDomain, ...projects, inbox, overdue, completed], missingFields: [],
             fields: {
                 title: { id: "title", name: "工作项", type: "block", options: [] },
                 currentAction: { id: "current", name: "本次行动细则", type: "text", options: [] },
@@ -599,24 +561,23 @@ describe("XingzhouApp", () => {
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(() => new Promise<never>(() => undefined)),
-                captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
+                load: vi.fn().mockResolvedValue(workItemData),
+                captureInbox: vi.fn(), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
             },
         });
-        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
-        await tick();
-        const input = document.querySelector("#xz-inbox-input") as HTMLInputElement;
-        input.value = "初始化整理数据";
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        await tick();
-        (document.querySelector(".xz-capture-card") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-        await vi.waitFor(() => expect(document.body.textContent).toContain("已加入收件箱：初始化整理数据"));
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
 
         [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "整理")?.click();
         await tick();
         expect(document.body.textContent).toContain("每周整理");
-        expect(document.body.textContent).toContain("需要收敛");
-        expect(document.body.textContent).toContain("需要归类的想法");
+        expect(document.body.textContent).toContain("确认重视什么");
+        expect(document.body.textContent).toContain("1 个重点领域");
+        expect(document.querySelector(".xz-review-page")?.textContent).toContain("创作");
+        expect(document.querySelector(".xz-review-page")?.textContent).not.toContain("家庭");
+        expect(document.body.textContent).toContain("确认正在做什么");
+        expect(document.body.textContent).toContain("并行项目过多");
+        expect(document.querySelector(".xz-review-page")?.textContent).not.toContain("收件箱");
+        expect(document.querySelector(".xz-review-page")?.textContent).not.toContain("需要归类的想法");
         expect(document.body.textContent).toContain("需要重新安排的事务");
         expect(document.body.textContent).toContain("本周完成的事务");
         expect(document.querySelector(".xz-review-item-overdue")?.textContent).toContain("截止日期已过");
@@ -624,9 +585,7 @@ describe("XingzhouApp", () => {
         const actionStep = [...document.querySelectorAll<HTMLElement>(".xz-review-step")].find((step) => step.querySelector("h3")?.textContent === "让执行项可以直接开始");
         expect(actionStep?.classList.contains("xz-review-step--ready")).toBe(true);
 
-        [...document.querySelectorAll<HTMLButtonElement>(".xz-review-item-list button")].find((button) => button.textContent?.includes("需要归类的想法"))?.click();
-        await tick();
-        expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("需要归类的想法");
+        expect(document.querySelector(".xz-review-step-number")?.textContent).toBe("1");
     });
 
     it("编辑跨领域依赖并显示反向支持关系", async () => {
@@ -658,20 +617,10 @@ describe("XingzhouApp", () => {
         component = new XingzhouApp({
             target: document.body,
             props: {
-                load: vi.fn(() => new Promise<never>(() => undefined)), captureInbox: vi.fn().mockResolvedValue(workItemData), saveItem, deleteItem: vi.fn(),
+                load: vi.fn().mockResolvedValue(workItemData), captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(),
                 openDocument: vi.fn(),
             },
         });
-        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "收件箱")?.click();
-        await tick();
-        const input = document.querySelector("#xz-inbox-input") as HTMLInputElement;
-        input.value = "初始化依赖测试";
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        await tick();
-        (document.querySelector(".xz-capture-card") as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-        await vi.waitFor(() => expect(document.body.textContent).toContain("已加入收件箱：初始化依赖测试"));
-        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "全部")?.click();
-        await tick();
         await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="map-design"]'), document.body.innerHTML).not.toBeNull());
         (document.querySelector('[data-work-item-id="map-design"] .xz-tree-main') as HTMLButtonElement).click();
         await tick();

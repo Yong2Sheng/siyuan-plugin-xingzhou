@@ -26,11 +26,9 @@ describe("行舟一级模块外壳", () => {
         expect(document.querySelector(".xz-shell-header .xz-module-nav")?.textContent).toContain("项目与事务");
         expect(document.querySelector(".xz-module-nav")?.textContent).toContain("生活节律");
         expect(document.querySelector(".xz-app > .xz-header")).toBeNull();
-        expect(document.querySelector(".xz-shell-actions")?.textContent).toContain("添加");
+        expect(document.querySelector(".xz-shell-actions")?.textContent).not.toContain("添加");
+        expect(document.querySelector(".xz-global-capture-button")).toBeNull();
         expect(document.querySelector(".xz-main-nav")?.textContent).toContain("本周");
-
-        clickButton("添加");
-        expect(properties.openCaptureDialog).toHaveBeenCalledOnce();
 
         clickButton("生活节律");
         await tick();

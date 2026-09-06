@@ -143,7 +143,7 @@ export function addStoredWorkItem(
         documentId: null,
         detached: true,
         type: options.type ?? "",
-        status: options.status ?? "收件箱",
+        status: options.status ?? "待开始",
         currentAction: "",
         nextAction: "",
         parentIds: options.parentId ? [options.parentId] : [],

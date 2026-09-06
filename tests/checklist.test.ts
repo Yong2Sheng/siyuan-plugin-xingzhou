@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checklistStoresMatch, createDefaultChecklistStore, parseChecklistStore, updateChecklistStore } from "../src/checklist";
+import { checklistStoresMatch, createDefaultChecklistStore, parseChecklistStore, updateChecklistDayState, updateChecklistStore } from "../src/checklist";
 
 describe("Checklist 配置", () => {
     it("提供工作日、周六和周日三套默认提醒，且不包含需要填写的横线字段", () => {
@@ -23,6 +23,20 @@ describe("Checklist 配置", () => {
         const restored = parseChecklistStore(JSON.parse(JSON.stringify(initial)));
         expect(restored).not.toBeNull();
         expect(checklistStoresMatch(initial, restored!)).toBe(true);
+    });
+
+    it("按日期保存勾选和训练安排，并兼容没有每日状态的旧配置", () => {
+        const initial = createDefaultChecklistStore(1000);
+        const saved = updateChecklistDayState(initial, "2026-09-06", ["sun-wake:common:0", "sun-wake:common:0"], "rest", 2000);
+        expect(saved.dayStates).toEqual([{
+            date: "2026-09-06",
+            checkedKeys: ["sun-wake:common:0"],
+            trainingMode: "rest",
+            updatedAt: 2000,
+        }]);
+        const { dayStates: _discarded, ...legacy } = saved;
+        expect(parseChecklistStore(legacy)?.dayStates).toEqual([]);
+        expect(checklistStoresMatch(saved, JSON.parse(JSON.stringify(saved)))).toBe(true);
     });
 
     it("损坏的单个模板会恢复对应默认值，而不是破坏其他模板", () => {

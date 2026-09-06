@@ -12,7 +12,7 @@ describe("每日 Checklist", () => {
         document.body.replaceChildren();
     });
 
-    it("两种视图共享勾选状态，并保存显示偏好", async () => {
+    it("两种视图共享勾选状态，并在组件重建后恢复当日进度", async () => {
         let store = createDefaultChecklistStore(1000);
         const saveChecklist = vi.fn(async (incoming: ChecklistStore) => store = incoming);
         component = new DailyChecklist({
@@ -23,8 +23,16 @@ describe("每日 Checklist", () => {
         await vi.waitFor(() => expect(document.querySelector(".xz-checklist-native-list")).not.toBeNull());
         const firstCheck = document.querySelector('.xz-checklist-native-reminders input[type="checkbox"]') as HTMLInputElement;
         firstCheck.click();
-        await tick();
+        await vi.waitFor(() => expect(store.dayStates.find((state) => state.date === "2026-09-04")?.checkedKeys).toHaveLength(1));
         expect(document.querySelector(".xz-checklist-summary")?.textContent).toContain("1 /");
+
+        component.$destroy();
+        document.body.replaceChildren();
+        component = new DailyChecklist({
+            target: document.body,
+            props: { date: "2026-09-04", loadChecklist: async () => store, saveChecklist },
+        });
+        await vi.waitFor(() => expect(document.querySelector('.xz-checklist-native-reminders input[type="checkbox"]:checked')).not.toBeNull());
 
         clickButton("纸质视图");
         await vi.waitFor(() => expect(document.querySelector(".xz-checklist-paper")).not.toBeNull());
@@ -47,9 +55,9 @@ describe("每日 Checklist", () => {
         await vi.waitFor(() => expect(document.body.textContent).toContain("周六 · 轻量复盘后"));
     });
 
-    it("周末训练或休息只切换当天提醒，不写入 Checklist 配置", async () => {
-        const store = createDefaultChecklistStore(1000);
-        const saveChecklist = vi.fn(async (incoming: ChecklistStore) => incoming);
+    it("周末训练或休息按日期保存并能在重启后恢复", async () => {
+        let store = createDefaultChecklistStore(1000);
+        const saveChecklist = vi.fn(async (incoming: ChecklistStore) => store = incoming);
         component = new DailyChecklist({
             target: document.body,
             props: { date: "2026-09-12", loadChecklist: async () => store, saveChecklist },
@@ -66,7 +74,16 @@ describe("每日 Checklist", () => {
         await tick();
         expect(document.body.textContent).toContain("今天休息，不补做训练");
         expect(document.body.textContent).not.toContain("只做器材动作");
-        expect(saveChecklist).not.toHaveBeenCalled();
+        await vi.waitFor(() => expect(store.dayStates.find((state) => state.date === "2026-09-12")?.trainingMode).toBe("rest"));
+
+        component.$destroy();
+        document.body.replaceChildren();
+        component = new DailyChecklist({
+            target: document.body,
+            props: { date: "2026-09-12", loadChecklist: async () => store, saveChecklist },
+        });
+        await vi.waitFor(() => expect(document.body.textContent).toContain("今天休息，不补做训练"));
+        expect(document.body.textContent).not.toContain("只做器材动作");
     });
 });
 

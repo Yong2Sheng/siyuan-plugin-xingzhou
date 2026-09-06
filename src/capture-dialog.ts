@@ -1,6 +1,6 @@
 import { Dialog } from "siyuan";
 
-export type CaptureDialogMode = "global" | "child" | "areaOrIdea" | "topProject" | "transaction";
+export type CaptureDialogMode = "child" | "areaOrIdea" | "topProject" | "transaction";
 
 export type CaptureDialogItem = {
     id: string;
@@ -26,14 +26,9 @@ type NativeCaptureDialogOptions = CaptureDialogRequest & {
 };
 
 const DIALOG_COPY: Record<CaptureDialogMode, { title: string; description: string; submit: string }> = {
-    global: {
-        title: "添加到收件箱",
-        description: "这里只需要一个名称；类型、层级和日期可以稍后再补。",
-        submit: "加入收件箱",
-    },
     child: {
         title: "添加下级工作项",
-        description: "上层工作项已经自动带入；新条目仍从收件箱状态开始，之后可以继续整理。",
+        description: "上层工作项已经自动带入；新条目从“待开始”状态建立，之后可以继续补充日期和行动细则。",
         submit: "创建下级",
     },
     areaOrIdea: {

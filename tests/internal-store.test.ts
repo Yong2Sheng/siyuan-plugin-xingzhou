@@ -87,7 +87,7 @@ describe("行舟内部工作项仓库", () => {
         expect(newSiblings.map((entry) => entry.id)).toEqual(["existing", "moved"]);
     });
 
-    it("新增工作项直接进入内部收件箱，并支持带上下文创建", () => {
+    it("新增工作项默认进入待开始，并支持带上下文创建", () => {
         const store = migrateWorkItemData(data([]), 1000);
         const next = addStoredWorkItem(store, "  新想法  ", "new-id", {
             type: "想法", status: "进行中", parentId: "parent", topProjectId: "top",
@@ -98,6 +98,7 @@ describe("行舟内部工作项仓库", () => {
             detached: true, parentIds: ["parent"], topProjectIds: ["top"],
             hardPrerequisiteIds: [], softPrerequisiteIds: [],
         });
+        expect(addStoredWorkItem(store, "默认条目", "default-id", {}, 2000).items[0].status).toBe("待开始");
     });
 
     it("新增工作项排在同级末尾，且可原子保存完整同级顺序", () => {
@@ -107,6 +108,7 @@ describe("行舟内部工作项仓库", () => {
             item({ id: "first", title: "第一章", parentIds: ["parent"] }),
         ]), 1000);
         const added = addStoredWorkItem(store, "第三章", "third", { parentId: "parent" }, 1500);
+        expect(added.items.find((entry) => entry.id === "third")?.status).toBe("待开始");
         expect(added.items.filter((entry) => entry.parentIds[0] === "parent")
             .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
             .map((entry) => entry.id)).toEqual(["second", "first", "third"]);

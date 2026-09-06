@@ -8,9 +8,9 @@ Xingzhou is a self-contained SiYuan system for personal action and daily rhythm.
 
 ## Highlights
 
-- Separate top-level Projects & Tasks and Life Rhythm modules, each with its own second-level navigation.
+- Separate top-level Projects & Tasks and Life Rhythm modules, each with its own second-level navigation. Projects & Tasks now uses All, Week, and Review without a separate Inbox page or global unclassified-capture button.
 - Life Rhythm includes a standalone Daily Checklist with the same workday, Saturday, and Sunday reminders as the paper edition, excluding fields that require data entry. Xingzhou and Paper views share the same same-day checks.
-- Checklist time nodes, titles, and reminder text are editable. Templates and the preferred view live in `checklist.json`; checks remain temporary session state, never enter history, and clear on a new date.
+- Checklist time nodes, titles, and reminder text are editable. Templates, view preference, daily checked progress, and weekend training choices are stored by date in `checklist.json`, so they survive plugin restarts and device sync.
 - Nutrition intake totals calories, protein, carbohydrates, and fat by day without meal categories, with reusable one-tap food templates, proportional calculation from an actual weight or volume, and optional calorie/protein goals. Goal settings and template editing use separate cards, side by side on wide panes and stacked on tablets or narrow panes.
 - Nutrition entries preserve the template values captured at logging time. Editing or deleting a food template affects only future entries and never rewrites intake history.
 - Daily profiles for research workdays, Saturday reset, Sunday half-day research, and holidays, with weekday defaults and per-date overrides.
@@ -26,6 +26,7 @@ Xingzhou is a self-contained SiYuan system for personal action and daily rhythm.
 - Complete hierarchy browsing for areas, top-level projects, subprojects, tasks, transactions, and ideas, with Today markers and rolled-up counts along relevant project paths. Siblings can be manually reordered with per-row Up/Down controls or the drag handle.
 - Week remains compatible with legacy planned-date and per-day completion records. Transactions configured with execution slices now follow their explicit slice dates instead of being repeated mechanically across every day from start to deadline.
 - Returning to Projects & Tasks restores the previous page, filters, hierarchy expansion, selected work item, and scroll position.
+- New work items are created directly from the typed add buttons in All, the add-child action, or hierarchy context menus. Review separately lists Focused long-term areas and Ongoing top-level projects to distinguish what matters now from what is actively being done, then checks dates, action details, and weekly results. Legacy Inbox-status items remain readable and editable in All, but the current UI no longer creates new Inbox items.
 - Direct editing of lifecycle, hierarchy, dates, execution cost, and action details; Current Action Details and Next Action render basic SiYuan Markdown while being viewed, expand their editors to fit the full content, continue lists while being edited, and immediately normalize sibling numbering after typing, deletion, cutting, or pasting.
 - Cross-project hard prerequisites and should-stay-ahead relationships, with cycle prevention.
 - Optional links to SiYuan documents without requiring a document for every work item.
@@ -39,7 +40,7 @@ When upgrading from `0.4.x` with no internal store yet, Xingzhou reads the confi
 
 Once the migrated work items have been verified in Xingzhou, deleting the legacy database or its containing document does not delete the internal work items. A work item may still retain a link to a SiYuan document; deleting that document only makes the link unavailable.
 
-Life Rhythm uses a separate `daily-records.json`. It starts empty and never reads or migrates the old daily-data document. Checklist templates and the preferred display mode use `checklist.json`, while same-day checks are not written to disk. Nutrition goals, food templates, and daily intake entries use `nutrition.json`. Work items, daily records, checklist configuration, and nutrition records each use three rotating backups plus read-after-write verification. Life Rhythm's public read-only integration points are `getDailyRecordsSnapshot({ from?, to? })` and `getDailyRubrics()` for future weekly, monthly, or AI analysis.
+Life Rhythm uses a separate `daily-records.json`. It starts empty and never reads or migrates the old daily-data document. Checklist templates, display preference, and date-scoped completion state use `checklist.json`. Nutrition goals, food templates, and daily intake entries use `nutrition.json`. Work items, daily records, checklist configuration and progress, and nutrition records each use three rotating backups plus read-after-write verification. Life Rhythm's public read-only integration points are `getDailyRecordsSnapshot({ from?, to? })` and `getDailyRubrics()` for future weekly, monthly, or AI analysis.
 
 ## Development
 

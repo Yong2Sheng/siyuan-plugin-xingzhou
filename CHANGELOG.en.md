@@ -9,6 +9,9 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - Professional study after lunch now begins with a No / Yes decision. Book, topic, plan, and result fields appear only when study is planned, and explicitly selecting No clears details that no longer apply.
 - Today's Life Rhythm record now shows stage completeness and a missing-fields review. Free-form navigation remains available, stage buttons distinguish not started, incomplete, complete, and no-check-needed states, and each key omission can jump to and focus its field; ordinary notes remain optional.
 - The nutrition manager now separates Daily Goals and Food Templates into distinct cards: side by side on wide panes and stacked on tablets or narrow panes, making goal settings clearly separate from template entry.
+- Removed the redundant global Add button, Inbox navigation, standalone Inbox page, and Inbox review step. New items now come from typed creation entry points and default to Ready, while legacy Inbox-status data remains visible in All for compatibility.
+- Split the Review investment check into Focused long-term areas and Ongoing top-level projects, clearly separating what matters now from what is actively being done.
+- Persisted Checklist completion and weekend training/rest choices by date, so progress now survives plugin restarts and device sync without requiring migration of existing templates.
 
 ## 1.0.0 - 2026-09-06
 

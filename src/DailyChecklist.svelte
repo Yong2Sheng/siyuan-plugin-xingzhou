@@ -1,20 +1,16 @@
-<script context="module" lang="ts">
-    type WeekendTrainingMode = "training" | "rest" | "";
-    const checkedByDate = new Map<string, Set<string>>();
-    const trainingModeByDate = new Map<string, WeekendTrainingMode>();
-</script>
-
 <script lang="ts">
     import { tick } from "svelte";
     import {
         cloneChecklistStore,
         createDefaultChecklistStore,
+        updateChecklistDayState,
         updateChecklistStore,
         type ChecklistEntry,
         type ChecklistStore,
         type ChecklistTemplate,
         type ChecklistTemplateId,
         type ChecklistTone,
+        type ChecklistTrainingMode,
         type ChecklistViewMode,
     } from "./checklist";
 
@@ -37,25 +33,25 @@
     let editHasTrainingChoices = false;
     let editTone: ChecklistTone = "plain";
     let lastDate = date;
-    let trainingMode: WeekendTrainingMode = trainingModeByDate.get(date) ?? "";
+    let checked = new Set<string>();
+    let trainingMode: ChecklistTrainingMode = "";
+    let saveSequence = 0;
 
     $: templateId = templateIdForDate(date);
     $: template = store.templates.find((candidate) => candidate.id === templateId) ?? store.templates[0];
-    $: checked = checkedSet(date);
     $: allReminderKeys = template.entries.flatMap((item) => visibleReminders(item, trainingMode).map((reminder) => reminder.key));
     $: completedCount = allReminderKeys.filter((key) => checked.has(key)).length;
     $: completionPercent = allReminderKeys.length ? Math.round(completedCount / allReminderKeys.length * 100) : 0;
     $: paperColumns = splitPaperEntries(template);
     $: if (date !== lastDate) {
         lastDate = date;
-        for (const key of checkedByDate.keys()) if (key !== date) checkedByDate.delete(key);
-        for (const key of trainingModeByDate.keys()) if (key !== date) trainingModeByDate.delete(key);
-        trainingMode = trainingModeByDate.get(date) ?? "";
+        hydrateDayState(date);
     }
 
     Promise.resolve().then(async () => {
         try {
             store = cloneChecklistStore(await loadChecklist());
+            hydrateDayState(date);
         } catch (caught) {
             error = caught instanceof Error ? caught.message : String(caught);
         } finally {
@@ -63,28 +59,26 @@
         }
     });
 
-    function checkedSet(currentDate: string): Set<string> {
-        let value = checkedByDate.get(currentDate);
-        if (!value) {
-            value = new Set<string>();
-            checkedByDate.set(currentDate, value);
-        }
-        return value;
+    function hydrateDayState(currentDate: string) {
+        const state = store.dayStates.find((candidate) => candidate.date === currentDate);
+        checked = new Set(state?.checkedKeys ?? []);
+        trainingMode = state?.trainingMode ?? "";
     }
 
     function toggleCheck(key: string) {
-        if (checked.has(key)) checked.delete(key);
-        else checked.add(key);
-        checked = new Set(checked);
-        checkedByDate.set(date, checked);
+        const nextChecked = new Set(checked);
+        if (nextChecked.has(key)) nextChecked.delete(key);
+        else nextChecked.add(key);
+        checked = nextChecked;
+        void persistDayState();
     }
 
-    function chooseTrainingMode(mode: Exclude<WeekendTrainingMode, "">) {
+    function chooseTrainingMode(mode: Exclude<ChecklistTrainingMode, "">) {
         trainingMode = mode;
-        trainingModeByDate.set(date, mode);
+        void persistDayState();
     }
 
-    function visibleReminders(item: ChecklistEntry, mode: WeekendTrainingMode): Array<{ key: string; text: string }> {
+    function visibleReminders(item: ChecklistEntry, mode: ChecklistTrainingMode): Array<{ key: string; text: string }> {
         const common = item.reminders.map((text, index) => ({ key: `${item.id}:common:${index}`, text }));
         if (!item.trainingChoices || !mode) return common;
         return [
@@ -96,6 +90,11 @@
     async function changeViewMode(viewMode: ChecklistViewMode) {
         if (store.viewMode === viewMode || saving) return;
         await persist(updateChecklistStore(store, { viewMode }));
+    }
+
+    async function persistDayState(): Promise<void> {
+        const next = updateChecklistDayState(store, date, checked, trainingMode);
+        await persist(next);
     }
 
     function openEditor(entry?: ChecklistEntry) {
@@ -171,16 +170,21 @@
     }
 
     async function persist(next: ChecklistStore): Promise<boolean> {
+        const previous = cloneChecklistStore(store);
+        const sequence = ++saveSequence;
+        store = cloneChecklistStore(next);
         saving = true;
         error = "";
         try {
-            store = cloneChecklistStore(await saveChecklist(next));
+            const saved = cloneChecklistStore(await saveChecklist(next));
+            if (sequence === saveSequence) store = saved;
             return true;
         } catch (caught) {
+            if (sequence === saveSequence) store = previous;
             error = caught instanceof Error ? caught.message : String(caught);
             return false;
         } finally {
-            saving = false;
+            if (sequence === saveSequence) saving = false;
         }
     }
 
@@ -244,7 +248,7 @@
                 <article class="xz-checklist-native-list">
                     <header>
                         <div><h3>{formatDate(date)}</h3><p>{weekdayLabel(date)} · {template.label}</p></div>
-                        <span>勾选仅在本次使用期间保留</span>
+                        <span>当日勾选会自动保存</span>
                     </header>
                     <div class="xz-checklist-native-entries">
                         {#each template.entries as item, entryIndex (item.id)}
@@ -334,7 +338,7 @@
             </div>
         {/if}
 
-        <p class="xz-checklist-reset-note">切换视图不会丢失勾选；离开后返回仍会保留。本状态不写入历史，新日期会自动清空。</p>
+        <p class="xz-checklist-reset-note">勾选与周末训练安排按日期自动保存；切换视图、重启插件或更换设备后仍可恢复。</p>
     </section>
 {/if}
 

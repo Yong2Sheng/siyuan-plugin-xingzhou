@@ -4,6 +4,14 @@ export const CHECKLIST_STORE_VERSION = 1;
 export type ChecklistViewMode = "xingzhou" | "paper";
 export type ChecklistTemplateId = "workday" | "saturday" | "sunday";
 export type ChecklistTone = "plain" | "mint" | "sand" | "rose";
+export type ChecklistTrainingMode = "training" | "rest" | "";
+
+export type ChecklistDayState = {
+    date: string;
+    checkedKeys: string[];
+    trainingMode: ChecklistTrainingMode;
+    updatedAt: number;
+};
 
 export type ChecklistEntry = {
     id: string;
@@ -30,6 +38,7 @@ export type ChecklistStore = {
     updatedAt: number;
     viewMode: ChecklistViewMode;
     templates: ChecklistTemplate[];
+    dayStates: ChecklistDayState[];
 };
 
 const entry = (
@@ -47,6 +56,7 @@ export function createDefaultChecklistStore(now = Date.now()): ChecklistStore {
         revision: 1,
         updatedAt: now,
         viewMode: "xingzhou",
+        dayStates: [],
         templates: [
             {
                 id: "workday",
@@ -85,7 +95,7 @@ export function createDefaultChecklistStore(now = Date.now()): ChecklistStore {
                     }),
                     entry("sat-breakfast", "08:00 左右", "早餐＋日评估早晨段", ["早餐随餐鱼油 1 粒", "完成睡眠、体重与训练记录；总计控制在 3–5 分钟"], "mint"),
                     entry("sat-light-work", "周六上午", "轻量工作 1–2 小时", ["只做回顾、整理、计划和简单任务", "不启动复杂新任务；这段复盘计入每周工作时间"], "sand"),
-                    entry("sat-review", "复盘时", "完成每周评估", ["筛选本周日期；检查遗漏与录入错误", "回看工作成果、边界执行、睡眠、训练与个人生活", "确定下周最重要的三个结果；最多调整一项执行细节", "另用 10–15 分钟整理项目与事务：收件箱、活跃项目、下周日期与结束状态"], "mint"),
+                    entry("sat-review", "复盘时", "完成每周评估", ["筛选本周日期；检查遗漏与录入错误", "回看工作成果、边界执行、睡眠、训练与个人生活", "确定下周最重要的三个结果；最多调整一项执行细节", "另用 10–15 分钟整理项目与事务：活跃项目、下周日期、行动细则与结束状态"], "mint"),
                     entry("sat-shutdown", "轻量工作结束前", "下班收尾仪式｜约 15 分钟", ["记录结果、停点与下一个动作；关闭工作软件", "打开免打扰，防止零散工作扩散到全天"], "rose"),
                     entry("sat-no-work", "周六中午", "完全无工作开始", ["从现在到周日中午，保持至少连续 24 小时无工作；这一区间也不做整理与计划"], "rose"),
                     entry("sat-free", "周六下午", "自由选择", ["兴趣、关系、出行、阅读或彻底休息；不设硬性产出要求"], "mint"),
@@ -134,6 +144,7 @@ export function parseChecklistStore(value: unknown): ChecklistStore | null {
     if (source.version !== CHECKLIST_STORE_VERSION || !Array.isArray(source.templates)) return null;
     const defaults = createDefaultChecklistStore();
     const templates = defaults.templates.map((fallback) => normalizeTemplate(source.templates?.find((candidate) => isObject(candidate) && candidate.id === fallback.id), fallback));
+    const dayStates = normalizeDayStates(source.dayStates);
     const updatedAt = finiteNumber(source.updatedAt) ?? Date.now();
     return {
         version: CHECKLIST_STORE_VERSION,
@@ -141,17 +152,37 @@ export function parseChecklistStore(value: unknown): ChecklistStore | null {
         updatedAt,
         viewMode: source.viewMode === "paper" ? "paper" : "xingzhou",
         templates,
+        dayStates,
     };
 }
 
-export function updateChecklistStore(store: ChecklistStore, changes: Partial<Pick<ChecklistStore, "viewMode" | "templates">>, now = Date.now()): ChecklistStore {
+export function updateChecklistStore(store: ChecklistStore, changes: Partial<Pick<ChecklistStore, "viewMode" | "templates" | "dayStates">>, now = Date.now()): ChecklistStore {
     const parsed = parseChecklistStore({ ...store, ...changes, revision: store.revision + 1, updatedAt: now });
     if (!parsed) throw new Error("Checklist 配置包含无法识别的数据。");
     return parsed;
 }
 
 export function cloneChecklistStore(store: ChecklistStore): ChecklistStore {
-    return { ...store, templates: store.templates.map((template) => ({ ...template, entries: template.entries.map(cloneEntry) })) };
+    return {
+        ...store,
+        templates: store.templates.map((template) => ({ ...template, entries: template.entries.map(cloneEntry) })),
+        dayStates: store.dayStates.map((state) => ({ ...state, checkedKeys: [...state.checkedKeys] })),
+    };
+}
+
+export function updateChecklistDayState(
+    store: ChecklistStore,
+    date: string,
+    checkedKeys: Iterable<string>,
+    trainingMode: ChecklistTrainingMode,
+    now = Date.now(),
+): ChecklistStore {
+    const normalizedKeys = [...new Set([...checkedKeys].map(cleanString).filter(Boolean))].sort();
+    const otherStates = store.dayStates.filter((state) => state.date !== date);
+    const dayStates = normalizedKeys.length || trainingMode
+        ? [...otherStates, { date, checkedKeys: normalizedKeys, trainingMode, updatedAt: now }].sort((a, b) => a.date.localeCompare(b.date))
+        : otherStates;
+    return updateChecklistStore(store, { dayStates }, now);
 }
 
 export function checklistStoresMatch(expected: ChecklistStore, actual: ChecklistStore): boolean {
@@ -177,6 +208,23 @@ function normalizeTemplate(value: unknown, fallback: ChecklistTemplate): Checkli
         subtitle: cleanString(value.subtitle) || fallback.subtitle,
         entries: entries.length ? entries : cloneTemplate(fallback).entries,
     };
+}
+
+function normalizeDayStates(value: unknown): ChecklistDayState[] {
+    if (!Array.isArray(value)) return [];
+    const byDate = new Map<string, ChecklistDayState>();
+    for (const candidate of value) {
+        if (!isObject(candidate)) continue;
+        const date = cleanString(candidate.date);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+        const checkedKeys = Array.isArray(candidate.checkedKeys)
+            ? [...new Set(candidate.checkedKeys.map(cleanString).filter(Boolean))].sort()
+            : [];
+        const trainingMode: ChecklistTrainingMode = candidate.trainingMode === "training" || candidate.trainingMode === "rest" ? candidate.trainingMode : "";
+        if (!checkedKeys.length && !trainingMode) continue;
+        byDate.set(date, { date, checkedKeys, trainingMode, updatedAt: finiteNumber(candidate.updatedAt) ?? 0 });
+    }
+    return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function normalizeEntry(value: unknown, fallback?: ChecklistEntry): ChecklistEntry | null {
