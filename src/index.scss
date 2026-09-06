@@ -1022,6 +1022,11 @@
 .xz-checklist-native-title > div { display: flex; margin-left: auto; }
 .xz-checklist-native-title button { padding: 2px 5px; border: 0; color: var(--xingzhou-muted); background: transparent; cursor: pointer; font-size: 12px; }
 .xz-checklist-native-title button:disabled { opacity: .35; cursor: default; }
+.xz-checklist-training-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; }
+.xz-checklist-training-choice > span { margin-right: 2px; color: var(--xingzhou-muted); font-size: 12px; }
+.xz-checklist-training-choice > button { min-height: 30px; padding: 4px 12px; border: 1px solid var(--xingzhou-border); border-radius: 999px; color: var(--xingzhou-text); background: var(--xingzhou-panel); cursor: pointer; font-size: 13px; }
+.xz-checklist-training-choice > button.active { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 700; }
+.xz-checklist-training-choice > small { color: var(--xingzhou-muted); font-size: 11px; }
 .xz-checklist-native-reminders { display: grid; gap: 1px; margin-top: 5px; }
 .xz-checklist-native-reminders label, .xz-checklist-paper section > label { min-width: 0; display: grid; grid-template-columns: 19px minmax(0, 1fr); align-items: start; gap: 6px; cursor: pointer; }
 .xz-checklist-native-reminders label { padding: 5px 6px 5px 0; border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); font-size: 14px; line-height: 1.55; }
@@ -1065,6 +1070,10 @@
 .xz-checklist-paper section.rose > header > span { border-color: #8d4938; background: #b85f48; }
 .xz-checklist-paper section > header strong { min-width: 0; color: #243638; font-size: 15px; }
 .xz-checklist-paper section > header button { margin-left: auto; padding: 1px 3px; border: 0; color: #6d7b7a; background: transparent; cursor: pointer; font-size: 11px; }
+.xz-checklist-training-choice.paper { margin: 2px 0 7px; }
+.xz-checklist-training-choice.paper > span { color: #6d7b7a; font-size: 11px; }
+.xz-checklist-training-choice.paper > button { min-height: 25px; padding: 2px 9px; border-color: #b8c9c5; color: #243638; background: #fefdfc; font-size: 11px; }
+.xz-checklist-training-choice.paper > button.active { border-color: #527e79; color: #355d59; background: #e0eeea; }
 .xz-checklist-paper section > label { margin: 4px 0; color: #243638; font-size: 12px; line-height: 1.5; }
 .xz-checklist-paper section input { accent-color: #527e79; }
 .xz-checklist-paper > footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 13px; padding-top: 8px; border-top: 1px solid #d7e0dd; color: #6d7b7a; font-size: 11px; }

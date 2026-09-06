@@ -33,4 +33,28 @@ describe("Checklist 配置", () => {
         });
         expect(parsed?.templates.find((template) => template.id === "workday")?.entries.length).toBeGreaterThan(10);
     });
+
+    it("旧版周末训练提醒会迁移成训练日和休息日两个可编辑分支", () => {
+        const source = createDefaultChecklistStore(1000);
+        const saturday = source.templates.find((template) => template.id === "saturday")!;
+        const legacy = {
+            ...source,
+            templates: source.templates.map((template) => template.id !== "saturday" ? template : {
+                ...template,
+                entries: template.entries.map((entry) => entry.id !== "sat-training" ? entry : {
+                    id: entry.id,
+                    time: entry.time,
+                    title: entry.title,
+                    reminders: ["训练日做训练；休息日不补做"],
+                    tone: entry.tone,
+                }),
+            }),
+        };
+
+        const parsed = parseChecklistStore(legacy);
+        const migrated = parsed?.templates.find((template) => template.id === saturday.id)?.entries.find((entry) => entry.id === "sat-training");
+        expect(migrated?.reminders).toEqual([]);
+        expect(migrated?.trainingChoices?.training).toContain("只做器材动作，无器材核心回家完成");
+        expect(migrated?.trainingChoices?.rest).toContain("今天休息，不补做训练");
+    });
 });

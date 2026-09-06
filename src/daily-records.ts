@@ -31,6 +31,8 @@ export type DailyRecordFields = {
     workStartTime: string;
     plannedWorkEndTime: string;
     importantWorkPlan: string;
+    saturdayReviewOccurred: PresenceState;
+    hasDayAdjustments: PresenceState;
     dayAdjustments: string;
     trainingPlan: string;
     personalProjectLinks: DailyWorkItemLink[];
@@ -251,7 +253,7 @@ function emptyDailyFields(): DailyRecordFields {
     return {
         lightsOffTime: "", wakeTime: "", lightsOffAt: "", wakeAt: "", sleepDurationMinutes: null, watchSleepScore: null,
         subjectiveSleepQuality: null, morningWeight: null, weightUnit: "kg", workStartTime: "",
-        plannedWorkEndTime: "", importantWorkPlan: "", dayAdjustments: "", trainingPlan: "", personalProjectLinks: [],
+        plannedWorkEndTime: "", importantWorkPlan: "", saturdayReviewOccurred: "", hasDayAdjustments: "", dayAdjustments: "", trainingPlan: "", personalProjectLinks: [],
         personalProjectPlan: "", restAndLifePlan: "", studyMaterial: "", studyTopic: "", studyPlan: "",
         studyResult: "", actualWorkEndTime: "", keyWorkResult: "", trainingCompleted: "",
         importantWorkResult: "", personalProjectDurationMinutes: null, daytimeEnergy: null,
@@ -270,6 +272,8 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
     const createdAt = finiteNumber(source.createdAt) ?? Date.now();
     const fields = source.fields as Partial<DailyRecordFields>;
     const normalizedClosureNeed = closureNeed(fields);
+    const normalizedSaturdayReview = saturdayReviewOccurred(fields, source.dayType);
+    const normalizedDayAdjustments = presenceState(fields.hasDayAdjustments, fields.dayAdjustments);
     const normalizedClosureHasNextStep = presenceState(fields.closureHasNextStep, fields.closureNextStep);
     const normalizedAfterHoursWork = presenceState(fields.afterHoursWorkOccurred, fields.afterHoursWorkReason);
     const normalizedAnomaly = presenceState(fields.hasAnomalyOrObservation, fields.anomalyOrObservation);
@@ -287,8 +291,16 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             subjectiveSleepQuality: nullableScore(fields.subjectiveSleepQuality),
             morningWeight: nullableNonnegativeNumber(fields.morningWeight),
             weightUnit: fields.weightUnit === "lb" ? "lb" : "kg",
-            keyWorkResult: resultState(fields.keyWorkResult),
+            keyWorkResult: normalizedSaturdayReview === "no" ? "" : resultState(fields.keyWorkResult),
             trainingCompleted: triState(fields.trainingCompleted),
+            saturdayReviewOccurred: normalizedSaturdayReview,
+            workStartTime: normalizedSaturdayReview === "no" ? "" : textValue(fields.workStartTime),
+            plannedWorkEndTime: normalizedSaturdayReview === "no" ? "" : textValue(fields.plannedWorkEndTime),
+            importantWorkPlan: normalizedSaturdayReview === "no" ? "" : textValue(fields.importantWorkPlan),
+            actualWorkEndTime: normalizedSaturdayReview === "no" ? "" : textValue(fields.actualWorkEndTime),
+            importantWorkResult: normalizedSaturdayReview === "no" ? "" : textValue(fields.importantWorkResult),
+            hasDayAdjustments: normalizedDayAdjustments,
+            dayAdjustments: normalizedDayAdjustments === "yes" ? textValue(fields.dayAdjustments) : "",
             personalProjectLinks: normalizeWorkItemLinks(fields.personalProjectLinks),
             personalProjectDurationMinutes: nullableNonnegativeNumber(fields.personalProjectDurationMinutes),
             daytimeEnergy: nullableScore(fields.daytimeEnergy),
@@ -373,6 +385,12 @@ function presenceState(value: unknown, legacyText: unknown): PresenceState {
     const text = textValue(legacyText).trim();
     if (!text) return "";
     return /^(无|没有|否|none)[。.!！]?$/i.test(text) ? "no" : "yes";
+}
+
+function saturdayReviewOccurred(fields: Partial<DailyRecordFields>, dayType: DailyDayType): PresenceState {
+    if (fields.saturdayReviewOccurred === "yes" || fields.saturdayReviewOccurred === "no") return fields.saturdayReviewOccurred;
+    if (dayType !== "saturday-reset") return "";
+    return [fields.workStartTime, fields.plannedWorkEndTime, fields.importantWorkPlan].some((value) => typeof value === "string" && Boolean(value.trim())) ? "yes" : "";
 }
 
 function resultState(value: unknown): ResultState {

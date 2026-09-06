@@ -2,8 +2,14 @@ import { tick } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AppShell from "../src/AppShell.svelte";
 import DailyRhythm from "../src/DailyRhythm.svelte";
-import { createEmptyDailyStore, upsertDailyRecord, type DailyRecord } from "../src/daily-records";
+import { createDailyRecord, createEmptyDailyStore, upsertDailyRecord, type DailyRecord } from "../src/daily-records";
 import type { WorkItem, WorkItemData } from "../src/work-items";
+
+function researchDailyStore() {
+    const now = new Date();
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    return upsertDailyRecord(createEmptyDailyStore(1000), { ...createDailyRecord(date), dayType: "research-workday" }, 1000);
+}
 
 describe("行舟一级模块外壳", () => {
     let component: { $destroy(): void } | undefined;
@@ -66,6 +72,59 @@ describe("行舟一级模块外壳", () => {
         expect(document.body.textContent).toContain("科研字段不适用");
     });
 
+    it("周六使用上午复盘、中午下班和自由时间的独立动线", async () => {
+        const properties = props();
+        component = new DailyRhythm({ target: document.body, props: { loadDaily: properties.loadDaily, saveDaily: properties.saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-context select")).not.toBeNull());
+
+        const select = document.querySelector(".xz-daily-context select") as HTMLSelectElement;
+        select.value = "saturday-reset";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+
+        const stages = [...document.querySelectorAll(".xz-daily-stage-nav button")].map((button) => button.textContent?.trim());
+        expect(stages).toEqual(["早晨", "上午复盘", "中午下班", "自由时间", "21:00", "全部"]);
+        expect(document.querySelector(".xz-daily-progress")?.textContent).toContain("上午轻量复盘");
+        expect(document.body.textContent).not.toContain("今天最重要的工作内容");
+
+        clickButton("上午复盘");
+        await vi.waitFor(() => expect(document.body.textContent).toContain("今天是否进行上午轻量复盘"));
+        expect(document.body.textContent).not.toContain("计划结束时间（中午前）");
+        const reviewDecision = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("今天是否进行上午轻量复盘"))
+            ?.querySelector("select") as HTMLSelectElement | undefined;
+        if (!reviewDecision) throw new Error("没有找到周六轻量复盘判断选择框");
+        reviewDecision.value = "no";
+        reviewDecision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.body.textContent).toContain("中午下班记录均按“不适用”保存");
+
+        clickButton("中午下班");
+        await vi.waitFor(() => expect(document.body.textContent).toContain("今天未进行轻量复盘，无需填写中午下班时间和工作结果"));
+
+        clickButton("上午复盘");
+        await vi.waitFor(() => expect(document.body.textContent).toContain("今天是否进行上午轻量复盘"));
+        const changedDecision = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("今天是否进行上午轻量复盘"))
+            ?.querySelector("select") as HTMLSelectElement;
+        changedDecision.value = "yes";
+        changedDecision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.body.textContent).toContain("计划结束时间（中午前）");
+        expect(document.body.textContent).not.toContain("午饭后专业学习安排");
+
+        clickButton("中午下班");
+        await vi.waitFor(() => expect(document.body.textContent).toContain("中午工作边界"));
+
+        clickButton("自由时间");
+        await vi.waitFor(() => expect(document.body.textContent).toContain("自由时间与个人安排"));
+        expect(document.body.textContent).not.toContain("下班后工作闭环（按需）");
+
+        clickButton("21:00");
+        await vi.waitFor(() => expect(document.body.textContent).toContain("中午下班后是否接触了工作"));
+        expect(document.body.textContent).not.toContain("明天开始工作时的第一个动作");
+    });
+
     it("把下班判断与下班后个人安排拆成独立阶段", async () => {
         const properties = props();
         component = new DailyRhythm({
@@ -96,7 +155,7 @@ describe("行舟一级模块外壳", () => {
     });
 
     it("先确认训练完成状态，仅在已完成时填写训练内容", async () => {
-        let store = createEmptyDailyStore(1000);
+        let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
@@ -126,8 +185,34 @@ describe("行舟一级模块外壳", () => {
         expect(saveDaily.mock.calls[0][0].fields).toMatchObject({ trainingCompleted: "no", trainingPlan: "" });
     });
 
+    it("先确认是否有临时调整，仅在选择是时显示说明输入框", async () => {
+        let store = researchDailyStore();
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
+
+        const decision = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("今日是否有节奏或临时调整"))
+            ?.querySelector("select") as HTMLSelectElement | undefined;
+        if (!decision) throw new Error("没有找到临时调整判断选择框");
+        expect(document.body.textContent).not.toContain("调整内容");
+
+        decision.value = "yes";
+        decision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.body.textContent).toContain("调整内容");
+
+        decision.value = "no";
+        decision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.body.textContent).not.toContain("调整内容");
+        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalledOnce(), { timeout: 2000 });
+        expect(saveDaily.mock.calls[0][0].fields).toMatchObject({ hasDayAdjustments: "no", dayAdjustments: "" });
+    });
+
     it("把小时和分钟组合保存，并自动判断下班是否超时", async () => {
-        let store = createEmptyDailyStore(1000);
+        let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
@@ -175,7 +260,7 @@ describe("行舟一级模块外壳", () => {
     });
 
     it("关键工作结果选择后立即保持所选值", async () => {
-        let store = createEmptyDailyStore(1000);
+        let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
@@ -200,7 +285,7 @@ describe("行舟一级模块外壳", () => {
     });
 
     it("按是否需要工作闭环切换字段，并把不需要保存为明确状态", async () => {
-        let store = createEmptyDailyStore(1000);
+        let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
@@ -228,7 +313,7 @@ describe("行舟一级模块外壳", () => {
     });
 
     it("工作闭环先确认是否有下一步，有时才显示下一步输入框", async () => {
-        let store = createEmptyDailyStore(1000);
+        let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
@@ -269,7 +354,7 @@ describe("行舟一级模块外壳", () => {
     });
 
     it("先判断下班后工作和异常观察，再按需显示说明字段", async () => {
-        let store = createEmptyDailyStore(1000);
+        let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
@@ -310,7 +395,7 @@ describe("行舟一级模块外壳", () => {
     });
 
     it("睡前可选择自由安排，也可明确设置次日熄灯计划", async () => {
-        let store = createEmptyDailyStore(1000);
+        let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
@@ -348,7 +433,7 @@ describe("行舟一级模块外壳", () => {
     });
 
     it("连续输入会合并为一次自动保存", async () => {
-        let store = createEmptyDailyStore(1000);
+        let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
@@ -368,7 +453,7 @@ describe("行舟一级模块外壳", () => {
     });
 
     it("自动保存进行中继续输入时不会被旧结果覆盖", async () => {
-        let store = createEmptyDailyStore(1000);
+        let store = researchDailyStore();
         const pending: Array<() => void> = [];
         const loadDaily = vi.fn().mockResolvedValue(store);
         const saveDaily = vi.fn((record: DailyRecord) => new Promise<ReturnType<typeof upsertDailyRecord>>((resolve) => {
@@ -399,7 +484,7 @@ describe("行舟一级模块外壳", () => {
     it("从进行中事务补充今日执行切片，保存快照并跳回对应工作项", async () => {
         const items = sampleWorkItems();
         let workData = sampleWorkItemData(items);
-        let dailyStore = createEmptyDailyStore(1000);
+        let dailyStore = researchDailyStore();
         const properties = {
             ...props(),
             load: vi.fn(async () => workData),
@@ -449,7 +534,7 @@ describe("行舟一级模块外壳", () => {
     });
 
     function props() {
-        let dailyStore = createEmptyDailyStore(1000);
+        let dailyStore = researchDailyStore();
         return {
             load: vi.fn(() => new Promise<never>(() => undefined)),
             captureInbox: vi.fn(), saveItem: vi.fn(), deleteItem: vi.fn(), openItemMenu: vi.fn(),

@@ -46,6 +46,28 @@ describe("每日 Checklist", () => {
         await tick();
         await vi.waitFor(() => expect(document.body.textContent).toContain("周六 · 轻量复盘后"));
     });
+
+    it("周末训练或休息只切换当天提醒，不写入 Checklist 配置", async () => {
+        const store = createDefaultChecklistStore(1000);
+        const saveChecklist = vi.fn(async (incoming: ChecklistStore) => incoming);
+        component = new DailyChecklist({
+            target: document.body,
+            props: { date: "2026-09-12", loadChecklist: async () => store, saveChecklist },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-checklist-training-choice")).not.toBeNull());
+
+        expect(document.body.textContent).not.toContain("只做器材动作");
+        clickButton("训练日");
+        await tick();
+        expect(document.body.textContent).toContain("只做器材动作");
+        expect(document.body.textContent).not.toContain("今天休息，不补做训练");
+
+        clickButton("休息日");
+        await tick();
+        expect(document.body.textContent).toContain("今天休息，不补做训练");
+        expect(document.body.textContent).not.toContain("只做器材动作");
+        expect(saveChecklist).not.toHaveBeenCalled();
+    });
 });
 
 function clickButton(label: string): void {

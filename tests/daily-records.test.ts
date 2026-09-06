@@ -109,6 +109,41 @@ describe("生活节律内部数据库", () => {
         });
     });
 
+    it("旧记录会从临时调整文字推断判断状态，明确选择否时清空说明", () => {
+        const legacy = createDailyRecord("2026-09-04", "research-workday", 1000);
+        legacy.fields.dayAdjustments = "上午会议临时延长";
+        const migrated = upsertDailyRecord(createEmptyDailyStore(900), legacy, 1100).records[0];
+        expect(migrated.fields).toMatchObject({ hasDayAdjustments: "yes", dayAdjustments: "上午会议临时延长" });
+
+        migrated.fields.hasDayAdjustments = "no";
+        const cleared = upsertDailyRecord(createEmptyDailyStore(1200), migrated, 1300).records[0];
+        expect(cleared.fields).toMatchObject({ hasDayAdjustments: "no", dayAdjustments: "" });
+    });
+
+    it("周六旧记录会从复盘内容推断已复盘，明确未复盘时清空工作字段", () => {
+        const legacy = createDailyRecord("2026-09-05", "saturday-reset", 1000);
+        legacy.fields.workStartTime = "09:00";
+        legacy.fields.plannedWorkEndTime = "11:00";
+        legacy.fields.importantWorkPlan = "完成周复盘";
+        const migrated = upsertDailyRecord(createEmptyDailyStore(900), legacy, 1100).records[0];
+        expect(migrated.fields.saturdayReviewOccurred).toBe("yes");
+
+        migrated.fields.saturdayReviewOccurred = "no";
+        migrated.fields.actualWorkEndTime = "11:10";
+        migrated.fields.keyWorkResult = "met";
+        migrated.fields.importantWorkResult = "整理完成";
+        const skipped = upsertDailyRecord(createEmptyDailyStore(1200), migrated, 1300).records[0];
+        expect(skipped.fields).toMatchObject({
+            saturdayReviewOccurred: "no",
+            workStartTime: "",
+            plannedWorkEndTime: "",
+            importantWorkPlan: "",
+            actualWorkEndTime: "",
+            keyWorkResult: "",
+            importantWorkResult: "",
+        });
+    });
+
     it("明确选择没有时清除条件说明，选择有时保留说明", () => {
         const record = createDailyRecord("2026-09-04", "research-workday", 1000);
         record.fields.afterHoursWorkOccurred = "no";

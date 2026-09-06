@@ -10,6 +10,10 @@ export type ChecklistEntry = {
     time: string;
     title: string;
     reminders: string[];
+    trainingChoices?: {
+        training: string[];
+        rest: string[];
+    };
     tone: ChecklistTone;
 };
 
@@ -28,7 +32,14 @@ export type ChecklistStore = {
     templates: ChecklistTemplate[];
 };
 
-const entry = (id: string, time: string, title: string, reminders: string[], tone: ChecklistTone = "plain"): ChecklistEntry => ({ id, title, time, reminders, tone });
+const entry = (
+    id: string,
+    time: string,
+    title: string,
+    reminders: string[],
+    tone: ChecklistTone = "plain",
+    trainingChoices?: ChecklistEntry["trainingChoices"],
+): ChecklistEntry => ({ id, title, time, reminders, tone, ...(trainingChoices ? { trainingChoices } : {}) });
 
 export function createDefaultChecklistStore(now = Date.now()): ChecklistStore {
     return {
@@ -68,7 +79,10 @@ export function createDefaultChecklistStore(now = Date.now()): ChecklistStore {
                 subtitle: "轻量复盘后，进入至少 24 小时完全无工作区间",
                 entries: [
                     entry("sat-wake", "06:00", "起床", ["保持固定起床时间；称重后喝水、吃香蕉"]),
-                    entry("sat-training", "06:30–07:30", "器材训练或休息日", ["训练日只做器材动作，无器材核心回家完成；休息日不补做", "训练日乳清＋肌酸 3–5 g；休息日肌酸随早餐或午餐"]),
+                    entry("sat-training", "06:30–07:30", "器材训练或休息日", [], "plain", {
+                        training: ["只做器材动作，无器材核心回家完成", "乳清＋肌酸 3–5 g"],
+                        rest: ["今天休息，不补做训练", "肌酸随早餐或午餐"],
+                    }),
                     entry("sat-breakfast", "08:00 左右", "早餐＋日评估早晨段", ["早餐随餐鱼油 1 粒", "完成睡眠、体重与训练记录；总计控制在 3–5 分钟"], "mint"),
                     entry("sat-light-work", "周六上午", "轻量工作 1–2 小时", ["只做回顾、整理、计划和简单任务", "不启动复杂新任务；这段复盘计入每周工作时间"], "sand"),
                     entry("sat-review", "复盘时", "完成每周评估", ["筛选本周日期；检查遗漏与录入错误", "回看工作成果、边界执行、睡眠、训练与个人生活", "确定下周最重要的三个结果；最多调整一项执行细节", "另用 10–15 分钟整理项目与事务：收件箱、活跃项目、下周日期与结束状态"], "mint"),
@@ -90,7 +104,10 @@ export function createDefaultChecklistStore(now = Date.now()): ChecklistStore {
                 subtitle: "上午不工作；12:00 开始、17:00 准时结束",
                 entries: [
                     entry("sun-wake", "06:00", "起床", ["保持固定起床时间；称重后喝水、吃香蕉"]),
-                    entry("sun-training", "06:30–07:30", "器材训练或休息日", ["在周六或周日灵活安排 1 个休息日", "训练日只做器材动作，无器材核心回家完成；休息日不临时加量"]),
+                    entry("sun-training", "06:30–07:30", "器材训练或休息日", ["在周六或周日灵活安排 1 个休息日"], "plain", {
+                        training: ["只做器材动作，无器材核心回家完成"],
+                        rest: ["今天休息，不临时加量或补做训练"],
+                    }),
                     entry("sun-breakfast", "08:00 左右", "早餐＋日评估早晨段", ["早餐随餐鱼油 1 粒", "完成睡眠、体重、训练与当天计划"], "mint"),
                     entry("sun-no-work", "上午–12:00", "继续完全无工作", ["不处理邮件、Slack、科研笔记或“顺手回复”", "把连续 24 小时的无工作区间守到中午"], "rose"),
                     entry("sun-start", "12:00 左右", "到办公室，开始工作", ["确定今天最重要的结果与第一个动作", "明确 17:00 结束；午饭离开桌面并随餐鱼油 1 粒"], "mint"),
@@ -134,7 +151,7 @@ export function updateChecklistStore(store: ChecklistStore, changes: Partial<Pic
 }
 
 export function cloneChecklistStore(store: ChecklistStore): ChecklistStore {
-    return { ...store, templates: store.templates.map((template) => ({ ...template, entries: template.entries.map((item) => ({ ...item, reminders: [...item.reminders] })) })) };
+    return { ...store, templates: store.templates.map((template) => ({ ...template, entries: template.entries.map(cloneEntry) })) };
 }
 
 export function checklistStoresMatch(expected: ChecklistStore, actual: ChecklistStore): boolean {
@@ -152,7 +169,7 @@ export function checklistBackupFileForRevision(revision: number): string {
 function normalizeTemplate(value: unknown, fallback: ChecklistTemplate): ChecklistTemplate {
     if (!isObject(value)) return cloneTemplate(fallback);
     const entries = Array.isArray(value.entries)
-        ? value.entries.map(normalizeEntry).filter((candidate): candidate is ChecklistEntry => candidate !== null)
+        ? value.entries.map((entryValue) => normalizeEntry(entryValue, fallback.entries.find((candidate) => isObject(entryValue) && candidate.id === entryValue.id))).filter((candidate): candidate is ChecklistEntry => candidate !== null)
         : [];
     return {
         id: fallback.id,
@@ -162,19 +179,41 @@ function normalizeTemplate(value: unknown, fallback: ChecklistTemplate): Checkli
     };
 }
 
-function normalizeEntry(value: unknown): ChecklistEntry | null {
+function normalizeEntry(value: unknown, fallback?: ChecklistEntry): ChecklistEntry | null {
     if (!isObject(value)) return null;
     const id = cleanString(value.id);
     const title = cleanString(value.title);
     const time = cleanString(value.time);
-    const reminders = Array.isArray(value.reminders) ? value.reminders.map(cleanString).filter(Boolean) : [];
-    if (!id || !title || !time || !reminders.length) return null;
+    const sourceReminders = Array.isArray(value.reminders) ? value.reminders.map(cleanString).filter(Boolean) : [];
+    const sourceTrainingChoices = normalizeTrainingChoices(value.trainingChoices);
+    const trainingChoices = sourceTrainingChoices ?? (fallback?.trainingChoices ? cloneTrainingChoices(fallback.trainingChoices) : undefined);
+    const reminders = !sourceTrainingChoices && fallback?.trainingChoices ? [...fallback.reminders] : sourceReminders;
+    if (!id || !title || !time || (!reminders.length && !trainingChoices)) return null;
     const tone: ChecklistTone = value.tone === "mint" || value.tone === "sand" || value.tone === "rose" ? value.tone : "plain";
-    return { id, title, time, reminders, tone };
+    return { id, title, time, reminders, tone, ...(trainingChoices ? { trainingChoices } : {}) };
 }
 
 function cloneTemplate(template: ChecklistTemplate): ChecklistTemplate {
-    return { ...template, entries: template.entries.map((item) => ({ ...item, reminders: [...item.reminders] })) };
+    return { ...template, entries: template.entries.map(cloneEntry) };
+}
+
+function cloneEntry(item: ChecklistEntry): ChecklistEntry {
+    return {
+        ...item,
+        reminders: [...item.reminders],
+        ...(item.trainingChoices ? { trainingChoices: cloneTrainingChoices(item.trainingChoices) } : {}),
+    };
+}
+
+function cloneTrainingChoices(value: NonNullable<ChecklistEntry["trainingChoices"]>): NonNullable<ChecklistEntry["trainingChoices"]> {
+    return { training: [...value.training], rest: [...value.rest] };
+}
+
+function normalizeTrainingChoices(value: unknown): ChecklistEntry["trainingChoices"] | undefined {
+    if (!isObject(value)) return undefined;
+    const training = Array.isArray(value.training) ? value.training.map(cleanString).filter(Boolean) : [];
+    const rest = Array.isArray(value.rest) ? value.rest.map(cleanString).filter(Boolean) : [];
+    return training.length && rest.length ? { training, rest } : undefined;
 }
 
 function cleanString(value: unknown): string {

@@ -1,5 +1,7 @@
 <script context="module" lang="ts">
+    type WeekendTrainingMode = "training" | "rest" | "";
     const checkedByDate = new Map<string, Set<string>>();
+    const trainingModeByDate = new Map<string, WeekendTrainingMode>();
 </script>
 
 <script lang="ts">
@@ -30,19 +32,25 @@
     let editTime = "";
     let editTitle = "";
     let editReminders = "";
+    let editTrainingReminders = "";
+    let editRestReminders = "";
+    let editHasTrainingChoices = false;
     let editTone: ChecklistTone = "plain";
     let lastDate = date;
+    let trainingMode: WeekendTrainingMode = trainingModeByDate.get(date) ?? "";
 
     $: templateId = templateIdForDate(date);
     $: template = store.templates.find((candidate) => candidate.id === templateId) ?? store.templates[0];
     $: checked = checkedSet(date);
-    $: allReminderKeys = template.entries.flatMap((item) => item.reminders.map((_, index) => `${item.id}:${index}`));
+    $: allReminderKeys = template.entries.flatMap((item) => visibleReminders(item, trainingMode).map((reminder) => reminder.key));
     $: completedCount = allReminderKeys.filter((key) => checked.has(key)).length;
     $: completionPercent = allReminderKeys.length ? Math.round(completedCount / allReminderKeys.length * 100) : 0;
     $: paperColumns = splitPaperEntries(template);
     $: if (date !== lastDate) {
         lastDate = date;
         for (const key of checkedByDate.keys()) if (key !== date) checkedByDate.delete(key);
+        for (const key of trainingModeByDate.keys()) if (key !== date) trainingModeByDate.delete(key);
+        trainingMode = trainingModeByDate.get(date) ?? "";
     }
 
     Promise.resolve().then(async () => {
@@ -71,6 +79,20 @@
         checkedByDate.set(date, checked);
     }
 
+    function chooseTrainingMode(mode: Exclude<WeekendTrainingMode, "">) {
+        trainingMode = mode;
+        trainingModeByDate.set(date, mode);
+    }
+
+    function visibleReminders(item: ChecklistEntry, mode: WeekendTrainingMode): Array<{ key: string; text: string }> {
+        const common = item.reminders.map((text, index) => ({ key: `${item.id}:common:${index}`, text }));
+        if (!item.trainingChoices || !mode) return common;
+        return [
+            ...common,
+            ...item.trainingChoices[mode].map((text, index) => ({ key: `${item.id}:${mode}:${index}`, text })),
+        ];
+    }
+
     async function changeViewMode(viewMode: ChecklistViewMode) {
         if (store.viewMode === viewMode || saving) return;
         await persist(updateChecklistStore(store, { viewMode }));
@@ -82,6 +104,9 @@
         editTime = selected?.time ?? "";
         editTitle = selected?.title ?? "";
         editReminders = selected?.reminders.join("\n") ?? "";
+        editHasTrainingChoices = Boolean(selected?.trainingChoices);
+        editTrainingReminders = selected?.trainingChoices?.training.join("\n") ?? "";
+        editRestReminders = selected?.trainingChoices?.rest.join("\n") ?? "";
         editTone = selected?.tone ?? "plain";
         editorOpen = true;
     }
@@ -91,6 +116,9 @@
         editTime = "";
         editTitle = "";
         editReminders = "";
+        editTrainingReminders = "";
+        editRestReminders = "";
+        editHasTrainingChoices = false;
         editTone = "plain";
         editorOpen = true;
     }
@@ -99,8 +127,11 @@
         const time = editTime.trim();
         const title = editTitle.trim();
         const reminders = editReminders.split("\n").map((value) => value.trim()).filter(Boolean);
-        if (!time || !title || !reminders.length) {
-            error = "时间节点、标题和至少一条提醒不能为空。";
+        const training = editTrainingReminders.split("\n").map((value) => value.trim()).filter(Boolean);
+        const rest = editRestReminders.split("\n").map((value) => value.trim()).filter(Boolean);
+        const trainingChoices = editHasTrainingChoices && training.length && rest.length ? { training, rest } : undefined;
+        if (!time || !title || (!reminders.length && !trainingChoices) || (editHasTrainingChoices && !trainingChoices)) {
+            error = editHasTrainingChoices ? "时间节点、标题、训练日提醒和休息日提醒都不能为空。" : "时间节点、标题和至少一条提醒不能为空。";
             return;
         }
         const next = cloneChecklistStore(store);
@@ -108,7 +139,7 @@
         if (!target) return;
         if (editingId) {
             const index = target.entries.findIndex((candidate) => candidate.id === editingId);
-            if (index >= 0) target.entries[index] = { ...target.entries[index], time, title, reminders, tone: editTone };
+            if (index >= 0) target.entries[index] = { id: target.entries[index].id, time, title, reminders, tone: editTone, ...(trainingChoices ? { trainingChoices } : {}) };
         } else {
             target.entries.push({ id: createEntryId(), time, title, reminders, tone: editTone });
         }
@@ -222,18 +253,26 @@
                                 <div class="xz-checklist-native-content">
                                     <div class="xz-checklist-native-title">
                                         <strong>{item.title}</strong>
-                                        <span>{item.reminders.length} 项提醒</span>
+                                        <span>{visibleReminders(item, trainingMode).length} 项提醒</span>
                                         <div>
                                             <button type="button" aria-label="上移" disabled={entryIndex === 0 || saving} on:click={() => void moveEntry(item.id, -1)}>↑</button>
                                             <button type="button" aria-label="下移" disabled={entryIndex === template.entries.length - 1 || saving} on:click={() => void moveEntry(item.id, 1)}>↓</button>
                                             <button type="button" on:click={() => openEditor(item)}>编辑</button>
                                         </div>
                                     </div>
+                                    {#if item.trainingChoices}
+                                        <div class="xz-checklist-training-choice">
+                                            <span>今天怎么安排？</span>
+                                            <button class:active={trainingMode === "training"} type="button" on:click={() => chooseTrainingMode("training")}>训练日</button>
+                                            <button class:active={trainingMode === "rest"} type="button" on:click={() => chooseTrainingMode("rest")}>休息日</button>
+                                            {#if !trainingMode}<small>先选一种，当天可随时切换</small>{/if}
+                                        </div>
+                                    {/if}
                                     <div class="xz-checklist-native-reminders">
-                                        {#each item.reminders as reminder, reminderIndex}
-                                            <label class:checked={checked.has(`${item.id}:${reminderIndex}`)}>
-                                                <input type="checkbox" checked={checked.has(`${item.id}:${reminderIndex}`)} on:change={() => toggleCheck(`${item.id}:${reminderIndex}`)} />
-                                                <span>{reminder}</span>
+                                        {#each visibleReminders(item, trainingMode) as reminder (reminder.key)}
+                                            <label class:checked={checked.has(reminder.key)}>
+                                                <input type="checkbox" checked={checked.has(reminder.key)} on:change={() => toggleCheck(reminder.key)} />
+                                                <span>{reminder.text}</span>
                                             </label>
                                         {/each}
                                     </div>
@@ -265,10 +304,17 @@
                                 {#each column as item (item.id)}
                                     <section class:mint={item.tone === "mint"} class:sand={item.tone === "sand"} class:rose={item.tone === "rose"}>
                                         <header><span>{item.time}</span><strong>{item.title}</strong><button type="button" on:click={() => openEditor(item)}>编辑</button></header>
-                                        {#each item.reminders as reminder, reminderIndex}
-                                            <label class:checked={checked.has(`${item.id}:${reminderIndex}`)}>
-                                                <input type="checkbox" checked={checked.has(`${item.id}:${reminderIndex}`)} on:change={() => toggleCheck(`${item.id}:${reminderIndex}`)} />
-                                                <span>{reminder}</span>
+                                        {#if item.trainingChoices}
+                                            <div class="xz-checklist-training-choice paper">
+                                                <span>今日安排</span>
+                                                <button class:active={trainingMode === "training"} type="button" on:click={() => chooseTrainingMode("training")}>训练日</button>
+                                                <button class:active={trainingMode === "rest"} type="button" on:click={() => chooseTrainingMode("rest")}>休息日</button>
+                                            </div>
+                                        {/if}
+                                        {#each visibleReminders(item, trainingMode) as reminder (reminder.key)}
+                                            <label class:checked={checked.has(reminder.key)}>
+                                                <input type="checkbox" checked={checked.has(reminder.key)} on:change={() => toggleCheck(reminder.key)} />
+                                                <span>{reminder.text}</span>
                                             </label>
                                         {/each}
                                     </section>
@@ -299,7 +345,13 @@
             <p>时间、标题和提醒内容都可以修改，但建议只在长期节奏发生变化时调整。每行文字会成为一条提醒，不会生成填写字段。</p>
             <label><span>时间节点（不建议频繁修改）</span><input bind:value={editTime} placeholder="例如：20:15–21:00" /></label>
             <label><span>标题</span><input bind:value={editTitle} placeholder="例如：准备明天" /></label>
-            <label><span>提醒内容（每行一条）</span><textarea bind:value={editReminders} placeholder="每行填写一条提醒"></textarea></label>
+            {#if editHasTrainingChoices}
+                <label><span>通用提醒（可选，每行一条）</span><textarea bind:value={editReminders} placeholder="无论训练或休息都会显示"></textarea></label>
+                <label><span>训练日提醒（每行一条）</span><textarea bind:value={editTrainingReminders} placeholder="选择训练日后显示"></textarea></label>
+                <label><span>休息日提醒（每行一条）</span><textarea bind:value={editRestReminders} placeholder="选择休息日后显示"></textarea></label>
+            {:else}
+                <label><span>提醒内容（每行一条）</span><textarea bind:value={editReminders} placeholder="每行填写一条提醒"></textarea></label>
+            {/if}
             <label><span>纸质视图区块样式</span><select bind:value={editTone}><option value="plain">普通</option><option value="mint">节律提示</option><option value="sand">准备事项</option><option value="rose">边界提醒</option></select></label>
             <footer>
                 {#if editingId}<button class="xz-checklist-delete" type="button" disabled={saving} on:click={() => void deleteEntry()}>删除时间节点</button>{/if}
