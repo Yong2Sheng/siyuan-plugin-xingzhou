@@ -23,7 +23,8 @@ describe("行舟一级模块外壳", () => {
         clickButton("生活节律");
         await tick();
 
-        expect(document.querySelector(".xz-daily-view-nav")?.textContent).toContain("今日记录");
+        const dailyViewLabels = [...document.querySelectorAll(".xz-daily-view-nav button")].map((button) => button.textContent?.trim());
+        expect(dailyViewLabels.slice(0, 2)).toEqual(["每日 Checklist", "今日记录"]);
         expect(document.querySelector(".xz-daily-view-nav")?.textContent).toContain("时间线");
         expect(document.querySelector(".xz-main-nav")).toBeNull();
     });

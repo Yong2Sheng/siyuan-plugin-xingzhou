@@ -1,6 +1,15 @@
 import { Dialog, Menu, openTab, Plugin, Setting, showMessage, type Custom, type Tab } from "siyuan";
 import AppShell from "./AppShell.svelte";
 import { showCaptureDialog, type CaptureDialogRequest } from "./capture-dialog";
+import {
+    CHECKLIST_STORE_FILE,
+    checklistBackupFileForRevision,
+    checklistStoresMatch,
+    cloneChecklistStore,
+    createDefaultChecklistStore,
+    parseChecklistStore,
+    type ChecklistStore,
+} from "./checklist";
 import { DEFAULT_SETTINGS, normalizeSettings, type XingzhouSettings } from "./config";
 import {
     DAILY_RUBRICS,
@@ -154,6 +163,8 @@ export default class XingzhouPlugin extends Plugin {
                             openDocument: (blockId: string) => plugin.openBlock(blockId),
                             loadDaily: () => plugin.getDailyRecordsSnapshot(),
                             saveDaily: (record: DailyRecord) => plugin.saveDailyRecord(record),
+                            loadChecklist: () => plugin.getChecklistSnapshot(),
+                            saveChecklist: (store: ChecklistStore) => plugin.saveChecklistStore(store),
                         },
                     });
                     plugin.instances.set(this, { component, mount });
@@ -261,6 +272,25 @@ export default class XingzhouPlugin extends Plugin {
     /** Stable scoring-rule integration point; callers receive a detached copy. */
     public getDailyRubrics(): DailyRubric[] {
         return DAILY_RUBRICS.map((rubric) => ({ ...rubric, levels: [...rubric.levels] as DailyRubric["levels"] }));
+    }
+
+    public async getChecklistSnapshot(): Promise<ChecklistStore> {
+        await this.settingsReady;
+        await this.mutationQueue;
+        return cloneChecklistStore(await this.loadChecklistStore());
+    }
+
+    private async saveChecklistStore(incoming: ChecklistStore): Promise<ChecklistStore> {
+        return this.enqueueMutation(async () => {
+            const current = await this.loadChecklistStore();
+            const next = parseChecklistStore(incoming);
+            if (!next) throw new Error("Checklist 配置无法识别，已停止保存。");
+            if (next.revision <= current.revision) next.revision = current.revision + 1;
+            next.updatedAt = Date.now();
+            await this.saveChecklistAndVerify(checklistBackupFileForRevision(current.revision), current);
+            await this.saveChecklistAndVerify(CHECKLIST_STORE_FILE, next);
+            return cloneChecklistStore(next);
+        });
     }
 
     private async saveDailyRecord(record: DailyRecord): Promise<DailyRecordStore> {
@@ -371,6 +401,38 @@ export default class XingzhouPlugin extends Plugin {
         return initial;
     }
 
+    private async loadChecklistStore(): Promise<ChecklistStore> {
+        let raw: unknown;
+        try {
+            raw = await this.loadData(CHECKLIST_STORE_FILE);
+        } catch (error) {
+            throw new Error(`Checklist 配置读取失败：${errorMessage(error)}`);
+        }
+        const primary = parseChecklistStore(raw);
+        if (primary) return primary;
+
+        const backups = await Promise.all([1, 2, 3].map(async (slot) => {
+            try {
+                return parseChecklistStore(await this.loadData(`checklist.backup-${slot}.json`));
+            } catch {
+                return null;
+            }
+        }));
+        const recovered = backups.filter((candidate): candidate is ChecklistStore => Boolean(candidate))
+            .sort((a, b) => b.revision - a.revision)[0];
+        if (recovered) {
+            await this.saveChecklistAndVerify(CHECKLIST_STORE_FILE, recovered);
+            console.warn(`行舟已从第 ${recovered.revision} 版 Checklist 备份恢复配置。`);
+            return recovered;
+        }
+        if (!isAbsentInternalStore(raw)) {
+            throw new Error("Checklist 配置文件无法识别，且三个轮换备份均不可用。为避免覆盖，行舟已停止写入。");
+        }
+        const initial = createDefaultChecklistStore();
+        await this.saveChecklistAndVerify(CHECKLIST_STORE_FILE, initial);
+        return initial;
+    }
+
     private async saveAndVerify(file: string, store: InternalWorkItemStore): Promise<void> {
         const response = await this.saveData(file, store);
         if (response.code !== 0) throw new Error(response.msg || `无法保存 ${file}。`);
@@ -386,6 +448,15 @@ export default class XingzhouPlugin extends Plugin {
         const verified = parseDailyStore(await this.loadData(file));
         if (!verified || !dailyStoresMatch(store, verified)) {
             throw new Error(`生活节律数据写入 ${file} 后未通过完整性复核。`);
+        }
+    }
+
+    private async saveChecklistAndVerify(file: string, store: ChecklistStore): Promise<void> {
+        const response = await this.saveData(file, store);
+        if (response.code !== 0) throw new Error(response.msg || `无法保存 ${file}。`);
+        const verified = parseChecklistStore(await this.loadData(file));
+        if (!verified || !checklistStoresMatch(store, verified)) {
+            throw new Error(`Checklist 配置写入 ${file} 后未通过完整性复核。`);
         }
     }
 

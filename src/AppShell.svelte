@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { CaptureDialogRequest } from "./capture-dialog";
     import type { DailyRecord, DailyRecordStore } from "./daily-records";
+    import { createDefaultChecklistStore, type ChecklistStore } from "./checklist";
     import DailyRhythm from "./DailyRhythm.svelte";
     import XingzhouApp from "./XingzhouApp.svelte";
     import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData, WorkItemViewState } from "./work-items";
@@ -16,6 +17,8 @@
     export let openDocument: (blockId: string) => Promise<void>;
     export let loadDaily: () => Promise<DailyRecordStore>;
     export let saveDaily: (record: DailyRecord) => Promise<DailyRecordStore>;
+    export let loadChecklist: () => Promise<ChecklistStore> = async () => createDefaultChecklistStore();
+    export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore> = async (store) => store;
 
     let module: "projects" | "rhythm" = "projects";
     let dailyRhythm: DailyRhythm | undefined;
@@ -65,7 +68,7 @@
                 initialViewState={projectViewState}
             />
         {:else}
-            <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
+            <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} {loadChecklist} {saveChecklist} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
         {/if}
     </div>
 </div>

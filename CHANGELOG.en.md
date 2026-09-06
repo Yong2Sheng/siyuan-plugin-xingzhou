@@ -4,8 +4,14 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
+## 0.8.0 - 2026-09-05
+
 ### Added
 
+- Added a standalone Daily Checklist page under Life Rhythm with the same workday, Saturday, and Sunday reminders as the paper edition, excluding fields that previously required handwriting.
+- Added shared Xingzhou and Paper views. Both use the same templates and same-day checks, remember the preferred view, and always use the paper layout for printing.
+- Checklist time nodes, titles, reminder text, and paper-section styling are editable. Time nodes can also be added, removed, and reordered; configuration uses its own file with three rotating backups and read-after-write verification.
+- Checklist checks are temporary, date-scoped session state and never enter history. Switching views or modules keeps them, while moving to a new date clears the old state.
 - Added Free arrangement for bedtime, allowing users to intentionally skip bedtime preparation and a planned lights-off value while still recording actual sleep the next morning.
 - Added Same evening / Next day selection for planned lights-off and persist the resulting full local date-time, removing ambiguity after midnight.
 
@@ -14,6 +20,13 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - After-hours work and anomaly/observation prompts in the 21:00 review now use Pending / No / Yes decisions. Explanation fields appear only for Yes, while No clears details that no longer apply.
 - Closure next steps now use Pending / No / Yes; the next-step text field appears only when Yes is selected.
 - Reworked the two-column 21:00 and bedtime layouts so paired decisions, conditional details, and lights-off date/time controls remain aligned.
+- Life Rhythm now places Daily Checklist before Today, following a reminders-first and records-afterward reading order.
+- Paper view now keeps the same main-checklist plus progress-sidebar structure as Xingzhou view. Titles, time labels, reminders, and checkboxes are larger in both views, while printing still outputs only the paper checklist.
+
+### Fixed
+
+- Fixed the first Checklist write being falsely reported as an integrity failure when JSON property order changed after normalization.
+- Fixed Paper view abruptly centering the checklist and removing the progress sidebar when switching from Xingzhou view.
 
 ### Compatibility
 

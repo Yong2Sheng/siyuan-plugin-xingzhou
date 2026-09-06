@@ -2,13 +2,15 @@
 
 Xingzhou is a self-contained SiYuan system for personal action and daily rhythm. Projects and tasks live in one top-level module; research-life balance, wellbeing, and recovery records live in another. Both use plugin-managed private data without requiring extra SiYuan databases or documents.
 
-> Current version: `0.7.0` (execution slices, daily-task integration, autosave, private storage, and read-after-write verification)
+> Current version: `0.8.0` (dual-view Daily Checklist, editable reminder templates, cross-midnight bedtime plans, and conditional evening review)
 
 [中文说明](README.md) · [中文更新日志](CHANGELOG.md) · [English Changelog](CHANGELOG.en.md)
 
 ## Highlights
 
 - Separate top-level Projects & Tasks and Life Rhythm modules, each with its own second-level navigation.
+- Life Rhythm includes a standalone Daily Checklist with the same workday, Saturday, and Sunday reminders as the paper edition, excluding fields that require data entry. Xingzhou and Paper views share the same same-day checks.
+- Checklist time nodes, titles, and reminder text are editable. Templates and the preferred view live in `checklist.json`; checks remain temporary session state, never enter history, and clear on a new date.
 - Daily profiles for research workdays, Saturday reset, Sunday half-day research, and holidays, with weekday defaults and per-date overrides.
 - Daily forms follow a Morning / After lunch / Clock-out / After work / 21:00 timeline and save automatically. Sleep duration uses hour/minute selectors, weight supports kg/lb, and actual lights-off and wake values retain explicit cross-day dates. A bedtime plan can target the same evening or the next day, or use Free arrangement without recording a planned lights-off time.
 - Training details appear only after training is marked complete. The after-work closure flow distinguishes Pending, Not needed, and Needed, then asks whether a next step exists before showing its text field. Not-needed durations remain not applicable rather than becoming zero.
@@ -33,7 +35,7 @@ When upgrading from `0.4.x` with no internal store yet, Xingzhou reads the confi
 
 Once the migrated work items have been verified in Xingzhou, deleting the legacy database or its containing document does not delete the internal work items. A work item may still retain a link to a SiYuan document; deleting that document only makes the link unavailable.
 
-Life Rhythm uses a separate `daily-records.json`. It starts empty and never reads or migrates the old daily-data document. Its public read-only integration points are `getDailyRecordsSnapshot({ from?, to? })` and `getDailyRubrics()` for future weekly, monthly, or AI analysis.
+Life Rhythm uses a separate `daily-records.json`. It starts empty and never reads or migrates the old daily-data document. Checklist templates and the preferred display mode use `checklist.json`, while same-day checks are not written to disk. Work items, daily records, and checklist configuration each use three rotating backups plus read-after-write verification. Life Rhythm's public read-only integration points are `getDailyRecordsSnapshot({ from?, to? })` and `getDailyRubrics()` for future weekly, monthly, or AI analysis.
 
 ## Development
 

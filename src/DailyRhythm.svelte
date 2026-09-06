@@ -19,20 +19,24 @@
         type TriState,
     } from "./daily-records";
     import DurationSelect from "./DurationSelect.svelte";
+    import DailyChecklist from "./DailyChecklist.svelte";
     import DailyWorkItemPicker from "./DailyWorkItemPicker.svelte";
     import ScoreInput from "./ScoreInput.svelte";
     import TimeSelect from "./TimeSelect.svelte";
     import { slicesOnDate } from "./execution-slices";
     import { buildWorkItemTree, flattenWorkItemTree } from "./tree";
     import type { WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
+    import { createDefaultChecklistStore, type ChecklistStore } from "./checklist";
 
     export let loadDaily: () => Promise<DailyRecordStore>;
     export let saveDaily: (record: DailyRecord) => Promise<DailyRecordStore>;
     export let loadWorkItems: (() => Promise<WorkItemData>) | null = null;
     export let saveWorkItem: ((data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData>) | null = null;
     export let openWorkItem: (workItemId: string) => void = () => undefined;
+    export let loadChecklist: () => Promise<ChecklistStore> = async () => createDefaultChecklistStore();
+    export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore> = async (store) => store;
 
-    type View = "today" | "history" | "rubrics" | "timeline";
+    type View = "today" | "checklist" | "history" | "rubrics" | "timeline";
     type Stage = "morning" | "learning" | "boundary" | "after-work" | "recovery" | "evening" | "all";
     const AUTO_SAVE_DELAY_MS = 900;
 
@@ -143,6 +147,10 @@
         message = "";
         error = "";
         scheduleAutoSave();
+    }
+
+    function markDailyDirty() {
+        if (view === "today") markDirty();
     }
 
     function scheduleAutoSave() {
@@ -382,7 +390,7 @@
     }
 </script>
 
-<section class="xz-daily-module" on:input={markDirty} on:change={markDirty}>
+<section class="xz-daily-module" on:input={markDailyDirty} on:change={markDailyDirty}>
     <div class="xz-daily-toolbar">
         <div class="xz-daily-date-nav">
             <button type="button" aria-label="前一天" on:click={() => void shiftDate(-1)}>‹</button>
@@ -391,6 +399,7 @@
             <button type="button" on:click={() => void openDate(localDateKey())}>今天</button>
         </div>
         <nav class="xz-daily-view-nav" aria-label="生活节律视图">
+            <button class:active={view === "checklist"} type="button" on:click={() => void changeView("checklist")}>每日 Checklist</button>
             <button class:active={view === "today"} type="button" on:click={() => void changeView("today")}>今日记录</button>
             <button class:active={view === "history"} type="button" on:click={() => void changeView("history")}>历史数据</button>
             <button class:active={view === "rubrics"} type="button" on:click={() => void changeView("rubrics")}>评分标准</button>
@@ -631,6 +640,8 @@
                 <p class="xz-daily-rubric-note">规则随当前评分字段切换，填写时不必再打开评估表文档。</p>
             </aside>
         </div>
+    {:else if view === "checklist"}
+        <DailyChecklist date={currentDate} {loadChecklist} {saveChecklist} />
     {:else if view === "history"}
         <section class="xz-daily-list-view">
             <header><div><span class="xz-section-kicker">插件内部数据库</span><h2>历史数据</h2></div><span>{store?.records.length ?? 0} 天</span></header>
