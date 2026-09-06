@@ -487,7 +487,7 @@ describe("XingzhouApp", () => {
 
         saveItem.mockClear();
         const assignment = document.querySelector('select[aria-label="安排“整理书架”"]') as HTMLSelectElement;
-        const targetDate = localDateKey(tomorrow);
+        const targetDate = localDateKey(today);
         assignment.value = targetDate;
         assignment.dispatchEvent(new Event("change", { bubbles: true }));
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
