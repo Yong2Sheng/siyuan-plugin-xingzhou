@@ -271,6 +271,8 @@ describe("XingzhouApp", () => {
             id: "item-1", rowId: "item-1", title: "清理房间中的垃圾", documentId: null, detached: true,
             type: "事务", status: "收件箱", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
             planDate: Date.now(), deadline: Date.now() - 2 * 24 * 60 * 60 * 1000, noDeadline: false, durationMinutes: null, energy: "", updatedAt: Date.now(),
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "historical-slice", scheduledDate: localDateKey(new Date()), status: "completed" as const, completedAt: Date.now(), updatedAt: Date.now() }],
         };
         const workItemData = {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
@@ -416,6 +418,7 @@ describe("XingzhouApp", () => {
         deadlineMode.dispatchEvent(new Event("change", { bubbles: true }));
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
         expect(saveItem.mock.calls[0][2]).toEqual({ deadline: null, noDeadline: true });
+        expect(document.body.textContent).not.toContain("已有执行记录时不能清除截止日期");
     });
 
     it("本周页按实际日期分组，并能把待安排条目分配到某一天", async () => {

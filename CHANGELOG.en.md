@@ -4,6 +4,37 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
+## 1.0.0 - 2026-09-06
+
+### Added
+
+- Added a standalone Nutrition Intake page to Life Rhythm, totaling calories, protein, carbohydrates, and fat by day without requiring meal categories.
+- Added optional daily calorie and protein goals with progress, remaining allowance, and over-target feedback. Carbohydrates and fat remain secondary metrics, with approximate macro calorie shares calculated at 4/4/9 kcal per gram.
+- Added user-defined food templates with create, edit, and delete flows. A template can be logged instantly at its base amount or recorded with a temporary actual weight, volume, or quantity; all four nutrition values scale proportionally.
+- Daily entries expose their actual consumed amount directly, with unit-aware adjustment steps. Editing or deleting a template never rewrites historical nutrition snapshots.
+- Nutrition uses an independent `nutrition.json` store protected by revisions, three rotating backups, read-after-write verification, and corruption recovery.
+- Every execution-slice calendar now shows the number of scheduled slices and estimated minutes per day, making workload visible before adding another slice. Compact layouts prioritize estimated time.
+
+### Changed
+
+- Compacted the plugin header while preserving the original Projects & Tasks / Life Rhythm button styling and leaving the existing content UI intact.
+- Consolidated total investment, the status legend, same-day guidance, and slice actions into a tighter execution-slice header, and reduced the gap between configuration and the calendar.
+- Redesigned responsive behavior for tablets and narrow panes: detail fields wrap predictably, hierarchy rows waste less width, and Nutrition switches by actual pane width between two-column, single-column, and bottom-sheet amount layouts.
+- Enlarged touch targets while retaining keyboard, trackpad, context-menu, and desktop-density behavior.
+- Completing an execution slice can now promote an unstarted transaction to In Progress without overriding paused, blocked, or closed states.
+
+### Fixed
+
+- Increased execution-calendar text, border, and workload contrast, and fixed side guidance consuming most of the usable calendar width on tablets.
+- Fixed compressed detail fields, Deadline / Required Energy misalignment, and hierarchy titles being reduced to only one or two visible characters on HarmonyOS tablets.
+- Restored left alignment for transaction detail titles and kept overflow-menu and touch operations available in narrow panes.
+- Fixed existing execution records incorrectly preventing a deadline from being cleared. Saving is blocked only when a new concrete deadline would precede an existing slice.
+
+### Compatibility
+
+- Upgrading creates `nutrition.json` on first use and does not read or modify any SiYuan document to derive nutrition data.
+- Legacy nutrition templates and entries using servings / serving descriptions are normalized on read into equivalent base amounts, units, and consumed amounts.
+
 ## 0.8.0 - 2026-09-05
 
 ### Added

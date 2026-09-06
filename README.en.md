@@ -1,8 +1,8 @@
 # Xingzhou · Personal Action & Life System
 
-Xingzhou is a self-contained SiYuan system for personal action and daily rhythm. Projects and tasks live in one top-level module; research-life balance, wellbeing, and recovery records live in another. Both use plugin-managed private data without requiring extra SiYuan databases or documents.
+Xingzhou is a self-contained SiYuan system for personal action and daily rhythm. Projects and tasks live in one top-level module; research-life balance, wellbeing, recovery, and nutrition intake live in another. All use plugin-managed private data without requiring extra SiYuan databases or documents.
 
-> Current version: `0.8.0` (dual-view Daily Checklist, editable reminder templates, cross-midnight bedtime plans, and conditional evening review)
+> Current version: `1.0.0` (nutrition tracking, proportional actual-amount calculation, tablet adaptation, and an enhanced execution-slice calendar)
 
 [中文说明](README.md) · [中文更新日志](CHANGELOG.md) · [English Changelog](CHANGELOG.en.md)
 
@@ -11,6 +11,7 @@ Xingzhou is a self-contained SiYuan system for personal action and daily rhythm.
 - Separate top-level Projects & Tasks and Life Rhythm modules, each with its own second-level navigation.
 - Life Rhythm includes a standalone Daily Checklist with the same workday, Saturday, and Sunday reminders as the paper edition, excluding fields that require data entry. Xingzhou and Paper views share the same same-day checks.
 - Checklist time nodes, titles, and reminder text are editable. Templates and the preferred view live in `checklist.json`; checks remain temporary session state, never enter history, and clear on a new date.
+- Nutrition intake totals calories, protein, carbohydrates, and fat by day without meal categories, with reusable one-tap food templates, proportional calculation from an actual weight or volume, and optional calorie/protein goals.
 - Daily profiles for research workdays, Saturday reset, Sunday half-day research, and holidays, with weekday defaults and per-date overrides.
 - Daily forms follow a Morning / After lunch / Clock-out / After work / 21:00 timeline and save automatically. Sleep duration uses hour/minute selectors, weight supports kg/lb, and actual lights-off and wake values retain explicit cross-day dates. A bedtime plan can target the same evening or the next day, or use Free arrangement without recording a planned lights-off time.
 - Training details appear only after training is marked complete. The after-work closure flow distinguishes Pending, Not needed, and Needed, then asks whether a next step exists before showing its text field. Not-needed durations remain not applicable rather than becoming zero.
@@ -18,6 +19,7 @@ Xingzhou is a self-contained SiYuan system for personal action and daily rhythm.
 - Holiday records treat work metrics as not applicable instead of failed or zero-valued.
 - Transactions can be divided into a target number of execution slices with a per-slice estimate and independently scheduled on a calendar. Completion is shown as a percentage; missed and abandoned attempts remain in history while releasing a replacement slot.
 - A deadline acts only as the latest schedulable date. Transactions without a deadline can still schedule and move slices from today onward.
+- Existing execution slices no longer prevent clearing a deadline or returning it to Pending; a new concrete deadline still cannot precede an existing slice.
 - Week uses execution slices as dated work, while Life Rhythm automatically shows today's personal slices and can add a slice from an in-progress transaction with immediate synchronization back to Projects & Tasks.
 - Complete hierarchy browsing for areas, top-level projects, subprojects, tasks, transactions, and ideas, with Today markers and rolled-up counts along relevant project paths. Siblings can be manually reordered with per-row Up/Down controls or the drag handle.
 - Week remains compatible with legacy planned-date and per-day completion records. Transactions configured with execution slices now follow their explicit slice dates instead of being repeated mechanically across every day from start to deadline.
@@ -35,7 +37,7 @@ When upgrading from `0.4.x` with no internal store yet, Xingzhou reads the confi
 
 Once the migrated work items have been verified in Xingzhou, deleting the legacy database or its containing document does not delete the internal work items. A work item may still retain a link to a SiYuan document; deleting that document only makes the link unavailable.
 
-Life Rhythm uses a separate `daily-records.json`. It starts empty and never reads or migrates the old daily-data document. Checklist templates and the preferred display mode use `checklist.json`, while same-day checks are not written to disk. Work items, daily records, and checklist configuration each use three rotating backups plus read-after-write verification. Life Rhythm's public read-only integration points are `getDailyRecordsSnapshot({ from?, to? })` and `getDailyRubrics()` for future weekly, monthly, or AI analysis.
+Life Rhythm uses a separate `daily-records.json`. It starts empty and never reads or migrates the old daily-data document. Checklist templates and the preferred display mode use `checklist.json`, while same-day checks are not written to disk. Nutrition goals, food templates, and daily intake entries use `nutrition.json`. Work items, daily records, checklist configuration, and nutrition records each use three rotating backups plus read-after-write verification. Life Rhythm's public read-only integration points are `getDailyRecordsSnapshot({ from?, to? })` and `getDailyRubrics()` for future weekly, monthly, or AI analysis.
 
 ## Development
 
@@ -50,7 +52,7 @@ The build creates `dist/` and an installable `package.zip`.
 
 ## Privacy
 
-Xingzhou contains no remote service. Work items, the migration snapshot, and rotating backups use SiYuan's plugin-private data mechanism. The plugin accesses local SiYuan content only for one-time legacy migration or when opening a linked document, and it never creates or deletes documents automatically.
+Xingzhou contains no remote service. Work items, daily records, nutrition records, the migration snapshot, and rotating backups use SiYuan's plugin-private data mechanism. The plugin accesses local SiYuan content only for one-time legacy migration or when opening a linked document, and it never creates or deletes documents automatically.
 
 ## License
 

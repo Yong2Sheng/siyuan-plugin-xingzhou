@@ -812,11 +812,6 @@
         if (!data || !selected || savingInline || savingSlices) return;
         detailDraft.deadlineMode = mode;
         if (mode === "date") return;
-        if (selected.type === "事务" && (selected.executionSlices ?? []).length > 0) {
-            detailDraft.deadlineMode = selected.deadline ? "date" : "pending";
-            inlineError = "已有执行记录时不能清除截止日期；请保留一个不早于所有切片的截止日期。";
-            return;
-        }
         if (!data.fields.noDeadline) {
             detailDraft.deadlineMode = selected.deadline ? "date" : "pending";
             inlineError = "内部数据字段暂不可用，无法明确保存为“无”。";

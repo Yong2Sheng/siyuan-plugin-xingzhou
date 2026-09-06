@@ -3,6 +3,7 @@
     import type { DailyRecord, DailyRecordStore } from "./daily-records";
     import { createDefaultChecklistStore, type ChecklistStore } from "./checklist";
     import DailyRhythm from "./DailyRhythm.svelte";
+    import { createEmptyNutritionStore, type NutritionStore } from "./nutrition";
     import XingzhouApp from "./XingzhouApp.svelte";
     import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData, WorkItemViewState } from "./work-items";
 
@@ -24,6 +25,8 @@
     export let saveDaily: (record: DailyRecord) => Promise<DailyRecordStore>;
     export let loadChecklist: () => Promise<ChecklistStore> = async () => createDefaultChecklistStore();
     export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore> = async (store) => store;
+    export let loadNutrition: () => Promise<NutritionStore> = async () => createEmptyNutritionStore();
+    export let saveNutrition: (store: NutritionStore) => Promise<NutritionStore> = async (store) => store;
 
     let module: "projects" | "rhythm" = "projects";
     let dailyRhythm: DailyRhythm | undefined;
@@ -88,7 +91,7 @@
                 initialViewState={projectViewState}
             />
         {:else}
-            <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} {loadChecklist} {saveChecklist} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
+            <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} {loadChecklist} {saveChecklist} {loadNutrition} {saveNutrition} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
         {/if}
     </div>
 </div>

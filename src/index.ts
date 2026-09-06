@@ -42,6 +42,15 @@ import {
     type InternalWorkItemStore,
 } from "./internal-store";
 import { getXingzhouTabId, XINGZHOU_TAB_TYPE } from "./tab-id";
+import {
+    NUTRITION_STORE_FILE,
+    cloneNutritionStore,
+    createEmptyNutritionStore,
+    nutritionBackupFileForRevision,
+    nutritionStoresMatch,
+    parseNutritionStore,
+    type NutritionStore,
+} from "./nutrition";
 import { loadWorkItems, type InboxCaptureOptions, type WorkItem, type WorkItemChanges, type WorkItemData } from "./work-items";
 import "./index.scss";
 
@@ -177,6 +186,8 @@ export default class XingzhouPlugin extends Plugin {
                             saveDaily: (record: DailyRecord) => plugin.saveDailyRecord(record),
                             loadChecklist: () => plugin.getChecklistSnapshot(),
                             saveChecklist: (store: ChecklistStore) => plugin.saveChecklistStore(store),
+                            loadNutrition: () => plugin.getNutritionSnapshot(),
+                            saveNutrition: (store: NutritionStore) => plugin.saveNutritionStore(store),
                         },
                     });
                     plugin.instances.set(this, { component, mount });
@@ -290,6 +301,25 @@ export default class XingzhouPlugin extends Plugin {
         await this.settingsReady;
         await this.mutationQueue;
         return cloneChecklistStore(await this.loadChecklistStore());
+    }
+
+    public async getNutritionSnapshot(): Promise<NutritionStore> {
+        await this.settingsReady;
+        await this.mutationQueue;
+        return cloneNutritionStore(await this.loadNutritionStore());
+    }
+
+    private async saveNutritionStore(incoming: NutritionStore): Promise<NutritionStore> {
+        return this.enqueueMutation(async () => {
+            const current = await this.loadNutritionStore();
+            const next = parseNutritionStore(incoming);
+            if (!next) throw new Error("营养记录无法识别，已停止保存。");
+            if (next.revision <= current.revision) next.revision = current.revision + 1;
+            next.updatedAt = Date.now();
+            await this.saveNutritionAndVerify(nutritionBackupFileForRevision(current.revision), current);
+            await this.saveNutritionAndVerify(NUTRITION_STORE_FILE, next);
+            return cloneNutritionStore(next);
+        });
     }
 
     private async saveChecklistStore(incoming: ChecklistStore): Promise<ChecklistStore> {
@@ -445,6 +475,38 @@ export default class XingzhouPlugin extends Plugin {
         return initial;
     }
 
+    private async loadNutritionStore(): Promise<NutritionStore> {
+        let raw: unknown;
+        try {
+            raw = await this.loadData(NUTRITION_STORE_FILE);
+        } catch (error) {
+            throw new Error(`营养记录读取失败：${errorMessage(error)}`);
+        }
+        const primary = parseNutritionStore(raw);
+        if (primary) return primary;
+
+        const backups = await Promise.all([1, 2, 3].map(async (slot) => {
+            try {
+                return parseNutritionStore(await this.loadData(`nutrition.backup-${slot}.json`));
+            } catch {
+                return null;
+            }
+        }));
+        const recovered = backups.filter((candidate): candidate is NutritionStore => Boolean(candidate))
+            .sort((a, b) => b.revision - a.revision)[0];
+        if (recovered) {
+            await this.saveNutritionAndVerify(NUTRITION_STORE_FILE, recovered);
+            console.warn(`行舟已从第 ${recovered.revision} 版营养记录备份恢复数据。`);
+            return recovered;
+        }
+        if (!isAbsentInternalStore(raw)) {
+            throw new Error("营养记录文件无法识别，且三个轮换备份均不可用。为避免覆盖，行舟已停止写入。");
+        }
+        const initial = createEmptyNutritionStore();
+        await this.saveNutritionAndVerify(NUTRITION_STORE_FILE, initial);
+        return initial;
+    }
+
     private async saveAndVerify(file: string, store: InternalWorkItemStore): Promise<void> {
         const response = await this.saveData(file, store);
         if (response.code !== 0) throw new Error(response.msg || `无法保存 ${file}。`);
@@ -469,6 +531,15 @@ export default class XingzhouPlugin extends Plugin {
         const verified = parseChecklistStore(await this.loadData(file));
         if (!verified || !checklistStoresMatch(store, verified)) {
             throw new Error(`Checklist 配置写入 ${file} 后未通过完整性复核。`);
+        }
+    }
+
+    private async saveNutritionAndVerify(file: string, store: NutritionStore): Promise<void> {
+        const response = await this.saveData(file, store);
+        if (response.code !== 0) throw new Error(response.msg || `无法保存 ${file}。`);
+        const verified = parseNutritionStore(await this.loadData(file));
+        if (!verified || !nutritionStoresMatch(store, verified)) {
+            throw new Error(`营养记录写入 ${file} 后未通过完整性复核。`);
         }
     }
 

@@ -23,6 +23,8 @@
     import DailyWorkItemPicker from "./DailyWorkItemPicker.svelte";
     import ScoreInput from "./ScoreInput.svelte";
     import TimeSelect from "./TimeSelect.svelte";
+    import NutritionTracker from "./NutritionTracker.svelte";
+    import { createEmptyNutritionStore, type NutritionStore } from "./nutrition";
     import { slicesOnDate } from "./execution-slices";
     import { buildWorkItemTree, flattenWorkItemTree } from "./tree";
     import type { WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
@@ -35,8 +37,10 @@
     export let openWorkItem: (workItemId: string) => void = () => undefined;
     export let loadChecklist: () => Promise<ChecklistStore> = async () => createDefaultChecklistStore();
     export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore> = async (store) => store;
+    export let loadNutrition: () => Promise<NutritionStore> = async () => createEmptyNutritionStore();
+    export let saveNutrition: (store: NutritionStore) => Promise<NutritionStore> = async (store) => store;
 
-    type View = "today" | "checklist" | "history" | "rubrics" | "timeline";
+    type View = "today" | "checklist" | "nutrition" | "history" | "rubrics" | "timeline";
     type Stage = "morning" | "learning" | "boundary" | "after-work" | "recovery" | "evening" | "all";
     const AUTO_SAVE_DELAY_MS = 900;
 
@@ -427,6 +431,7 @@
         <nav class="xz-daily-view-nav" aria-label="生活节律视图">
             <button class:active={view === "checklist"} type="button" on:click={() => void changeView("checklist")}>每日 Checklist</button>
             <button class:active={view === "today"} type="button" on:click={() => void changeView("today")}>今日记录</button>
+            <button class:active={view === "nutrition"} type="button" on:click={() => void changeView("nutrition")}>营养摄入</button>
             <button class:active={view === "history"} type="button" on:click={() => void changeView("history")}>历史数据</button>
             <button class:active={view === "rubrics"} type="button" on:click={() => void changeView("rubrics")}>评分标准</button>
             <button class:active={view === "timeline"} type="button" on:click={() => void changeView("timeline")}>时间线</button>
@@ -437,6 +442,8 @@
         <div class="xz-state"><span class="xz-spinner"></span><p>正在读取生活节律内部数据……</p></div>
     {:else if error && !store}
         <div class="xz-state xz-error"><h2>暂时无法读取生活节律数据</h2><p>{error}</p><button class="b3-button" type="button" on:click={() => void refresh()}>重试</button></div>
+    {:else if view === "nutrition"}
+        <NutritionTracker date={currentDate} load={loadNutrition} save={saveNutrition} />
     {:else if view === "today"}
         <div class="xz-daily-context">
             <label><span>今日类型</span><select value={draft.dayType} on:change|stopPropagation={(event) => changeDayType(event.currentTarget.value)}>{#each dayTypes as type}<option value={type.value}>{type.label}</option>{/each}</select></label>

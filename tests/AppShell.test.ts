@@ -38,7 +38,12 @@ describe("行舟一级模块外壳", () => {
         const dailyViewLabels = [...document.querySelectorAll(".xz-daily-view-nav button")].map((button) => button.textContent?.trim());
         expect(dailyViewLabels.slice(0, 2)).toEqual(["每日 Checklist", "今日记录"]);
         expect(document.querySelector(".xz-daily-view-nav")?.textContent).toContain("时间线");
+        expect(document.querySelector(".xz-daily-view-nav")?.textContent).toContain("营养摄入");
         expect(document.querySelector(".xz-main-nav")).toBeNull();
+
+        clickButton("营养摄入");
+        await vi.waitFor(() => expect(document.querySelector(".xz-nutrition-page")).not.toBeNull());
+        expect(document.body.textContent).toContain("不区分餐次，吃了就记");
     });
 
     it("离开项目与事务后再返回时恢复此前聚焦的工作项", async () => {
