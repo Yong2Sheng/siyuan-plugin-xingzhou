@@ -9,6 +9,7 @@
         availableSliceCount,
         automaticStatusForSliceCompletion,
         cancelScheduledSlice,
+        completeSliceNow,
         completedSliceCount,
         expirePastSlices,
         localDateKey,
@@ -883,10 +884,12 @@
         return status ? { ...changes, status } : changes;
     }
 
-    async function updateWeekSlice(item: WorkItem, slice: ExecutionSlice, action: "complete" | "abandon" | "undo") {
+    async function updateWeekSlice(item: WorkItem, slice: ExecutionSlice, action: "complete" | "miss" | "abandon" | "undo") {
         const executionSlices = action === "undo"
             ? undoCompletedSlice(item, slice.id)
-            : setSliceOutcome(item, slice.id, action === "complete" ? "completed" : "abandoned");
+            : action === "complete"
+                ? completeSliceNow(item, slice.id)
+                : setSliceOutcome(item, slice.id, action === "miss" ? "missed" : "abandoned");
         await updateWeekItem(item, { executionSlices });
     }
 
@@ -1319,12 +1322,19 @@
                                                             {#each weekDays as targetDay}<option value={targetDay.key} disabled={targetDay.key < localDateKey() || Boolean(item.deadline && targetDay.key > formatInputDate(item.deadline))}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}
                                                             <option value="__clear">取消安排</option>
                                                         </select>
-                                                        {#if day.key === localDateKey()}
+                                                        {#if day.key < localDateKey()}
+                                                            <button type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>补记完成</button>
+                                                            <button class="xz-week-missed-button" type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "miss")}>记为未完成</button>
+                                                        {:else if day.key === localDateKey()}
                                                             <button type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>完成</button>
                                                             <button class="xz-week-abandon-button" type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "abandon")}>放弃</button>
+                                                        {:else}
+                                                            <button type="button" title="完成后会将这个切片移动到今天" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>提前完成</button>
                                                         {/if}
                                                     {:else if slice?.status === "completed"}
                                                         <button class="xz-week-complete-button--done" type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "undo")}>撤销完成</button>
+                                                    {:else if slice?.status === "missed"}
+                                                        <button type="button" title="补记后仍保留原计划日期" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>补记完成</button>
                                                     {:else if !slice}
                                                         {#if !compactOccurrence}<select aria-label={occurrence.phase === "start" ? `修改“${item.title}”的开始日` : `移动“${item.title}”`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekAssignment(event, item)}>
                                                                 <option value="">{occurrence.phase === "start" ? "修改开始日…" : "移动到…"}</option>

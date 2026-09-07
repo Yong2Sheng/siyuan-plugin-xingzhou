@@ -3,6 +3,7 @@ import {
     availableSliceCount,
     automaticStatusForSliceCompletion,
     cancelScheduledSlice,
+    completeSliceNow,
     expirePastSlices,
     executionSliceLoadsByDate,
     moveScheduledSlice,
@@ -55,6 +56,24 @@ describe("事务执行切片", () => {
         const abandoned = setSliceOutcome(item({ executionSlices: completed }), "give-up", "abandoned", TODAY);
         expect(availableSliceCount(item({ executionSlices: abandoned }))).toBe(1);
         expect(sliceCompletionPercent(item({ executionSlices: abandoned }))).toBe(50);
+    });
+
+    it("未来切片提前完成时移到今天，过去未完成切片补记时保留原日期", () => {
+        const future = scheduleSlice(item(), "2026-09-06", "future", TODAY);
+        const completedEarly = completeSliceNow(item({ executionSlices: future }), "future", TODAY);
+        expect(completedEarly[0]).toMatchObject({ scheduledDate: "2026-09-04", status: "completed", completedAt: TODAY });
+
+        const missed = [{ id: "past", scheduledDate: "2026-09-03", status: "missed" as const, completedAt: null, updatedAt: 1 }];
+        const corrected = completeSliceNow(item({ executionSlices: missed }), "past", TODAY);
+        expect(corrected[0]).toMatchObject({ scheduledDate: "2026-09-03", status: "completed", completedAt: TODAY });
+    });
+
+    it("今天已有同一事务切片时阻止把未来切片提前完成", () => {
+        const slices = [
+            { id: "today", scheduledDate: "2026-09-04", status: "scheduled" as const, completedAt: null, updatedAt: 1 },
+            { id: "future", scheduledDate: "2026-09-06", status: "scheduled" as const, completedAt: null, updatedAt: 2 },
+        ];
+        expect(() => completeSliceNow(item({ executionSlices: slices }), "future", TODAY)).toThrow("已经有执行记录");
     });
 
     it("首次完成切片只把准备状态推进为进行中，并尊重手动状态", () => {

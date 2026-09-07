@@ -13,6 +13,7 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - Split the Review investment check into Focused long-term areas and Ongoing top-level projects, clearly separating what matters now from what is actively being done.
 - Persisted Checklist completion and weekend training/rest choices by date, so progress now survives plugin restarts and device sync without requiring migration of existing templates.
 - Made Today's Intake an independently scrollable region with a persistent header. Desktop panes now use the available viewport height, while tablet single-column layouts keep a tighter cap so long entry lists do not stretch the entire page.
+- Restored execution-slice completion actions in Week: today's slices can be completed or abandoned, missed past slices can be corrected as completed, and future slices can be completed early by atomically moving them to today.
 
 ## 1.0.0 - 2026-09-06
 

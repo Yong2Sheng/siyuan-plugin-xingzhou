@@ -130,13 +130,33 @@ export function moveScheduledSlice(item: WorkItem, sliceId: string, date: string
 export function setSliceOutcome(
     item: WorkItem,
     sliceId: string,
-    status: Extract<ExecutionSliceStatus, "completed" | "abandoned">,
+    status: Extract<ExecutionSliceStatus, "completed" | "missed" | "abandoned">,
     now = Date.now(),
 ): ExecutionSlice[] {
     const slice = (item.executionSlices ?? []).find((candidate) => candidate.id === sliceId);
     if (!slice || slice.status !== "scheduled") throw new Error("只能处理尚未完成的切片。");
     return normalizeExecutionSlices((item.executionSlices ?? []).map((candidate) => candidate.id === sliceId
         ? { ...candidate, status, completedAt: status === "completed" ? now : null, updatedAt: now }
+        : candidate));
+}
+
+/**
+ * Complete a slice from the weekly view. Past slices retain their historical
+ * date, while future slices move to today before completion so the record does
+ * not claim that work was completed on a future date.
+ */
+export function completeSliceNow(item: WorkItem, sliceId: string, now = Date.now()): ExecutionSlice[] {
+    const slice = (item.executionSlices ?? []).find((candidate) => candidate.id === sliceId);
+    if (!slice || (slice.status !== "scheduled" && slice.status !== "missed")) {
+        throw new Error("只能完成已安排或未完成的切片。");
+    }
+    const today = localDateKey(now);
+    if (slice.scheduledDate > today) {
+        const moved = moveScheduledSlice(item, sliceId, today, now);
+        return setSliceOutcome({ ...item, executionSlices: moved }, sliceId, "completed", now);
+    }
+    return normalizeExecutionSlices((item.executionSlices ?? []).map((candidate) => candidate.id === sliceId
+        ? { ...candidate, status: "completed" as const, completedAt: now, updatedAt: now }
         : candidate));
 }
 

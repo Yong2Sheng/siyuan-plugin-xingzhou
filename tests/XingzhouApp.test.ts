@@ -488,6 +488,57 @@ describe("XingzhouApp", () => {
         expect(saveItem.mock.calls[0][2].executionSlices?.[0]).toMatchObject({ scheduledDate: targetDate, status: "scheduled" });
     });
 
+    it("每周页允许提前完成未来切片，并自动把记录日期移到今天", async () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const item: WorkItem = {
+            id: "future", rowId: "future", title: "提前完成的事务", documentId: null, detached: true,
+            type: "事务", status: "待开始", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: tomorrow.getTime(), noDeadline: false, durationMinutes: 30, energy: "低", updatedAt: Date.now(),
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "future-slice", scheduledDate: localDateKey(tomorrow), status: "scheduled", completedAt: null, updatedAt: Date.now() }],
+        };
+        const workItemData: WorkItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [item], missingFields: [], fields: {},
+        };
+        const saveItem = vi.fn(async (currentData: WorkItemData, currentItem: WorkItem, changes: WorkItemChanges): Promise<WorkItemData> => ({
+            ...currentData,
+            items: currentData.items.map((candidate) => candidate.id === currentItem.id ? {
+                ...candidate,
+                ...(changes.executionSlices !== undefined ? { executionSlices: changes.executionSlices } : {}),
+                ...(typeof changes.status === "string" ? { status: changes.status } : {}),
+            } : candidate),
+        }));
+        component = new XingzhouApp({
+            target: document.body,
+            props: { load: vi.fn().mockResolvedValue(workItemData), captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(), openDocument: vi.fn() },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "本周")?.click();
+        await tick();
+        if (today.getDay() === 0) {
+            [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "下一周")?.click();
+            await tick();
+        }
+
+        const futureCard = document.querySelector<HTMLElement>('[data-work-item-id="future"]');
+        const completeEarly = [...(futureCard?.querySelectorAll<HTMLButtonElement>(".xz-week-item-actions button") ?? [])]
+            .find((button) => button.textContent === "提前完成");
+        expect(completeEarly).toBeInstanceOf(HTMLButtonElement);
+        completeEarly?.click();
+
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalledOnce());
+        expect(saveItem.mock.calls[0][2].executionSlices?.[0]).toMatchObject({
+            id: "future-slice",
+            scheduledDate: localDateKey(today),
+            status: "completed",
+        });
+        expect(saveItem.mock.calls[0][2].status).toBe("进行中");
+    });
+
     it("在任意工作项入口右键可安全删除内部工作项，并提示保留下级与关联文档", async () => {
         const domain = {
             id: "domain", rowId: "row-domain", title: "写小说", documentId: "domain-doc", detached: false,

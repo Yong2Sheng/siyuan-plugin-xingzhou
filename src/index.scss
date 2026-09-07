@@ -709,6 +709,7 @@
 .xz-week-slice-status.missed { color: var(--xingzhou-danger); }
 .xz-week-slice-status.abandoned { color: var(--xingzhou-muted); }
 .xz-week-abandon-button { color: var(--xingzhou-danger) !important; }
+.xz-week-missed-button { color: var(--xingzhou-danger) !important; }
 .xz-week-item--date-completed .xz-week-item-title { text-decoration: line-through; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); opacity: .72; }
 .xz-week-item-title { width: 100%; padding: 0; border: 0; color: var(--xingzhou-text); background: transparent; text-align: left; cursor: pointer; font-weight: 600; line-height: 1.45; }
 .xz-week-item-title:hover { color: var(--xingzhou-primary); }
