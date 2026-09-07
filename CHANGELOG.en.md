@@ -4,6 +4,8 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
+## 1.1.0 - 2026-09-06
+
 ### Changed
 
 - Professional study after lunch now begins with a No / Yes decision. Book, topic, plan, and result fields appear only when study is planned, and explicitly selecting No clears details that no longer apply.

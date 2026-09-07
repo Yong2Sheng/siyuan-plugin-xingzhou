@@ -2,7 +2,7 @@
 
 Xingzhou is a self-contained SiYuan system for personal action and daily rhythm. Projects and tasks live in one top-level module; research-life balance, wellbeing, recovery, and nutrition intake live in another. All use plugin-managed private data without requiring extra SiYuan databases or documents.
 
-> Current version: `1.0.0` (nutrition tracking, proportional actual-amount calculation, tablet adaptation, and an enhanced execution-slice calendar)
+> Current version: `1.1.0` (persistent Checklist progress, completion review, a streamlined project workflow, and enhanced weekly slice actions)
 
 [中文说明](README.md) · [中文更新日志](CHANGELOG.md) · [English Changelog](CHANGELOG.en.md)
 
