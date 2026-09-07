@@ -1369,6 +1369,9 @@
 .xz-nutrition-page {
     container-type: inline-size;
     min-width: 0;
+    min-height: 0;
+    flex: 1;
+    overflow: auto;
     padding: 18px;
     color: var(--xingzhou-text);
 }
@@ -1484,7 +1487,28 @@
 .xz-nutrition-template-list strong,
 .xz-nutrition-template-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .xz-nutrition-template-list small { color: var(--xingzhou-muted); font-size: 10px; }
-.xz-nutrition-entry-list { display: grid; gap: 7px; }
+.xz-nutrition-today {
+    max-height: clamp(320px, calc(100vh - 330px), 680px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.xz-nutrition-today > header { flex: 0 0 auto; }
+.xz-nutrition-entry-list {
+    min-height: 0;
+    display: grid;
+    gap: 7px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 5px;
+    scrollbar-color: color-mix(in srgb, var(--xingzhou-muted) 68%, transparent) var(--xingzhou-surface-light);
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+}
+.xz-nutrition-entry-list::-webkit-scrollbar { width: 9px; }
+.xz-nutrition-entry-list::-webkit-scrollbar-track { border-radius: 999px; background: var(--xingzhou-surface-light); }
+.xz-nutrition-entry-list::-webkit-scrollbar-thumb { border: 2px solid var(--xingzhou-surface-light); border-radius: 999px; background: color-mix(in srgb, var(--xingzhou-muted) 68%, transparent); }
+.xz-nutrition-entry-list::-webkit-scrollbar-thumb:hover { background: var(--xingzhou-muted); }
 .xz-nutrition-entry-list article { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-bg); }
 .xz-nutrition-entry-list article > div:first-child { min-width: 0; }
 .xz-nutrition-entry-list article strong,
@@ -1517,7 +1541,7 @@
 
 @container (max-width: 1100px) {
     .xz-nutrition-layout { grid-template-columns: 1fr; }
-    .xz-nutrition-today { grid-row: 1; }
+    .xz-nutrition-today { grid-row: 1; max-height: clamp(300px, 52vh, 600px); }
     .xz-nutrition-manager { grid-template-columns: 1fr; }
 }
 
