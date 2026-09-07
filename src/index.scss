@@ -1488,7 +1488,7 @@
 .xz-nutrition-template-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .xz-nutrition-template-list small { color: var(--xingzhou-muted); font-size: 10px; }
 .xz-nutrition-today {
-    max-height: clamp(320px, calc(100vh - 330px), 680px);
+    max-height: max(320px, calc(100dvh - 120px));
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1541,7 +1541,7 @@
 
 @container (max-width: 1100px) {
     .xz-nutrition-layout { grid-template-columns: 1fr; }
-    .xz-nutrition-today { grid-row: 1; max-height: clamp(300px, 52vh, 600px); }
+    .xz-nutrition-today { grid-row: 1; max-height: clamp(300px, 58dvh, 680px); }
     .xz-nutrition-manager { grid-template-columns: 1fr; }
 }
 
