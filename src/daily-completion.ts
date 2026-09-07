@@ -37,7 +37,7 @@ export function calculateDailyCompletion(record: DailyRecord): DailyCompletion {
     if (holiday) {
         stages.push(stageResult("recovery", "恢复", recoveryChecks(fields), touched(fields, [
             "daytimeEnergy", "personalLifeResult", "personalProjectPlan", "personalProjectDurationMinutes",
-        ]) || fields.personalProjectLinks.length > 0));
+        ])));
     } else {
         stages.push(stageResult("learning", saturday ? "上午复盘" : "午饭后", learningChecks(fields, saturday), touched(fields, saturday
             ? ["saturdayReviewOccurred", "workStartTime", "plannedWorkEndTime", "importantWorkPlan"]
@@ -59,7 +59,7 @@ export function calculateDailyCompletion(record: DailyRecord): DailyCompletion {
             stages.push(stageResult("after-work", "下班后", afterWorkChecks(fields), touched(fields, [
                 "closureNeed", "closureObject", "closurePlannedMinutes", "closureHasNextStep", "closureNextStep", "closureActualMinutes",
                 "personalProjectPlan", "personalProjectDurationMinutes",
-            ]) || fields.personalProjectLinks.length > 0));
+            ])));
         }
     }
 

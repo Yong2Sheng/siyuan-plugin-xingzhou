@@ -34,6 +34,24 @@ describe("生活节律完整度检查", () => {
         expect(calculateDailyCompletion(record).missing.map((item) => item.label)).toEqual(expect.arrayContaining(["计划熄灯日期", "计划熄灯时间"]));
     });
 
+    it("自动同步的执行切片不单独触发阶段待补状态", () => {
+        const workday = createDailyRecord("2026-09-07", "research-workday", 1000);
+        workday.fields.personalProjectLinks = [{
+            workItemId: "action-1",
+            titleSnapshot: "整理发布说明",
+            pathSnapshot: "完善行舟",
+            typeSnapshot: "事务",
+        }];
+        expect(calculateDailyCompletion(workday).stages.find((stage) => stage.stage === "after-work")?.state).toBe("not-started");
+
+        const holiday = createDailyRecord("2026-09-07", "holiday", 1000);
+        holiday.fields.personalProjectLinks = workday.fields.personalProjectLinks.map((link) => ({ ...link }));
+        expect(calculateDailyCompletion(holiday).stages.find((stage) => stage.stage === "recovery")?.state).toBe("not-started");
+
+        workday.fields.personalProjectPlan = "晚上整理发布说明";
+        expect(calculateDailyCompletion(workday).stages.find((stage) => stage.stage === "after-work")?.state).toBe("incomplete");
+    });
+
     it("周六不复盘时，中午下班和自由时间无需检查", () => {
         const record = createDailyRecord("2026-09-05", "saturday-reset", 1000);
         record.fields.saturdayReviewOccurred = "no";

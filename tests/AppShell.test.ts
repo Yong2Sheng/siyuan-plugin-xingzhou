@@ -194,6 +194,9 @@ describe("行舟一级模块外壳", () => {
         await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
 
         expect(document.querySelector<HTMLButtonElement>('.xz-daily-stage-nav button[aria-label^="早晨，"]')?.getAttribute("aria-label")).toContain("未开始");
+        expect(document.querySelector(".xz-daily-stage-legend")?.textContent).toContain("○未开始");
+        expect(document.querySelector(".xz-daily-stage-legend")?.textContent).toContain("数字表示待补项");
+        expect(document.querySelector(".xz-daily-stage-legend")?.textContent).toContain("✓已完成");
         clickButton("检查待补");
         await tick();
         expect(document.querySelector(".xz-daily-missing-panel")?.textContent).toContain("只检查关键字段");
@@ -205,6 +208,39 @@ describe("行舟一级模块外壳", () => {
         await vi.waitFor(() => expect(document.body.textContent).toContain("午饭后专业学习安排"));
         expect(document.activeElement?.closest("label")?.textContent).toContain("午饭后是否安排专业学习");
         expect(document.querySelector(".xz-daily-missing-panel")).toBeNull();
+    });
+
+    it("切换日期时同步刷新阶段徽标和无障碍状态", async () => {
+        const completedDate = "2030-01-07";
+        const blankDate = "2030-01-08";
+        const completedLearning = createDailyRecord(completedDate, "research-workday", 1000);
+        completedLearning.fields.professionalStudyPlanned = "no";
+        let store = upsertDailyRecord(createEmptyDailyStore(1000), completedLearning, 1000);
+        store = upsertDailyRecord(store, createDailyRecord(blankDate, "research-workday", 1000), 1000);
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>('input[aria-label="记录日期"]')).not.toBeNull());
+
+        const openDate = async (date: string) => {
+            const input = document.querySelector<HTMLInputElement>('input[aria-label="记录日期"]');
+            if (!input) throw new Error("没有找到记录日期输入框");
+            input.value = date;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            await vi.waitFor(() => expect(input.value).toBe(date));
+        };
+        const learningButton = () => document.querySelector<HTMLButtonElement>('.xz-daily-stage-nav button[aria-label^="午饭后，"]');
+
+        await openDate(completedDate);
+        await vi.waitFor(() => expect(learningButton()?.getAttribute("aria-label")).toBe("午饭后，已完成"));
+        expect(learningButton()?.dataset.completion).toBe("✓");
+
+        await openDate(blankDate);
+        await vi.waitFor(() => expect(learningButton()?.getAttribute("aria-label")).toBe("午饭后，未开始"));
+        expect(learningButton()?.dataset.completion).toBe("○");
+
+        await openDate(completedDate);
+        await vi.waitFor(() => expect(learningButton()?.dataset.completion).toBe("✓"));
     });
 
     it("先确认训练完成状态，仅在已完成时填写训练内容", async () => {

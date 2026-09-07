@@ -89,6 +89,12 @@
     $: boundary = calculateBoundary(draft.fields.plannedWorkEndTime, draft.fields.actualWorkEndTime);
     $: resolvedSleep = resolveSleepDateTimes(draft);
     $: completion = calculateDailyCompletion(draft);
+    $: morningCompletion = stagePresentation(completion, "morning");
+    $: learningCompletion = stagePresentation(completion, "learning");
+    $: boundaryCompletion = stagePresentation(completion, "boundary");
+    $: afterWorkCompletion = stagePresentation(completion, "after-work");
+    $: recoveryCompletion = stagePresentation(completion, "recovery");
+    $: eveningCompletion = stagePresentation(completion, "evening");
 
     Promise.resolve().then(() => void refresh());
 
@@ -384,29 +390,32 @@
         stage = next;
     }
 
-    function stageCompletion(target: DailyCompletionStage): DailyStageCompletion {
-        return completion.stages.find((entry) => entry.stage === target) ?? {
+    function stagePresentation(current: ReturnType<typeof calculateDailyCompletion>, target: DailyCompletionStage) {
+        const entry: DailyStageCompletion = current.stages.find((candidate) => candidate.stage === target) ?? {
             stage: target,
             label: target,
             state: "not-started",
             missing: [],
         };
+        const statusLabel = entry.state === "complete"
+            ? "已完成"
+            : entry.state === "not-applicable"
+                ? "无需检查"
+                : entry.state === "not-started"
+                    ? "未开始"
+                    : `待补 ${entry.missing.length} 项`;
+        const badge = entry.state === "complete"
+            ? "✓"
+            : entry.state === "not-applicable"
+                ? "—"
+                : entry.state === "not-started"
+                    ? "○"
+                    : String(entry.missing.length);
+        return { state: entry.state, statusLabel, badge };
     }
 
-    function completionStatusLabel(target: DailyCompletionStage): string {
-        const entry = stageCompletion(target);
-        if (entry.state === "complete") return "已完成";
-        if (entry.state === "not-applicable") return "无需检查";
-        if (entry.state === "not-started") return "未开始";
-        return `待补 ${entry.missing.length} 项`;
-    }
-
-    function completionBadge(target: DailyCompletionStage): string {
-        const entry = stageCompletion(target);
-        if (entry.state === "complete") return "✓";
-        if (entry.state === "not-applicable") return "—";
-        if (entry.state === "not-started") return "○";
-        return String(entry.missing.length);
+    function completionStageLabel(current: ReturnType<typeof calculateDailyCompletion>, target: DailyCompletionStage): string {
+        return current.stages.find((candidate) => candidate.stage === target)?.label ?? target;
     }
 
     async function inspectMissing(item: DailyMissingItem) {
@@ -528,13 +537,14 @@
                     <div><h2>{formatDate(currentDate)}</h2><p>{dayTypeLabel(draft.dayType)} · {store?.records.some((record) => record.date === currentDate) ? "已有记录" : "尚未保存"}</p></div>
                     <div class="xz-daily-header-actions">
                         <div class="xz-daily-completion-summary" aria-live="polite">
+                            <div class="xz-daily-stage-legend" aria-label="阶段状态说明"><span><i>○</i>未开始</span><span class="incomplete"><i>1</i>数字表示待补项</span><span class="complete"><i>✓</i>已完成</span><span><i>—</i>无需填写</span></div>
                             <span>完成 <strong>{completion.completedCount}/{completion.applicableCount}</strong>{#if completion.missing.length}<em>待补 {completion.missing.length} 项</em>{:else}<em class="complete">已补齐</em>{/if}</span>
                             <button type="button" class:active={missingOpen} on:click={() => missingOpen = !missingOpen}>{missingOpen ? "收起待补" : "检查待补"}</button>
                         </div>
                         <nav class="xz-daily-stage-nav" aria-label="填写阶段">
-                            <button class={`completion-${stageCompletion("morning").state}`} class:active={stage === "morning"} data-completion={completionBadge("morning")} aria-label={`早晨，${completionStatusLabel("morning")}`} title={completionStatusLabel("morning")} type="button" on:click={() => void changeStage("morning")}>早晨</button>
-                            {#if workApplicable}<button class={`completion-${stageCompletion("learning").state}`} class:active={stage === "learning"} data-completion={completionBadge("learning")} aria-label={`${isSaturdayReset ? "上午复盘" : "午饭后"}，${completionStatusLabel("learning")}`} title={completionStatusLabel("learning")} type="button" on:click={() => void changeStage("learning")}>{isSaturdayReset ? "上午复盘" : "午饭后"}</button><button class={`completion-${stageCompletion("boundary").state}`} class:active={stage === "boundary"} data-completion={completionBadge("boundary")} aria-label={`${isSaturdayReset ? "中午下班" : "下班"}，${completionStatusLabel("boundary")}`} title={completionStatusLabel("boundary")} type="button" on:click={() => void changeStage("boundary")}>{isSaturdayReset ? "中午下班" : "下班"}</button><button class={`completion-${stageCompletion("after-work").state}`} class:active={stage === "after-work"} data-completion={completionBadge("after-work")} aria-label={`${isSaturdayReset ? "自由时间" : "下班后"}，${completionStatusLabel("after-work")}`} title={completionStatusLabel("after-work")} type="button" on:click={() => void changeStage("after-work")}>{isSaturdayReset ? "自由时间" : "下班后"}</button>{:else}<button class={`completion-${stageCompletion("recovery").state}`} class:active={stage === "recovery"} data-completion={completionBadge("recovery")} aria-label={`恢复，${completionStatusLabel("recovery")}`} title={completionStatusLabel("recovery")} type="button" on:click={() => void changeStage("recovery")}>恢复</button>{/if}
-                            <button class={`completion-${stageCompletion("evening").state}`} class:active={stage === "evening"} data-completion={completionBadge("evening")} aria-label={`21:00，${completionStatusLabel("evening")}`} title={completionStatusLabel("evening")} type="button" on:click={() => void changeStage("evening")}>21:00</button>
+                            <button class={`completion-${morningCompletion.state}`} class:active={stage === "morning"} data-completion={morningCompletion.badge} aria-label={`早晨，${morningCompletion.statusLabel}`} title={morningCompletion.statusLabel} type="button" on:click={() => void changeStage("morning")}>早晨</button>
+                            {#if workApplicable}<button class={`completion-${learningCompletion.state}`} class:active={stage === "learning"} data-completion={learningCompletion.badge} aria-label={`${isSaturdayReset ? "上午复盘" : "午饭后"}，${learningCompletion.statusLabel}`} title={learningCompletion.statusLabel} type="button" on:click={() => void changeStage("learning")}>{isSaturdayReset ? "上午复盘" : "午饭后"}</button><button class={`completion-${boundaryCompletion.state}`} class:active={stage === "boundary"} data-completion={boundaryCompletion.badge} aria-label={`${isSaturdayReset ? "中午下班" : "下班"}，${boundaryCompletion.statusLabel}`} title={boundaryCompletion.statusLabel} type="button" on:click={() => void changeStage("boundary")}>{isSaturdayReset ? "中午下班" : "下班"}</button><button class={`completion-${afterWorkCompletion.state}`} class:active={stage === "after-work"} data-completion={afterWorkCompletion.badge} aria-label={`${isSaturdayReset ? "自由时间" : "下班后"}，${afterWorkCompletion.statusLabel}`} title={afterWorkCompletion.statusLabel} type="button" on:click={() => void changeStage("after-work")}>{isSaturdayReset ? "自由时间" : "下班后"}</button>{:else}<button class={`completion-${recoveryCompletion.state}`} class:active={stage === "recovery"} data-completion={recoveryCompletion.badge} aria-label={`恢复，${recoveryCompletion.statusLabel}`} title={recoveryCompletion.statusLabel} type="button" on:click={() => void changeStage("recovery")}>恢复</button>{/if}
+                            <button class={`completion-${eveningCompletion.state}`} class:active={stage === "evening"} data-completion={eveningCompletion.badge} aria-label={`21:00，${eveningCompletion.statusLabel}`} title={eveningCompletion.statusLabel} type="button" on:click={() => void changeStage("evening")}>21:00</button>
                             <button class:active={stage === "all"} type="button" on:click={() => void changeStage("all")}>全部</button>
                         </nav>
                     </div>
@@ -544,7 +554,7 @@
                     <section class="xz-daily-missing-panel" aria-label="待补项目">
                         <header><div><strong>{completion.missing.length ? `还有 ${completion.missing.length} 项待补` : "今日关键记录已补齐"}</strong><small>{completion.missing.length ? "只检查关键字段；备注和补充说明仍是可选项。" : "普通备注与补充说明无需填写。"}</small></div><button type="button" aria-label="关闭待补项目" on:click={() => missingOpen = false}>×</button></header>
                         {#if completion.missing.length}
-                            <div>{#each completion.missing as item (item.stage + item.id)}<button type="button" on:click={() => void inspectMissing(item)}><span>{stageCompletion(item.stage).label}</span><strong>{item.label}</strong><i>›</i></button>{/each}</div>
+                            <div>{#each completion.missing as item (item.stage + item.id)}<button type="button" on:click={() => void inspectMissing(item)}><span>{completionStageLabel(completion, item.stage)}</span><strong>{item.label}</strong><i>›</i></button>{/each}</div>
                         {:else}
                             <p>没有遗漏的关键字段，可以按自己的需要继续补充其他内容。</p>
                         {/if}
