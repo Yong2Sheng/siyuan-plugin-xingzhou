@@ -32,7 +32,44 @@ describe("层级浏览今日提示", () => {
 
         expect(getTodayFocusCounts(items, buildWorkItemTree(items), today).size).toBe(0);
     });
+
+    it("把今天已安排或已完成的有效执行切片标记为今日并汇总到上层", () => {
+        const project = item({ id: "project" });
+        const scheduled = item({
+            id: "scheduled",
+            type: "事务",
+            parentIds: [project.id],
+            executionSlices: [slice("scheduled", "2026-09-03")],
+        });
+        const completed = item({
+            id: "completed",
+            type: "事务",
+            parentIds: [project.id],
+            executionSlices: [slice("completed", "2026-09-03")],
+        });
+        const items = [project, scheduled, completed];
+
+        const counts = getTodayFocusCounts(items, buildWorkItemTree(items), today);
+
+        expect(counts.get(project.id)).toBe(2);
+        expect(counts.get(scheduled.id)).toBe(1);
+        expect(counts.get(completed.id)).toBe(1);
+    });
+
+    it("不把其他日期、未完成或已放弃的切片标记为今日", () => {
+        const future = item({ id: "future", type: "事务", executionSlices: [slice("scheduled", "2026-09-04")] });
+        const missed = item({ id: "missed", type: "事务", executionSlices: [slice("missed", "2026-09-03")] });
+        const abandoned = item({ id: "abandoned", type: "事务", executionSlices: [slice("abandoned", "2026-09-03")] });
+        const closed = item({ id: "closed-slice", type: "事务", status: "已完成", executionSlices: [slice("completed", "2026-09-03")] });
+        const items = [future, missed, abandoned, closed];
+
+        expect(getTodayFocusCounts(items, buildWorkItemTree(items), today).size).toBe(0);
+    });
 });
+
+function slice(status: "scheduled" | "completed" | "missed" | "abandoned", scheduledDate: string) {
+    return { id: `${status}-${scheduledDate}`, scheduledDate, status, completedAt: status === "completed" ? 1 : null, updatedAt: 1 };
+}
 
 function item(overrides: Partial<WorkItem> = {}): WorkItem {
     return {

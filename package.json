@@ -17,6 +17,7 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development VITE_SOURCEMAP=inline vite build --watch",
     "build": "cross-env NODE_ENV=production vite build",
+    "deploy:local": "bash scripts/deploy-local.sh",
     "test": "vitest run",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json"

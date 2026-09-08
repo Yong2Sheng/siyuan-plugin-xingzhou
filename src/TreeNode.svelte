@@ -112,7 +112,7 @@
             <span class="xz-tree-title">{item.title}</span>
             {#if dependencyCount > 0}<span class="xz-dependency-indicator" title={`${dependencyCount} 项跨项目依赖`}>⇠ {dependencyCount}</span>{/if}
             {#if todayFocusCount > 0}<span class="xz-today-focus" title={todayFocusCount > 1 ? `包含 ${todayFocusCount} 个今日工作项` : "今日工作项或所在路径"}>今日{todayFocusCount > 1 ? ` ${todayFocusCount}` : ""}</span>{/if}
-            {#if item.status}<span class:xz-tag--secondary={todayFocusCount > 0} class="xz-tag" data-status={item.status}>{item.status}</span>{/if}
+            {#if item.status}<span class="xz-tag" data-status={item.status}>{item.status}</span>{/if}
         </button>
         <span class="xz-order-controls" aria-label="同级排序">
             <button

@@ -34,6 +34,22 @@ describe("生活节律完整度检查", () => {
         expect(calculateDailyCompletion(record).missing.map((item) => item.label)).toEqual(expect.arrayContaining(["计划熄灯日期", "计划熄灯时间"]));
     });
 
+    it("手表评分和晨起体重先确认是否可记录，选择否后不再要求数值", () => {
+        const record = createDailyRecord("2026-09-04", "research-workday", 1000);
+        let missing = calculateDailyCompletion(record).missing.map((item) => item.label);
+        expect(missing).toEqual(expect.arrayContaining(["是否有手表睡眠评分", "是否测量晨起体重"]));
+
+        record.fields.hasWatchSleepScore = "yes";
+        record.fields.hasMorningWeight = "yes";
+        missing = calculateDailyCompletion(record).missing.map((item) => item.label);
+        expect(missing).toEqual(expect.arrayContaining(["手表睡眠评分", "晨起体重"]));
+
+        record.fields.hasWatchSleepScore = "no";
+        record.fields.hasMorningWeight = "no";
+        missing = calculateDailyCompletion(record).missing.map((item) => item.label);
+        expect(missing).not.toEqual(expect.arrayContaining(["是否有手表睡眠评分", "手表睡眠评分", "是否测量晨起体重", "晨起体重"]));
+    });
+
     it("自动同步的执行切片不单独触发阶段待补状态", () => {
         const workday = createDailyRecord("2026-09-07", "research-workday", 1000);
         workday.fields.personalProjectLinks = [{

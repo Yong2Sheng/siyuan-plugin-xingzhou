@@ -24,8 +24,10 @@ export type DailyRecordFields = {
     lightsOffAt: string;
     wakeAt: string;
     sleepDurationMinutes: number | null;
+    hasWatchSleepScore: PresenceState;
     watchSleepScore: number | null;
     subjectiveSleepQuality: number | null;
+    hasMorningWeight: PresenceState;
     morningWeight: number | null;
     weightUnit: WeightUnit;
     workStartTime: string;
@@ -252,8 +254,9 @@ function resolvePlannedLightsOff(record: DailyRecord): void {
 
 function emptyDailyFields(): DailyRecordFields {
     return {
-        lightsOffTime: "", wakeTime: "", lightsOffAt: "", wakeAt: "", sleepDurationMinutes: null, watchSleepScore: null,
-        subjectiveSleepQuality: null, morningWeight: null, weightUnit: "kg", workStartTime: "",
+        lightsOffTime: "", wakeTime: "", lightsOffAt: "", wakeAt: "", sleepDurationMinutes: null,
+        hasWatchSleepScore: "", watchSleepScore: null, subjectiveSleepQuality: null,
+        hasMorningWeight: "", morningWeight: null, weightUnit: "kg", workStartTime: "",
         plannedWorkEndTime: "", importantWorkPlan: "", saturdayReviewOccurred: "", hasDayAdjustments: "", dayAdjustments: "", trainingPlan: "", personalProjectLinks: [],
         personalProjectPlan: "", restAndLifePlan: "", professionalStudyPlanned: "", studyMaterial: "", studyTopic: "", studyPlan: "",
         studyResult: "", actualWorkEndTime: "", keyWorkResult: "", trainingCompleted: "",
@@ -279,6 +282,8 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
     const normalizedClosureHasNextStep = presenceState(fields.closureHasNextStep, fields.closureNextStep);
     const normalizedAfterHoursWork = presenceState(fields.afterHoursWorkOccurred, fields.afterHoursWorkReason);
     const normalizedAnomaly = presenceState(fields.hasAnomalyOrObservation, fields.anomalyOrObservation);
+    const normalizedHasWatchSleepScore = measurementPresenceState(fields.hasWatchSleepScore, fields.watchSleepScore);
+    const normalizedHasMorningWeight = measurementPresenceState(fields.hasMorningWeight, fields.morningWeight);
     return resolveSleepDateTimes({
         date: source.date,
         dayType: source.dayType,
@@ -289,9 +294,11 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             ...emptyDailyFields(),
             ...stringFields(fields),
             sleepDurationMinutes: nullableNonnegativeNumber(fields.sleepDurationMinutes),
-            watchSleepScore: nullableBoundedNumber(fields.watchSleepScore, 0, 100),
+            hasWatchSleepScore: normalizedHasWatchSleepScore,
+            watchSleepScore: normalizedHasWatchSleepScore === "yes" ? nullableBoundedNumber(fields.watchSleepScore, 0, 100) : null,
             subjectiveSleepQuality: nullableScore(fields.subjectiveSleepQuality),
-            morningWeight: nullableNonnegativeNumber(fields.morningWeight),
+            hasMorningWeight: normalizedHasMorningWeight,
+            morningWeight: normalizedHasMorningWeight === "yes" ? nullableNonnegativeNumber(fields.morningWeight) : null,
             weightUnit: fields.weightUnit === "lb" ? "lb" : "kg",
             keyWorkResult: normalizedSaturdayReview === "no" ? "" : resultState(fields.keyWorkResult),
             trainingCompleted: triState(fields.trainingCompleted),
@@ -392,6 +399,11 @@ function presenceState(value: unknown, legacyText: unknown): PresenceState {
     const text = textValue(legacyText).trim();
     if (!text) return "";
     return /^(无|没有|否|none)[。.!！]?$/i.test(text) ? "no" : "yes";
+}
+
+function measurementPresenceState(value: unknown, legacyNumber: unknown): PresenceState {
+    if (value === "yes" || value === "no") return value;
+    return finiteNumber(legacyNumber) !== null ? "yes" : "";
 }
 
 function saturdayReviewOccurred(fields: Partial<DailyRecordFields>, dayType: DailyDayType): PresenceState {

@@ -308,7 +308,7 @@ describe("XingzhouApp", () => {
         expect(exactScope?.classList.contains("active"), document.body.textContent ?? "").toBe(true);
         expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("清理房间中的垃圾");
         expect(document.querySelector(".xz-tree-row.selected .xz-today-focus")?.textContent).toBe("今日");
-        expect(document.querySelector(".xz-tree-row.selected .xz-tag")?.classList.contains("xz-tag--secondary")).toBe(true);
+        expect(document.querySelector(".xz-tree-row.selected .xz-tag")?.classList.contains("xz-tag--secondary")).toBe(false);
         expect(document.body.textContent).toContain("这是行舟内部工作项，当前没有关联思源文档");
         expect(document.querySelector(".xz-date-hint--today")).toBeNull();
         expect(document.querySelector(".xz-date-hint--overdue")?.textContent).toBe("已逾期");

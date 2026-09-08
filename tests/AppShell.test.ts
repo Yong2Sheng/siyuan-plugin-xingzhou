@@ -254,6 +254,7 @@ describe("行舟一级模块外壳", () => {
             .find((label) => label.textContent?.includes("完成训练"))
             ?.querySelector("select") as HTMLSelectElement | undefined;
         if (!completion) throw new Error("没有找到完成训练选择框");
+        expect(completion.closest(".xz-daily-flow-column")).not.toBeNull();
         expect(document.body.textContent).not.toContain("今天的训练内容");
 
         completion.value = "yes";
@@ -263,6 +264,7 @@ describe("行舟一级模块外壳", () => {
             .find((label) => label.textContent?.includes("今天的训练内容"))
             ?.querySelector("textarea") as HTMLTextAreaElement | undefined;
         if (!plan) throw new Error("没有在已完成状态下显示训练内容");
+        expect(plan.closest(".xz-daily-decision-column")?.contains(completion)).toBe(true);
         plan.value = "晨跑 30 分钟";
         plan.dispatchEvent(new Event("input", { bubbles: true }));
 
@@ -272,6 +274,39 @@ describe("行舟一级模块外壳", () => {
         expect(document.body.textContent).not.toContain("今天的训练内容");
         await vi.waitFor(() => expect(saveDaily).toHaveBeenCalledOnce(), { timeout: 2000 });
         expect(saveDaily.mock.calls[0][0].fields).toMatchObject({ trainingCompleted: "no", trainingPlan: "" });
+    });
+
+    it("先确认是否有手表评分和体重测量，再按需显示数值输入", async () => {
+        let store = researchDailyStore();
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
+
+        const watchDecision = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("今天是否有手表睡眠评分"))
+            ?.querySelector("select") as HTMLSelectElement;
+        const weightDecision = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("今天是否测量晨起体重"))
+            ?.querySelector("select") as HTMLSelectElement;
+        expect(document.body.textContent).not.toContain("今天没有手表评分，无需填写");
+        expect([...document.querySelectorAll("label")].some((label) => label.textContent?.trim().startsWith("晨起体重"))).toBe(false);
+
+        watchDecision.value = "no";
+        watchDecision.dispatchEvent(new Event("change", { bubbles: true }));
+        weightDecision.value = "no";
+        weightDecision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.body.textContent).toContain("今天没有手表评分，无需填写");
+        expect(document.body.textContent).toContain("今天没有测量条件，无需填写");
+
+        watchDecision.value = "yes";
+        watchDecision.dispatchEvent(new Event("change", { bubbles: true }));
+        weightDecision.value = "yes";
+        weightDecision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect([...document.querySelectorAll("label")].some((label) => label.textContent?.trim().startsWith("手表睡眠评分"))).toBe(true);
+        expect([...document.querySelectorAll("label")].some((label) => label.textContent?.trim().startsWith("晨起体重"))).toBe(true);
     });
 
     it("先确认是否有临时调整，仅在选择是时显示说明输入框", async () => {
@@ -285,6 +320,13 @@ describe("行舟一级模块外壳", () => {
             .find((label) => label.textContent?.includes("今日是否有节奏或临时调整"))
             ?.querySelector("select") as HTMLSelectElement | undefined;
         if (!decision) throw new Error("没有找到临时调整判断选择框");
+        const workStartColumn = document.querySelector('[aria-label="上班时间小时"]')?.closest(".xz-daily-flow-column");
+        const plannedEndColumn = document.querySelector('[aria-label="计划下班时间小时"]')?.closest(".xz-daily-flow-column");
+        expect(plannedEndColumn).toBe(workStartColumn);
+        const timePair = document.querySelector('[aria-label="上班时间小时"]')?.closest(".xz-daily-time-pair");
+        expect(timePair).not.toBeNull();
+        expect(timePair?.contains(document.querySelector('[aria-label="计划下班时间小时"]'))).toBe(true);
+        expect(decision.closest(".xz-daily-flow-column")).not.toBe(workStartColumn);
         expect(document.body.textContent).not.toContain("调整内容");
 
         decision.value = "yes";

@@ -420,13 +420,13 @@
     white-space: nowrap;
 }
 .xz-tag[data-status="活跃"], .xz-tag[data-status="进行中"] { color: var(--b3-theme-success); background: color-mix(in srgb, var(--b3-theme-success) 13%, transparent); }
+.xz-tag[data-status="重点投入"] { color: color-mix(in srgb, #d88a16 78%, var(--xingzhou-text)); background: color-mix(in srgb, #d88a16 14%, transparent); }
 .xz-tag[data-status="阻塞"], .xz-tag[data-status="已失败"] { color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 12%, transparent); }
 .xz-tag[data-status="将来／也许"], .xz-tag[data-status="暂停"] { color: var(--xingzhou-muted); }
 .xz-tag--type { color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
 .xz-tag--today { color: var(--b3-theme-success); background: color-mix(in srgb, var(--b3-theme-success) 13%, transparent); }
 .xz-tag--overdue { color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 12%, transparent); }
-.xz-tree-row .xz-tag--secondary { color: var(--xingzhou-muted); background: var(--xingzhou-surface-light); opacity: .72; }
-.xz-today-focus { display: inline-flex; flex: 0 0 auto; align-items: center; padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--xingzhou-primary) 32%, transparent); border-radius: 999px; color: var(--xingzhou-primary); background: color-mix(in srgb, var(--xingzhou-primary) 13%, transparent); font-size: 10px; font-weight: 650; white-space: nowrap; }
+.xz-today-focus { display: inline-flex; flex: 0 0 auto; align-items: center; padding: 2px 7px; border: 1px solid color-mix(in srgb, #4c9cff 34%, transparent); border-radius: 999px; color: color-mix(in srgb, #4c9cff 78%, var(--xingzhou-text)); background: color-mix(in srgb, #4c9cff 14%, transparent); font-size: 10px; font-weight: 650; white-space: nowrap; }
 
 .xz-detail { container-type: inline-size; padding: 22px 24px 32px; background: var(--xingzhou-panel); }
 .xz-detail p,
@@ -887,6 +887,9 @@
 .xz-daily-fields { display: grid; gap: 10px; }
 .xz-daily-fields.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .xz-daily-fields.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.xz-daily-fields.xz-daily-flow-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.xz-daily-flow-column { min-width: 0; display: grid; align-content: start; gap: 10px; }
+.xz-daily-time-pair { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 10px; }
 .xz-daily-fields label, .xz-daily-field, .xz-daily-score { min-width: 0; display: grid; align-content: start; gap: 6px; color: var(--xingzhou-muted); font-size: 14px; }
 .xz-daily-score { width: min(100%, var(--xz-daily-structured-width)); }
 .xz-daily-label-with-note { display: flex; align-items: baseline; gap: 7px; }
@@ -943,6 +946,7 @@
 .xz-daily-decision-pair { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .xz-daily-decision-column { min-width: 0; display: grid; align-content: start; gap: 10px; }
 .xz-daily-decision-column > label { min-width: 0; display: grid; align-content: start; gap: 6px; color: var(--xingzhou-muted); font-size: 14px; }
+.xz-daily-field-note { margin: 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.5; }
 .xz-daily-lights-off-inline { min-width: 0; display: grid; grid-template-columns: minmax(150px, .9fr) minmax(210px, 1.1fr); align-items: center; gap: 8px; }
 .xz-daily-lights-off-inline > .xz-daily-time-select { width: 100%; }
 .xz-daily-bedtime-note { box-sizing: border-box; min-height: 42px; display: flex; align-items: center; margin: 22px 0 0; padding: 8px 10px; border-left: 3px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; }
@@ -1193,7 +1197,14 @@
     .xz-daily-completion-summary > span { justify-content: flex-start; }
     .xz-daily-completion-summary button { min-height: 36px; }
     .xz-daily-missing-panel > div { grid-template-columns: 1fr; }
-    .xz-daily-progress, .xz-daily-progress.holiday, .xz-daily-fields.two, .xz-daily-fields.three { grid-template-columns: 1fr; }
+    .xz-daily-progress, .xz-daily-progress.holiday, .xz-daily-fields.two, .xz-daily-fields.three, .xz-daily-fields.xz-daily-flow-columns { grid-template-columns: 1fr; }
+    .xz-daily-fields.xz-daily-flow-columns > .xz-daily-flow-column { display: contents; }
+    .xz-daily-time-pair { display: contents; }
+    .xz-daily-flow-start { order: 1; }
+    .xz-daily-flow-end { order: 2; }
+    .xz-daily-flow-primary { order: 3; }
+    .xz-daily-flow-adjustments { order: 4; }
+    .xz-daily-flow-training { order: 5; }
     .xz-daily-personal-project-row, .xz-daily-decision-pair, .xz-daily-lights-off-inline, .xz-daily-closure-bottom { grid-template-columns: 1fr; }
     .xz-daily-bedtime-note { margin-top: 0; }
     .xz-daily-history-row, .xz-daily-rubric-row, .xz-daily-timeline-row { grid-template-columns: 1fr 1fr; }

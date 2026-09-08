@@ -80,10 +80,18 @@ function morningChecks(record: DailyRecord): Check[] {
         check("lights-off", "昨晚熄灯", "昨晚熄灯", text(fields.lightsOffTime)),
         check("wake-time", "今日起床", "今日起床", text(fields.wakeTime)),
         check("sleep-duration", "睡眠时长", "睡眠时长", number(fields.sleepDurationMinutes)),
+        check("watch-sleep-score-decision", "是否有手表睡眠评分", "今天是否有手表睡眠评分", text(fields.hasWatchSleepScore)),
+    ];
+    if (fields.hasWatchSleepScore === "yes") checks.push(check("watch-sleep-score", "手表睡眠评分", "手表睡眠评分", number(fields.watchSleepScore)));
+    checks.push(
         check("subjective-sleep", "主观睡眠质量", "主观睡眠质量", number(fields.subjectiveSleepQuality)),
+        check("morning-weight-decision", "是否测量晨起体重", "今天是否测量晨起体重", text(fields.hasMorningWeight)),
+    );
+    if (fields.hasMorningWeight === "yes") checks.push(check("morning-weight", "晨起体重", "晨起体重", number(fields.morningWeight)));
+    checks.push(
         check("day-adjustment-decision", "是否有节奏或临时调整", "今日是否有节奏或临时调整", text(fields.hasDayAdjustments)),
         check("training-decision", "训练完成状态", "完成训练", text(fields.trainingCompleted)),
-    ];
+    );
     if (record.dayType === "holiday") {
         checks.push(check("rest-plan", "休息／个人生活重点", "今天如何休息／个人生活重点", text(fields.restAndLifePlan)));
     } else if (record.dayType !== "saturday-reset") {
@@ -177,7 +185,8 @@ function eveningChecks(record: DailyRecord): Check[] {
 
 function morningTouched(fields: DailyRecordFields, holiday: boolean, saturday: boolean): boolean {
     const keys: Array<keyof DailyRecordFields> = [
-        "lightsOffTime", "wakeTime", "sleepDurationMinutes", "watchSleepScore", "subjectiveSleepQuality", "morningWeight",
+        "lightsOffTime", "wakeTime", "sleepDurationMinutes", "hasWatchSleepScore", "watchSleepScore", "subjectiveSleepQuality",
+        "hasMorningWeight", "morningWeight",
         "hasDayAdjustments", "dayAdjustments", "trainingCompleted", "trainingPlan",
     ];
     if (holiday) keys.push("restAndLifePlan");

@@ -257,6 +257,24 @@
         markDirty();
     }
 
+    function changeHasWatchSleepScore(value: string) {
+        const allowed: PresenceState[] = ["", "yes", "no"];
+        if (!allowed.includes(value as PresenceState)) return;
+        draft.fields.hasWatchSleepScore = value as PresenceState;
+        if (value !== "yes") draft.fields.watchSleepScore = null;
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    function changeHasMorningWeight(value: string) {
+        const allowed: PresenceState[] = ["", "yes", "no"];
+        if (!allowed.includes(value as PresenceState)) return;
+        draft.fields.hasMorningWeight = value as PresenceState;
+        if (value !== "yes") draft.fields.morningWeight = null;
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
     function changeSaturdayReviewOccurred(value: string) {
         const allowed: PresenceState[] = ["", "yes", "no"];
         if (!allowed.includes(value as PresenceState)) return;
@@ -568,27 +586,41 @@
                             <div class="xz-daily-field"><span class="xz-daily-label-with-note">昨晚熄灯 {#if resolvedSleep.fields.lightsOffAt}<small>{shortDateFromLocalDateTime(resolvedSleep.fields.lightsOffAt)}</small>{/if}</span><TimeSelect bind:value={draft.fields.lightsOffTime} ariaLabel="昨晚熄灯" /></div>
                             <div class="xz-daily-field"><span class="xz-daily-label-with-note">今日起床 {#if resolvedSleep.fields.wakeAt}<small>{shortDateFromLocalDateTime(resolvedSleep.fields.wakeAt)}</small>{/if}</span><TimeSelect bind:value={draft.fields.wakeTime} ariaLabel="今日起床" /></div>
                             <div class="xz-daily-field"><span>睡眠时长</span><DurationSelect bind:value={draft.fields.sleepDurationMinutes} maxHours={16} ariaLabel="睡眠时长" /></div>
-                            <label><span>手表睡眠评分</span><input class="xz-daily-compact-number" type="number" min="0" max="100" bind:value={draft.fields.watchSleepScore} placeholder="未填写" /></label>
+                            <div class="xz-daily-decision-column">
+                                <label><span>今天是否有手表睡眠评分</span><select value={draft.fields.hasWatchSleepScore} on:change|stopPropagation={(event) => changeHasWatchSleepScore(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
+                                {#if draft.fields.hasWatchSleepScore === "yes"}<label><span>手表睡眠评分</span><input class="xz-daily-compact-number" type="number" min="0" max="100" bind:value={draft.fields.watchSleepScore} placeholder="未填写" /></label>{:else if draft.fields.hasWatchSleepScore === "no"}<p class="xz-daily-field-note">今天没有手表评分，无需填写。</p>{/if}
+                            </div>
                             <ScoreInput bind:value={draft.fields.subjectiveSleepQuality} rubric={rubricById.subjectiveSleepQuality} on:inspect={inspectRubric} on:change={markDirty} />
-                            <label><span>晨起体重</span><div class="xz-daily-inline"><input type="number" min="0" step="0.1" bind:value={draft.fields.morningWeight} placeholder="未填写" /><select bind:value={draft.fields.weightUnit}><option value="kg">kg</option><option value="lb">lb</option></select></div></label>
+                            <div class="xz-daily-decision-column">
+                                <label><span>今天是否测量晨起体重</span><select value={draft.fields.hasMorningWeight} on:change|stopPropagation={(event) => changeHasMorningWeight(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
+                                {#if draft.fields.hasMorningWeight === "yes"}<label><span>晨起体重</span><div class="xz-daily-inline"><input type="number" min="0" step="0.1" bind:value={draft.fields.morningWeight} placeholder="未填写" /><select bind:value={draft.fields.weightUnit}><option value="kg">kg</option><option value="lb">lb</option></select></div></label>{:else if draft.fields.hasMorningWeight === "no"}<p class="xz-daily-field-note">今天没有测量条件，无需填写。</p>{/if}
+                            </div>
                         </div>
                     </section>
                     <section class="xz-daily-form-section">
                         <h3>今日安排</h3>
-                        <div class="xz-daily-fields two">
-                            {#if workApplicable && !isSaturdayReset}
-                                <div class="xz-daily-field"><span>上班时间</span><TimeSelect bind:value={draft.fields.workStartTime} ariaLabel="上班时间" /></div>
-                                <div class="xz-daily-field"><span>计划下班时间</span><TimeSelect bind:value={draft.fields.plannedWorkEndTime} ariaLabel="计划下班时间" /></div>
-                                <label><span>今天最重要的工作内容</span><textarea bind:value={draft.fields.importantWorkPlan}></textarea></label>
-                            {:else if !workApplicable}
-                                <label><span>今天如何休息／个人生活重点</span><textarea bind:value={draft.fields.restAndLifePlan} placeholder="例如：散步、做饭、陪伴家人、完全离开科研"></textarea></label>
-                            {/if}
-                            <div class="xz-daily-decision-column">
+                        <div class="xz-daily-fields xz-daily-flow-columns">
+                            <div class="xz-daily-flow-column">
+                                {#if workApplicable && !isSaturdayReset}
+                                    <div class="xz-daily-time-pair">
+                                        <div class="xz-daily-field xz-daily-flow-start"><span>上班时间</span><TimeSelect bind:value={draft.fields.workStartTime} ariaLabel="上班时间" /></div>
+                                        <div class="xz-daily-field xz-daily-flow-end"><span>计划下班时间</span><TimeSelect bind:value={draft.fields.plannedWorkEndTime} ariaLabel="计划下班时间" /></div>
+                                    </div>
+                                    <label class="xz-daily-flow-primary"><span>今天最重要的工作内容</span><textarea bind:value={draft.fields.importantWorkPlan}></textarea></label>
+                                {:else if !workApplicable}
+                                    <label class="xz-daily-flow-primary"><span>今天如何休息／个人生活重点</span><textarea bind:value={draft.fields.restAndLifePlan} placeholder="例如：散步、做饭、陪伴家人、完全离开科研"></textarea></label>
+                                {/if}
+                                <div class="xz-daily-decision-column xz-daily-flow-training">
+                                    <label class:xz-daily-result-select={draft.fields.trainingCompleted === "yes"}><span>完成训练</span><select value={draft.fields.trainingCompleted} on:change|stopPropagation={(event) => changeTrainingCompleted(event.currentTarget.value)}><option value="">尚未填写</option><option value="yes">✓ 已完成</option><option value="no">× 未完成</option><option value="not-applicable">— 休息日</option></select></label>
+                                    {#if draft.fields.trainingCompleted === "yes"}<label><span>今天的训练内容</span><textarea bind:value={draft.fields.trainingPlan}></textarea></label>{/if}
+                                </div>
+                            </div>
+                            <div class="xz-daily-flow-column">
+                                <div class="xz-daily-decision-column xz-daily-flow-adjustments">
                                 <label><span>今日是否有节奏或临时调整</span><select value={draft.fields.hasDayAdjustments} on:change|stopPropagation={(event) => changeHasDayAdjustments(event.currentTarget.value)}><option value="">尚未确认</option><option value="no">否</option><option value="yes">是</option></select></label>
                                 {#if draft.fields.hasDayAdjustments === "yes"}<label><span>调整内容</span><textarea bind:value={draft.fields.dayAdjustments} placeholder="记录今天与原计划不同的节奏或临时变化"></textarea></label>{/if}
+                                </div>
                             </div>
-                            <label class:xz-daily-result-select={draft.fields.trainingCompleted === "yes"}><span>完成训练</span><select value={draft.fields.trainingCompleted} on:change|stopPropagation={(event) => changeTrainingCompleted(event.currentTarget.value)}><option value="">尚未填写</option><option value="yes">✓ 已完成</option><option value="no">× 未完成</option><option value="not-applicable">— 休息日</option></select></label>
-                            {#if draft.fields.trainingCompleted === "yes"}<label><span>今天的训练内容</span><textarea bind:value={draft.fields.trainingPlan}></textarea></label>{/if}
                         </div>
                     </section>
                 {/if}

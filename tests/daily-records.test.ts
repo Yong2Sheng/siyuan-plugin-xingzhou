@@ -30,7 +30,31 @@ describe("生活节律内部数据库", () => {
         expect(second.records).toHaveLength(1);
         expect(second.records[0]).toMatchObject({ date: "2026-09-03", createdAt: 1100, updatedAt: 1300 });
         expect(second.records[0].fields).toMatchObject({ sleepDurationMinutes: 346, morningWeight: 150, weightUnit: "lb" });
+        expect(second.records[0].fields.hasMorningWeight).toBe("yes");
         expect(second.revision).toBe(3);
+    });
+
+    it("区分没有测量条件与尚未填写，并兼容已有评分和体重", () => {
+        const legacy = createDailyRecord("2026-09-03", "research-workday", 1000);
+        legacy.fields.watchSleepScore = 82;
+        legacy.fields.morningWeight = 70.4;
+        const migrated = upsertDailyRecord(createEmptyDailyStore(900), legacy, 1100).records[0];
+        expect(migrated.fields).toMatchObject({
+            hasWatchSleepScore: "yes",
+            watchSleepScore: 82,
+            hasMorningWeight: "yes",
+            morningWeight: 70.4,
+        });
+
+        migrated.fields.hasWatchSleepScore = "no";
+        migrated.fields.hasMorningWeight = "no";
+        const unavailable = upsertDailyRecord(createEmptyDailyStore(1200), migrated, 1300).records[0];
+        expect(unavailable.fields).toMatchObject({
+            hasWatchSleepScore: "no",
+            watchSleepScore: null,
+            hasMorningWeight: "no",
+            morningWeight: null,
+        });
     });
 
     it("损坏结构、重复日期和越界评分不会被静默接受", () => {

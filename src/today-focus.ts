@@ -21,6 +21,9 @@ export function getTodayFocusCounts(items: WorkItem[], tree: WorkItemTree, now =
 
 function isRelevantToday(item: WorkItem, today: string): boolean {
     if (isClosed(item)) return false;
+    if ((item.executionSlices ?? []).some((slice) =>
+        slice.scheduledDate === today && (slice.status === "scheduled" || slice.status === "completed")
+    )) return true;
     const start = item.planDate ? localDateKey(item.planDate) : "";
     const deadline = item.deadline ? localDateKey(item.deadline) : "";
     if (start === today || deadline === today) return true;
