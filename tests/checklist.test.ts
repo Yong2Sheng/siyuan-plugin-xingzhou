@@ -33,15 +33,32 @@ describe("Checklist 配置", () => {
         expect(checklistStoresMatch(initial, restored!)).toBe(true);
     });
 
-    it("按日期保存勾选和训练安排，并兼容没有每日状态的旧配置", () => {
+    it("按日期保存四态结果和训练安排，并兼容旧版勾选数据", () => {
         const initial = createDefaultChecklistStore(1000);
-        const saved = updateChecklistDayState(initial, "2026-09-06", ["sun-wake:common:0", "sun-wake:common:0"], "rest", 2000);
+        const saved = updateChecklistDayState(initial, "2026-09-06", new Map([
+            ["sun-wake:common:0", "completed" as const],
+            ["sun-wake:common:1", "partial" as const],
+            ["sun-training:rest:0", "missed" as const],
+        ]), "rest", 2000);
         expect(saved.dayStates).toEqual([{
             date: "2026-09-06",
             checkedKeys: ["sun-wake:common:0"],
+            reminderStates: {
+                "sun-training:rest:0": "missed",
+                "sun-wake:common:0": "completed",
+                "sun-wake:common:1": "partial",
+            },
             trainingMode: "rest",
             updatedAt: 2000,
         }]);
+        const migrated = parseChecklistStore({
+            ...initial,
+            dayStates: [{ date: "2026-09-05", checkedKeys: ["sat-wake:common:0"], trainingMode: "", updatedAt: 1500 }],
+        });
+        expect(migrated?.dayStates[0]).toMatchObject({
+            checkedKeys: ["sat-wake:common:0"],
+            reminderStates: { "sat-wake:common:0": "completed" },
+        });
         const { dayStates: _discarded, ...legacy } = saved;
         expect(parseChecklistStore(legacy)?.dayStates).toEqual([]);
         expect(checklistStoresMatch(saved, JSON.parse(JSON.stringify(saved)))).toBe(true);

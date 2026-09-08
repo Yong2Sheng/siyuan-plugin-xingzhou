@@ -1040,17 +1040,24 @@
 .xz-checklist-training-choice > button.active { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 700; }
 .xz-checklist-training-choice > small { color: var(--xingzhou-muted); font-size: 11px; }
 .xz-checklist-native-reminders { display: grid; gap: 1px; margin-top: 5px; }
-.xz-checklist-native-reminders label, .xz-checklist-paper section > label { min-width: 0; display: grid; grid-template-columns: 19px minmax(0, 1fr); align-items: start; gap: 6px; cursor: pointer; }
+.xz-checklist-native-reminders label, .xz-checklist-paper section > label { min-width: 0; display: grid; grid-template-columns: 102px minmax(0, 1fr); align-items: start; gap: 7px; }
 .xz-checklist-native-reminders label { padding: 5px 6px 5px 0; border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); font-size: 14px; line-height: 1.55; }
 .xz-checklist-native-reminders label:hover { background: var(--xingzhou-surface-light); }
-.xz-checklist-native-reminders input, .xz-checklist-paper section input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--b3-theme-success, var(--xingzhou-primary)); }
-.xz-checklist-native-reminders label.checked span, .xz-checklist-paper section label.checked span { color: var(--xingzhou-muted); text-decoration: line-through; }
+.xz-checklist-state-select { box-sizing: border-box; width: 100%; min-height: 27px; margin: 0; padding: 2px 5px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel); cursor: pointer; font-size: 11px; }
+.xz-checklist-native-reminders label.completed .xz-checklist-state-select, .xz-checklist-paper section label.completed .xz-checklist-state-select { border-color: color-mix(in srgb, var(--b3-theme-success, var(--xingzhou-primary)) 45%, var(--xingzhou-border)); color: var(--b3-theme-success, var(--xingzhou-primary)); }
+.xz-checklist-native-reminders label.partial .xz-checklist-state-select, .xz-checklist-paper section label.partial .xz-checklist-state-select { border-color: color-mix(in srgb, var(--b3-theme-warning, #d79b35) 50%, var(--xingzhou-border)); color: var(--b3-theme-warning, #b87916); }
+.xz-checklist-native-reminders label.missed .xz-checklist-state-select, .xz-checklist-paper section label.missed .xz-checklist-state-select { border-color: color-mix(in srgb, var(--xingzhou-danger) 45%, var(--xingzhou-border)); color: var(--xingzhou-danger); }
+.xz-checklist-native-reminders label.completed > span, .xz-checklist-paper section label.completed > span { color: var(--xingzhou-muted); text-decoration: line-through; }
+.xz-checklist-native-reminders label.partial > span, .xz-checklist-paper section label.partial > span { color: var(--b3-theme-warning, #a66b10); }
+.xz-checklist-native-reminders label.missed > span, .xz-checklist-paper section label.missed > span { color: var(--xingzhou-muted); text-decoration: line-through; text-decoration-color: var(--xingzhou-danger); }
 .xz-checklist-summary { position: sticky; top: 0; padding: 15px; }
 .xz-checklist-summary h3 { margin: 0 0 9px; font-size: 15px; }
 .xz-checklist-summary > strong { color: var(--xingzhou-primary); font-size: 31px; }
 .xz-checklist-summary > span { margin-left: 7px; color: var(--xingzhou-muted); font-size: 12px; }
 .xz-checklist-progress { height: 7px; margin: 10px 0 14px; overflow: hidden; border-radius: 999px; background: var(--xingzhou-surface-light); }
 .xz-checklist-progress i { display: block; height: 100%; background: var(--b3-theme-success, var(--xingzhou-primary)); transition: width .2s ease; }
+.xz-checklist-state-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: -3px 0 12px; color: var(--xingzhou-muted); font-size: 11px; text-align: center; }
+.xz-checklist-state-summary span { padding: 3px 1px; border-radius: var(--xingzhou-radius); background: var(--xingzhou-surface-light); }
 .xz-checklist-summary p { margin: 0; padding: 10px; border-left: 3px solid var(--xingzhou-primary); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; line-height: 1.6; }
 .xz-checklist-reset-note { margin: 10px 0 0; color: var(--xingzhou-muted); text-align: center; font-size: 12px; }
 
@@ -1087,7 +1094,8 @@
 .xz-checklist-training-choice.paper > button { min-height: 25px; padding: 2px 9px; border-color: #b8c9c5; color: #243638; background: #fefdfc; font-size: 11px; }
 .xz-checklist-training-choice.paper > button.active { border-color: #527e79; color: #355d59; background: #e0eeea; }
 .xz-checklist-paper section > label { margin: 4px 0; color: #243638; font-size: 12px; line-height: 1.5; }
-.xz-checklist-paper section input { accent-color: #527e79; }
+.xz-checklist-paper section > label { grid-template-columns: 86px minmax(0, 1fr); }
+.xz-checklist-paper .xz-checklist-state-select { min-height: 23px; padding: 1px 3px; border-color: #b8c9c5; color: #6d7b7a; background: #fefdfc; font-size: 9px; }
 .xz-checklist-paper > footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 13px; padding-top: 8px; border-top: 1px solid #d7e0dd; color: #6d7b7a; font-size: 11px; }
 
 .xz-checklist-editor { box-sizing: border-box; width: min(100%, 620px); max-height: min(760px, calc(100vh - 48px)); overflow: auto; padding: 22px; border: 1px solid var(--xingzhou-strong-border); border-radius: calc(var(--xingzhou-radius) + 3px); color: var(--xingzhou-text); background: var(--xingzhou-panel); box-shadow: 0 16px 48px color-mix(in srgb, var(--xingzhou-text) 28%, transparent); }

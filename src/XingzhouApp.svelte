@@ -67,6 +67,7 @@
         { id: "closed", label: "已结束" },
     ];
     const legacyStatuses = new Set(["规划中", "活跃", "等待", "将来／也许", "已计划"]);
+    const dependencyCandidateStatuses = new Set(["待开始", "进行中"]);
     const includeClosedStorageKey = "siyuan-plugin-xingzhou:include-closed";
 
     let page: MainPage = "all";
@@ -183,7 +184,7 @@
     $: parentCandidates = selected ? getParentCandidates(selected) : [];
     $: selectedIssues = selected ? tree.issues.filter((issue) => issue.itemId === selected.id) : [];
     $: dependencyCandidates = selected
-        ? sortSidebarItems((data?.items ?? []).filter((item) => item.id !== selected.id))
+        ? sortSidebarItems((data?.items ?? []).filter((item) => item.id !== selected.id && dependencyCandidateStatuses.has(item.status)))
         : [];
     $: selectedPrerequisiteIds = new Set(selected ? prerequisiteIds(selected) : []);
     $: hardPrerequisites = selected ? resolveItems(selected.hardPrerequisiteIds ?? []) : [];

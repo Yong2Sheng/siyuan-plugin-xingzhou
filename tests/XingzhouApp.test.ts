@@ -652,9 +652,11 @@ describe("XingzhouApp", () => {
         const novel = { ...base, id: "novel", rowId: "novel", title: "恶魔的尾巴第一季", status: "进行中", parentIds: [writingArea.id] };
         const mapDesign = { ...base, id: "map-design", rowId: "map-design", title: "恶魔的尾巴小说地图设计", status: "进行中", parentIds: [novel.id], topProjectIds: [novel.id], softPrerequisiteIds: [learning.id] };
         const reference = { ...base, id: "reference", rowId: "reference", title: "整理地图参考资料", type: "事务" };
+        const completedReference = { ...base, id: "completed-reference", rowId: "completed-reference", title: "已整理的参考资料", type: "事务", status: "已完成" };
+        const futureReference = { ...base, id: "future-reference", rowId: "future-reference", title: "将来再整理的资料", type: "事务", status: "将来" };
         const workItemData = {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
-            items: [mapArea, learning, writingArea, novel, mapDesign, reference], missingFields: [],
+            items: [mapArea, learning, writingArea, novel, mapDesign, reference, completedReference, futureReference], missingFields: [],
             fields: {},
         };
         const saveItem = vi.fn(async (currentData, currentItem, changes) => ({
@@ -679,6 +681,13 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-dependency-card")?.textContent).toContain("Azgaar 使用学习");
         expect(document.querySelector(".xz-dependency-indicator")?.textContent).toContain("1");
         const hardSelect = document.querySelector('select[aria-label="添加完成后开始依赖"]') as HTMLSelectElement;
+        const softSelect = document.querySelector('select[aria-label="添加需先行依赖"]') as HTMLSelectElement;
+        expect([...hardSelect.options].map((option) => option.value)).toContain(reference.id);
+        expect([...softSelect.options].map((option) => option.value)).toContain(reference.id);
+        expect([...hardSelect.options].map((option) => option.value)).not.toContain(completedReference.id);
+        expect([...softSelect.options].map((option) => option.value)).not.toContain(completedReference.id);
+        expect([...hardSelect.options].map((option) => option.value)).not.toContain(futureReference.id);
+        expect([...softSelect.options].map((option) => option.value)).not.toContain(futureReference.id);
         hardSelect.value = reference.id;
         hardSelect.dispatchEvent(new Event("change", { bubbles: true }));
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: mapDesign.id }), {

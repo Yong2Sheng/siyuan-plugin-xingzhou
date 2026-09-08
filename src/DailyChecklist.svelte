@@ -7,6 +7,7 @@
         updateChecklistDayState,
         updateChecklistStore,
         type ChecklistEntry,
+        type ChecklistReminderState,
         type ChecklistStore,
         type ChecklistTemplate,
         type ChecklistTemplateId,
@@ -35,15 +36,20 @@
     let editHasTrainingChoices = false;
     let editTone: ChecklistTone = "plain";
     let lastDate = date;
-    let checked = new Set<string>();
+    let reminderStates = new Map<string, ChecklistReminderState>();
     let trainingMode: ChecklistTrainingMode = "";
     let saveSequence = 0;
 
     $: templateId = dayType === "conference-day" ? "conference" : templateIdForDate(date);
     $: template = store.templates.find((candidate) => candidate.id === templateId) ?? store.templates[0];
     $: allReminderKeys = template.entries.flatMap((item) => visibleReminders(item, trainingMode).map((reminder) => reminder.key));
-    $: completedCount = allReminderKeys.filter((key) => checked.has(key)).length;
-    $: completionPercent = allReminderKeys.length ? Math.round(completedCount / allReminderKeys.length * 100) : 0;
+    $: completedCount = countState(allReminderKeys, "completed");
+    $: partialCount = countState(allReminderKeys, "partial");
+    $: missedCount = countState(allReminderKeys, "missed");
+    $: pendingCount = allReminderKeys.length - completedCount - partialCount - missedCount;
+    $: weightedCompletedCount = completedCount + partialCount * 0.5;
+    $: weightedCompletedLabel = Number.isInteger(weightedCompletedCount) ? String(weightedCompletedCount) : weightedCompletedCount.toFixed(1);
+    $: completionPercent = allReminderKeys.length ? Math.round(weightedCompletedCount / allReminderKeys.length * 100) : 0;
     $: paperColumns = splitPaperEntries(template);
     $: if (date !== lastDate) {
         lastDate = date;
@@ -63,16 +69,25 @@
 
     function hydrateDayState(currentDate: string) {
         const state = store.dayStates.find((candidate) => candidate.date === currentDate);
-        checked = new Set(state?.checkedKeys ?? []);
+        reminderStates = new Map(Object.entries(state?.reminderStates ?? {}));
         trainingMode = state?.trainingMode ?? "";
     }
 
-    function toggleCheck(key: string) {
-        const nextChecked = new Set(checked);
-        if (nextChecked.has(key)) nextChecked.delete(key);
-        else nextChecked.add(key);
-        checked = nextChecked;
+    function changeReminderState(key: string, value: string) {
+        if (value !== "" && value !== "completed" && value !== "partial" && value !== "missed") return;
+        const nextStates = new Map(reminderStates);
+        if (value) nextStates.set(key, value);
+        else nextStates.delete(key);
+        reminderStates = nextStates;
         void persistDayState();
+    }
+
+    function reminderState(key: string): ChecklistReminderState | "" {
+        return reminderStates.get(key) ?? "";
+    }
+
+    function countState(keys: string[], state: ChecklistReminderState): number {
+        return keys.filter((key) => reminderStates.get(key) === state).length;
     }
 
     function chooseTrainingMode(mode: Exclude<ChecklistTrainingMode, "">) {
@@ -95,7 +110,7 @@
     }
 
     async function persistDayState(): Promise<void> {
-        const next = updateChecklistDayState(store, date, checked, trainingMode);
+        const next = updateChecklistDayState(store, date, reminderStates, trainingMode);
         await persist(next);
     }
 
@@ -250,7 +265,7 @@
                 <article class="xz-checklist-native-list">
                     <header>
                         <div><h3>{formatDate(date)}</h3><p>{weekdayLabel(date)} · {template.label}</p></div>
-                        <span>当日勾选会自动保存</span>
+                        <span>当日状态会自动保存</span>
                     </header>
                     <div class="xz-checklist-native-entries">
                         {#each template.entries as item, entryIndex (item.id)}
@@ -276,8 +291,13 @@
                                     {/if}
                                     <div class="xz-checklist-native-reminders">
                                         {#each visibleReminders(item, trainingMode) as reminder (reminder.key)}
-                                            <label class:checked={checked.has(reminder.key)}>
-                                                <input type="checkbox" checked={checked.has(reminder.key)} on:change={() => toggleCheck(reminder.key)} />
+                                            <label class:completed={reminderState(reminder.key) === "completed"} class:partial={reminderState(reminder.key) === "partial"} class:missed={reminderState(reminder.key) === "missed"}>
+                                                <select class="xz-checklist-state-select" aria-label={`设置“${reminder.text}”状态`} value={reminderState(reminder.key)} on:change={(event) => changeReminderState(reminder.key, event.currentTarget.value)}>
+                                                    <option value="">○ 待处理</option>
+                                                    <option value="completed">✓ 已完成</option>
+                                                    <option value="partial">◐ 部分完成</option>
+                                                    <option value="missed">× 未完成</option>
+                                                </select>
                                                 <span>{reminder.text}</span>
                                             </label>
                                         {/each}
@@ -290,8 +310,9 @@
                 <aside class="xz-checklist-summary">
                     <h3>今日进度</h3>
                     <strong>{completionPercent}%</strong>
-                    <span>{completedCount} / {allReminderKeys.length} 项</span>
+                    <span>折算 {weightedCompletedLabel} / {allReminderKeys.length} 项</span>
                     <div class="xz-checklist-progress"><i style={`width:${completionPercent}%`}></i></div>
+                    <div class="xz-checklist-state-summary"><span>✓ {completedCount}</span><span>◐ {partialCount}</span><span>× {missedCount}</span><span>○ {pendingCount}</span></div>
                     <p>Checklist 只负责提醒。需要记录的结果、时长和观察仍在“今日记录”中填写。</p>
                 </aside>
             </div>
@@ -303,7 +324,7 @@
                         <dl><dt>日期</dt><dd>{formatDate(date)}</dd><dt>星期</dt><dd>{weekdayLabel(date)}</dd></dl>
                     </header>
                     <p class="xz-checklist-paper-intro">做完即可，不追求全部完美；下班后可做低压力工作闭环，但不重新进入执行状态。</p>
-                    <div class="xz-checklist-paper-progress"><span>今日完成 {completedCount} / {allReminderKeys.length}</span><i><b style={`width:${completionPercent}%`}></b></i><span>{completionPercent}%</span></div>
+                    <div class="xz-checklist-paper-progress"><span>今日折算完成 {weightedCompletedLabel} / {allReminderKeys.length}</span><i><b style={`width:${completionPercent}%`}></b></i><span>{completionPercent}%</span></div>
                     <div class="xz-checklist-paper-columns">
                         {#each paperColumns as column}
                             <div>
@@ -318,8 +339,13 @@
                                             </div>
                                         {/if}
                                         {#each visibleReminders(item, trainingMode) as reminder (reminder.key)}
-                                            <label class:checked={checked.has(reminder.key)}>
-                                                <input type="checkbox" checked={checked.has(reminder.key)} on:change={() => toggleCheck(reminder.key)} />
+                                            <label class:completed={reminderState(reminder.key) === "completed"} class:partial={reminderState(reminder.key) === "partial"} class:missed={reminderState(reminder.key) === "missed"}>
+                                                <select class="xz-checklist-state-select" aria-label={`设置“${reminder.text}”状态`} value={reminderState(reminder.key)} on:change={(event) => changeReminderState(reminder.key, event.currentTarget.value)}>
+                                                    <option value="">○ 待处理</option>
+                                                    <option value="completed">✓ 已完成</option>
+                                                    <option value="partial">◐ 部分完成</option>
+                                                    <option value="missed">× 未完成</option>
+                                                </select>
                                                 <span>{reminder.text}</span>
                                             </label>
                                         {/each}
@@ -333,14 +359,15 @@
                 <aside class="xz-checklist-summary">
                     <h3>今日进度</h3>
                     <strong>{completionPercent}%</strong>
-                    <span>{completedCount} / {allReminderKeys.length} 项</span>
+                    <span>折算 {weightedCompletedLabel} / {allReminderKeys.length} 项</span>
                     <div class="xz-checklist-progress"><i style={`width:${completionPercent}%`}></i></div>
-                    <p>当前仍是可交互的纸质样式。可以直接勾选或编辑，打印时只输出左侧清单。</p>
+                    <div class="xz-checklist-state-summary"><span>✓ {completedCount}</span><span>◐ {partialCount}</span><span>× {missedCount}</span><span>○ {pendingCount}</span></div>
+                    <p>当前仍是可交互的纸质样式。可以直接选择状态或编辑，打印时只输出左侧清单。</p>
                 </aside>
             </div>
         {/if}
 
-        <p class="xz-checklist-reset-note">勾选与周末训练安排按日期自动保存；切换视图、重启插件或更换设备后仍可恢复。</p>
+        <p class="xz-checklist-reset-note">Checklist 状态与周末训练安排按日期自动保存；切换视图、重启插件或更换设备后仍可恢复。</p>
     </section>
 {/if}
 

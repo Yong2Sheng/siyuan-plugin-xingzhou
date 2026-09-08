@@ -12,7 +12,7 @@ describe("每日 Checklist", () => {
         document.body.replaceChildren();
     });
 
-    it("两种视图共享勾选状态，并在组件重建后恢复当日进度", async () => {
+    it("两种视图共享四态结果，并在组件重建后恢复当日进度", async () => {
         let store = createDefaultChecklistStore(1000);
         const saveChecklist = vi.fn(async (incoming: ChecklistStore) => store = incoming);
         component = new DailyChecklist({
@@ -21,10 +21,19 @@ describe("每日 Checklist", () => {
         });
         await tick();
         await vi.waitFor(() => expect(document.querySelector(".xz-checklist-native-list")).not.toBeNull());
-        const firstCheck = document.querySelector('.xz-checklist-native-reminders input[type="checkbox"]') as HTMLInputElement;
-        firstCheck.click();
-        await vi.waitFor(() => expect(store.dayStates.find((state) => state.date === "2026-09-04")?.checkedKeys).toHaveLength(1));
-        expect(document.querySelector(".xz-checklist-summary")?.textContent).toContain("1 /");
+        const stateSelects = [...document.querySelectorAll<HTMLSelectElement>(".xz-checklist-native-reminders .xz-checklist-state-select")];
+        changeSelect(stateSelects[0], "completed");
+        changeSelect(stateSelects[1], "partial");
+        changeSelect(stateSelects[2], "missed");
+        await vi.waitFor(() => expect(store.dayStates.find((state) => state.date === "2026-09-04")?.reminderStates).toMatchObject({
+            "wd-wake:common:0": "completed",
+            "wd-wake:common:1": "partial",
+            "wd-drive:common:0": "missed",
+        }));
+        expect(document.querySelector(".xz-checklist-summary")?.textContent).toContain("折算 1.5 /");
+        expect(document.querySelector(".xz-checklist-state-summary")?.textContent).toContain("✓ 1");
+        expect(document.querySelector(".xz-checklist-state-summary")?.textContent).toContain("◐ 1");
+        expect(document.querySelector(".xz-checklist-state-summary")?.textContent).toContain("× 1");
 
         component.$destroy();
         document.body.replaceChildren();
@@ -32,13 +41,13 @@ describe("每日 Checklist", () => {
             target: document.body,
             props: { date: "2026-09-04", loadChecklist: async () => store, saveChecklist },
         });
-        await vi.waitFor(() => expect(document.querySelector('.xz-checklist-native-reminders input[type="checkbox"]:checked')).not.toBeNull());
+        await vi.waitFor(() => expect(document.querySelector<HTMLSelectElement>('.xz-checklist-native-reminders .xz-checklist-state-select')?.value).toBe("completed"));
 
         clickButton("纸质视图");
         await vi.waitFor(() => expect(document.querySelector(".xz-checklist-paper")).not.toBeNull());
         expect(saveChecklist).toHaveBeenCalled();
         expect(document.querySelector(".xz-checklist-paper-layout > .xz-checklist-summary")).not.toBeNull();
-        expect(document.querySelector('.xz-checklist-paper input[type="checkbox"]:checked')).not.toBeNull();
+        expect(document.querySelector<HTMLSelectElement>('.xz-checklist-paper .xz-checklist-state-select')?.value).toBe("completed");
     });
 
     it("按照日期自动选择工作日、周六或周日模板", async () => {
@@ -107,4 +116,9 @@ function clickButton(label: string): void {
     const button = [...document.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === label) as HTMLButtonElement | undefined;
     if (!button) throw new Error(`没有找到按钮：${label}`);
     button.click();
+}
+
+function changeSelect(select: HTMLSelectElement, value: string): void {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
 }

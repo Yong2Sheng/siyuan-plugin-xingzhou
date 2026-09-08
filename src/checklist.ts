@@ -5,10 +5,12 @@ export type ChecklistViewMode = "xingzhou" | "paper";
 export type ChecklistTemplateId = "workday" | "conference" | "saturday" | "sunday";
 export type ChecklistTone = "plain" | "mint" | "sand" | "rose";
 export type ChecklistTrainingMode = "training" | "rest" | "";
+export type ChecklistReminderState = "completed" | "partial" | "missed";
 
 export type ChecklistDayState = {
     date: string;
     checkedKeys: string[];
+    reminderStates: Record<string, ChecklistReminderState>;
     trainingMode: ChecklistTrainingMode;
     updatedAt: number;
 };
@@ -182,21 +184,22 @@ export function cloneChecklistStore(store: ChecklistStore): ChecklistStore {
     return {
         ...store,
         templates: store.templates.map((template) => ({ ...template, entries: template.entries.map(cloneEntry) })),
-        dayStates: store.dayStates.map((state) => ({ ...state, checkedKeys: [...state.checkedKeys] })),
+        dayStates: store.dayStates.map((state) => ({ ...state, checkedKeys: [...state.checkedKeys], reminderStates: { ...state.reminderStates } })),
     };
 }
 
 export function updateChecklistDayState(
     store: ChecklistStore,
     date: string,
-    checkedKeys: Iterable<string>,
+    reminderStates: ReadonlyMap<string, ChecklistReminderState>,
     trainingMode: ChecklistTrainingMode,
     now = Date.now(),
 ): ChecklistStore {
-    const normalizedKeys = [...new Set([...checkedKeys].map(cleanString).filter(Boolean))].sort();
+    const normalizedStates = normalizeReminderStates(Object.fromEntries(reminderStates));
+    const checkedKeys = Object.keys(normalizedStates).filter((key) => normalizedStates[key] === "completed").sort();
     const otherStates = store.dayStates.filter((state) => state.date !== date);
-    const dayStates = normalizedKeys.length || trainingMode
-        ? [...otherStates, { date, checkedKeys: normalizedKeys, trainingMode, updatedAt: now }].sort((a, b) => a.date.localeCompare(b.date))
+    const dayStates = Object.keys(normalizedStates).length || trainingMode
+        ? [...otherStates, { date, checkedKeys, reminderStates: normalizedStates, trainingMode, updatedAt: now }].sort((a, b) => a.date.localeCompare(b.date))
         : otherStates;
     return updateChecklistStore(store, { dayStates }, now);
 }
@@ -233,12 +236,15 @@ function normalizeDayStates(value: unknown): ChecklistDayState[] {
         if (!isObject(candidate)) continue;
         const date = cleanString(candidate.date);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-        const checkedKeys = Array.isArray(candidate.checkedKeys)
+        const legacyCheckedKeys = Array.isArray(candidate.checkedKeys)
             ? [...new Set(candidate.checkedKeys.map(cleanString).filter(Boolean))].sort()
             : [];
+        const reminderStates = normalizeReminderStates(candidate.reminderStates);
+        for (const key of legacyCheckedKeys) reminderStates[key] ??= "completed";
+        const checkedKeys = Object.keys(reminderStates).filter((key) => reminderStates[key] === "completed").sort();
         const trainingMode: ChecklistTrainingMode = candidate.trainingMode === "training" || candidate.trainingMode === "rest" ? candidate.trainingMode : "";
-        if (!checkedKeys.length && !trainingMode) continue;
-        byDate.set(date, { date, checkedKeys, trainingMode, updatedAt: finiteNumber(candidate.updatedAt) ?? 0 });
+        if (!Object.keys(reminderStates).length && !trainingMode) continue;
+        byDate.set(date, { date, checkedKeys, reminderStates, trainingMode, updatedAt: finiteNumber(candidate.updatedAt) ?? 0 });
     }
     return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -278,6 +284,16 @@ function normalizeTrainingChoices(value: unknown): ChecklistEntry["trainingChoic
     const training = Array.isArray(value.training) ? value.training.map(cleanString).filter(Boolean) : [];
     const rest = Array.isArray(value.rest) ? value.rest.map(cleanString).filter(Boolean) : [];
     return training.length && rest.length ? { training, rest } : undefined;
+}
+
+function normalizeReminderStates(value: unknown): Record<string, ChecklistReminderState> {
+    if (!isObject(value)) return {};
+    const states: Record<string, ChecklistReminderState> = {};
+    for (const [rawKey, rawState] of Object.entries(value)) {
+        const key = cleanString(rawKey);
+        if (key && (rawState === "completed" || rawState === "partial" || rawState === "missed")) states[key] = rawState;
+    }
+    return Object.fromEntries(Object.entries(states).sort(([left], [right]) => left.localeCompare(right)));
 }
 
 function cleanString(value: unknown): string {
