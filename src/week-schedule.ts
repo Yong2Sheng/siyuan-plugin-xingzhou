@@ -2,7 +2,7 @@ import { isClosed } from "./tree";
 import type { ExecutionSlice } from "./execution-slices";
 import type { WorkItem } from "./work-items";
 
-export type WeekOccurrencePhase = "slice" | "single" | "start" | "ongoing" | "deadline" | "carry-in" | "carry-out";
+export type WeekOccurrencePhase = "slice" | "early-completion" | "single" | "start" | "ongoing" | "deadline" | "carry-in" | "carry-out";
 
 export type WeekOccurrence = {
     item: WorkItem;
@@ -19,10 +19,18 @@ export function groupWeekOccurrences(items: WorkItem[], weekStart: number): Map<
     for (const item of items) {
         if (item.type === "事务") {
             for (const slice of item.executionSlices ?? []) {
-                if (slice.scheduledDate < weekStartKey || slice.scheduledDate > weekEndKey) continue;
-                const occurrences = result.get(slice.scheduledDate) ?? [];
-                occurrences.push({ item, phase: "slice", slice });
-                result.set(slice.scheduledDate, occurrences);
+                if (slice.scheduledDate >= weekStartKey && slice.scheduledDate <= weekEndKey) {
+                    const occurrences = result.get(slice.scheduledDate) ?? [];
+                    occurrences.push({ item, phase: "slice", slice });
+                    result.set(slice.scheduledDate, occurrences);
+                }
+                const completedDate = slice.completedAt ? localDateKey(slice.completedAt) : "";
+                if (slice.status === "completed" && completedDate && completedDate < slice.scheduledDate
+                    && completedDate >= weekStartKey && completedDate <= weekEndKey) {
+                    const achievements = result.get(completedDate) ?? [];
+                    achievements.push({ item, phase: "early-completion", slice });
+                    result.set(completedDate, achievements);
+                }
             }
             continue;
         }
@@ -52,6 +60,7 @@ export function groupWeekOccurrences(items: WorkItem[], weekStart: number): Map<
 
 export function weekOccurrenceLabel(phase: WeekOccurrencePhase): string {
     if (phase === "slice") return "执行切片";
+    if (phase === "early-completion") return "提前完成记录";
     if (phase === "single") return "当日";
     if (phase === "start") return "开始";
     if (phase === "deadline") return "截止";

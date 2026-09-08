@@ -81,7 +81,98 @@ describe("执行切片配置", () => {
         ([...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "完成事务") as HTMLButtonElement).click();
         await vi.waitFor(() => expect(complete).toHaveBeenCalledOnce());
     });
+
+    it("右键未来切片可以提前完成并保留原计划日期", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowKey = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+        const future = transaction({
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "future", scheduledDate: tomorrowKey, status: "scheduled", completedAt: null, updatedAt: 1 }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: future, save } });
+        await tick();
+
+        const day = [...document.querySelectorAll<HTMLButtonElement>(".xz-slice-day")]
+            .find((button) => button.getAttribute("aria-label")?.startsWith(tomorrowKey));
+        expect(day?.title).toContain("右键可提前完成");
+        day?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        const completeEarly = document.querySelector<HTMLButtonElement>(".xz-slice-context-menu button");
+        expect(completeEarly?.textContent).toBe("提前完成此切片");
+        completeEarly?.click();
+
+        await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+        expect(save.mock.calls[0][0].executionSlices).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: "future", status: "completed", scheduledDate: tomorrowKey }),
+        ]));
+    });
+
+    it("右键今天的切片可以完成，右键过期切片可以补记完成", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const todayKey = localDateKey();
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+        const current = transaction({
+            sliceTargetCount: 2,
+            executionSlices: [
+                { id: "past", scheduledDate: yesterdayKey, status: "missed", completedAt: null, updatedAt: 1 },
+                { id: "today", scheduledDate: todayKey, status: "scheduled", completedAt: null, updatedAt: 2 },
+            ],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: current, save } });
+        await tick();
+
+        const today = [...document.querySelectorAll<HTMLButtonElement>(".xz-slice-day")]
+            .find((button) => button.getAttribute("aria-label")?.startsWith(todayKey));
+        expect(today?.title).toContain("右键可完成");
+        today?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        expect(document.querySelector<HTMLButtonElement>(".xz-slice-context-menu button")?.textContent).toBe("完成此切片");
+
+        document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await tick();
+        const past = [...document.querySelectorAll<HTMLButtonElement>(".xz-slice-day")]
+            .find((button) => button.getAttribute("aria-label")?.startsWith(yesterdayKey));
+        expect(past?.disabled).toBe(false);
+        expect(past?.title).toContain("右键可补记完成");
+        past?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        const completeMissed = document.querySelector<HTMLButtonElement>(".xz-slice-context-menu button");
+        expect(completeMissed?.textContent).toBe("补记完成此切片");
+        completeMissed?.click();
+
+        await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+        expect(save.mock.calls[0][0].executionSlices).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: "past", status: "completed", scheduledDate: yesterdayKey }),
+            expect.objectContaining({ id: "today", status: "scheduled", scheduledDate: todayKey }),
+        ]));
+    });
+
+    it("同一天存在多个切片时显示当前事务的切片数量", async () => {
+        const key = localDateKey();
+        const finished = transaction({
+            sliceTargetCount: 2,
+            executionSlices: [
+                { id: "first", scheduledDate: key, status: "completed", completedAt: 1, updatedAt: 1 },
+                { id: "second", scheduledDate: key, status: "completed", completedAt: 2, updatedAt: 2 },
+            ],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: finished } });
+        await tick();
+
+        expect(document.querySelector(".xz-slice-arranged")?.textContent).toContain("已完成 2／2");
+        expect(document.querySelector(".xz-slice-day.today .xz-slice-day-own-count")?.textContent).toContain("本事务 2 片 · 完成 2");
+        expect(document.querySelector(".xz-slice-day.today")?.getAttribute("aria-label")).toContain("当前事务 2 个切片，已完成 2 个");
+    });
 });
+
+function localDateKey(): string {
+    const date = new Date();
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 function transaction(overrides: Partial<WorkItem> = {}): WorkItem {
     return {

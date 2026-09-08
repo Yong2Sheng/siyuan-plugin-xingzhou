@@ -2,6 +2,7 @@
     import {
         availableSliceCount,
         cancelScheduledSlice,
+        completeSliceNow,
         completedSliceCount,
         executionSliceLoadsByDate,
         localDateKey,
@@ -29,6 +30,7 @@
         isPast: boolean;
         afterDeadline: boolean;
         slice: ExecutionSlice | null;
+        slices: ExecutionSlice[];
         load: ExecutionSliceDayLoad;
     };
 
@@ -39,6 +41,7 @@
     let durationDraft = "";
     let error = "";
     let saving = false;
+    let sliceContextMenu: { day: CalendarDay; x: number; y: number } | null = null;
 
     $: if (item.id !== sourceId) {
         sourceId = item.id;
@@ -46,6 +49,7 @@
         targetDraft = item.sliceTargetCount ? String(item.sliceTargetCount) : "";
         durationDraft = item.durationMinutes === null ? "" : String(item.durationMinutes);
         error = "";
+        sliceContextMenu = null;
     }
     $: target = item.sliceTargetCount ?? 0;
     $: completed = completedSliceCount(item);
@@ -58,7 +62,8 @@
     $: loadsByDate = executionSliceLoadsByDate(loadItems);
     $: calendarDays = buildCalendarDays(monthCursor, item, loadsByDate);
     $: monthLabel = `${monthCursor.getFullYear()} 年 ${monthCursor.getMonth() + 1} 月`;
-    $: todaySlice = slicesOnDate(item, today)[0] ?? null;
+    $: todaySlices = slicesOnDate(item, today);
+    $: todaySlice = todaySlices.find((slice) => slice.status === "scheduled") ?? todaySlices[0] ?? null;
     $: investmentSummary = target && item.durationMinutes !== null
         ? `预计总投入 ${target * item.durationMinutes} 分钟`
         : "总投入待计算";
@@ -119,6 +124,53 @@
         }
     }
 
+    function openSliceContextMenu(event: MouseEvent, day: CalendarDay) {
+        if (!canFinishFromContextMenu(day)) return;
+        sliceContextMenu = {
+            day,
+            x: Math.min(event.clientX, window.innerWidth - 190),
+            y: Math.min(event.clientY, window.innerHeight - 92),
+        };
+    }
+
+    function openSliceContextMenuFromKeyboard(event: KeyboardEvent, day: CalendarDay) {
+        if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+        if (!canFinishFromContextMenu(day)) return;
+        event.preventDefault();
+        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+        sliceContextMenu = { day, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+
+    async function finishSliceFromContextMenu(day: CalendarDay) {
+        if (!canFinishFromContextMenu(day) || !day.slice) return;
+        sliceContextMenu = null;
+        try {
+            await persist({ executionSlices: completeSliceNow(item, day.slice.id) });
+        } catch (caught) {
+            error = caught instanceof Error ? caught.message : String(caught);
+        }
+    }
+
+    function finishContextSlice() {
+        if (sliceContextMenu) void finishSliceFromContextMenu(sliceContextMenu.day);
+    }
+
+    function canFinishFromContextMenu(day: CalendarDay): boolean {
+        return !disabled && (day.slice?.status === "scheduled" || day.slice?.status === "missed");
+    }
+
+    function contextMenuActionLabel(day: CalendarDay): string {
+        if (day.slice?.status === "missed" || day.key < today) return "补记完成此切片";
+        if (day.key > today) return "提前完成此切片";
+        return "完成此切片";
+    }
+
+    function contextMenuHint(day: CalendarDay): string {
+        if (day.slice?.status === "missed" || day.key < today) return "保留原计划日期，并补记为已完成";
+        if (day.key > today) return "保留原计划日期，并标记为已完成";
+        return "将今天的切片标记为已完成";
+    }
+
     async function persist(changes: WorkItemChanges) {
         if (saving || disabled) return;
         saving = true;
@@ -163,6 +215,7 @@
             const date = new Date(start);
             date.setDate(start.getDate() + index);
             const key = localDateKey(date.getTime());
+            const slices = slicesOnDate(workItem, key);
             return {
                 key,
                 day: date.getDate(),
@@ -170,7 +223,8 @@
                 isToday: key === today,
                 isPast: key < today,
                 afterDeadline: Boolean(deadline && key > deadline),
-                slice: slicesOnDate(workItem, key)[0] ?? null,
+                slice: slices.find((slice) => slice.status === "scheduled") ?? slices[0] ?? null,
+                slices,
                 load: dailyLoads.get(key) ?? { count: 0, minutes: 0, unestimatedCount: 0 },
             };
         });
@@ -188,6 +242,10 @@
         return "已安排";
     }
 
+    function completedSlicesOnDay(day: CalendarDay): number {
+        return day.slices.filter((slice) => slice.status === "completed").length;
+    }
+
     function loadMinutesLabel(load: ExecutionSliceDayLoad): string {
         if (load.unestimatedCount > 0 && load.minutes === 0) return "未估时";
         return `${load.unestimatedCount > 0 ? "≥" : ""}${load.minutes}分`;
@@ -203,6 +261,8 @@
         return `当日共 ${load.count} 片，${estimate}`;
     }
 </script>
+
+<svelte:window on:click={() => sliceContextMenu = null} on:keydown={(event) => { if (event.key === "Escape") sliceContextMenu = null; }} />
 
 <section class="xz-slice-card" aria-busy={saving}>
     <header>
@@ -255,16 +315,21 @@
                         class:abandoned={day.slice?.status === "abandoned"}
                         class="xz-slice-day"
                         type="button"
-                        aria-label={`${day.key}${day.slice ? `，当前事务${statusLabel(day.slice.status)}` : ""}${day.load.count ? `，${loadDescription(day.load)}` : ""}`}
-                        title={day.load.count ? loadDescription(day.load) : undefined}
+                        aria-label={`${day.key}${day.slices.length ? `，当前事务 ${day.slices.length} 个切片，已完成 ${completedSlicesOnDay(day)} 个` : ""}${day.load.count ? `，${loadDescription(day.load)}` : ""}`}
+                        title={canFinishFromContextMenu(day) ? `右键可${contextMenuActionLabel(day).replace("此切片", "")}` : day.load.count ? loadDescription(day.load) : undefined}
                         aria-pressed={Boolean(day.slice)}
-                        disabled={disabled || (!day.slice?.status && !canSchedule(day)) || Boolean(day.slice && day.slice.status !== "scheduled")}
+                        disabled={disabled || (!day.slice?.status && !canSchedule(day)) || Boolean(day.slice && day.slice.status !== "scheduled" && day.slice.status !== "missed")}
                         on:click={() => void toggleDate(day)}
+                        on:contextmenu|preventDefault={(event) => openSliceContextMenu(event, day)}
+                        on:keydown={(event) => openSliceContextMenuFromKeyboard(event, day)}
                     >
                         <span class="xz-slice-day-heading">
                             <span>{day.day}</span>
                             {#if day.slice}<i class:scheduled={day.slice.status === "scheduled"} class:completed={day.slice.status === "completed"} class:missed={day.slice.status === "missed"} class:abandoned={day.slice.status === "abandoned"} class="xz-slice-day-status" aria-hidden="true"></i>{/if}
                         </span>
+                        {#if day.slices.length > 1}
+                            <small class="xz-slice-day-own-count">本事务 {day.slices.length} 片 · 完成 {completedSlicesOnDay(day)}</small>
+                        {/if}
                         {#if day.load.count}
                             <small class="xz-slice-day-load"><strong>{loadMinutesLabel(day.load)}</strong><span class="xz-slice-day-count">{day.load.count}片</span></small>
                         {:else if day.slice}
@@ -276,5 +341,11 @@
         </div>
 
     </div>
+    {#if sliceContextMenu}
+        <div class="xz-slice-context-menu" style={`left:${sliceContextMenu.x}px;top:${sliceContextMenu.y}px`} role="menu">
+            <button type="button" role="menuitem" disabled={saving || disabled} on:click={finishContextSlice}>{contextMenuActionLabel(sliceContextMenu.day)}</button>
+            <small>{contextMenuHint(sliceContextMenu.day)}</small>
+        </div>
+    {/if}
     {#if error}<p class="xz-save-error" role="alert">{error}</p>{/if}
 </section>

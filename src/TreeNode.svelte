@@ -1,5 +1,6 @@
 <script lang="ts">
     import { createEventDispatcher } from "svelte";
+    import { executionSlicePlanSummary } from "./execution-slices";
     import RoleBadge from "./RoleBadge.svelte";
     import type { WorkItem } from "./work-items";
     import type { WorkItemTree as BuiltTree } from "./tree";
@@ -32,6 +33,7 @@
     $: role = getWorkItemRole(item, tree);
     $: dependencyCount = (item.hardPrerequisiteIds?.length ?? 0) + (item.softPrerequisiteIds?.length ?? 0);
     $: todayFocusCount = todayFocusCounts.get(item.id) ?? 0;
+    $: slicePlan = executionSlicePlanSummary(item);
     $: sameParentDrag = Boolean(draggingId)
         && (tree.byId.get(draggingId ?? "")?.parentIds[0] ?? "") === (item.parentIds[0] ?? "");
     $: siblings = (item.parentIds[0] ? tree.children.get(item.parentIds[0]) ?? [] : tree.roots)
@@ -111,7 +113,8 @@
             <RoleBadge {role} />
             <span class="xz-tree-title">{item.title}</span>
             {#if dependencyCount > 0}<span class="xz-dependency-indicator" title={`${dependencyCount} 项跨项目依赖`}>⇠ {dependencyCount}</span>{/if}
-            {#if todayFocusCount > 0}<span class="xz-today-focus" title={todayFocusCount > 1 ? `包含 ${todayFocusCount} 个今日工作项` : "今日工作项或所在路径"}>今日{todayFocusCount > 1 ? ` ${todayFocusCount}` : ""}</span>{/if}
+            {#if todayFocusCount > 0}<span class="xz-today-focus" title={`今日有 ${todayFocusCount} 个尚未完成的执行切片`}>今日{todayFocusCount > 1 ? ` ${todayFocusCount}` : ""}</span>{/if}
+            {#if slicePlan}<span class={`xz-slice-plan-indicator ${slicePlan.kind}`} title={slicePlan.title}>{slicePlan.label}</span>{/if}
             {#if item.status}<span class="xz-tag" data-status={item.status}>{item.status}</span>{/if}
         </button>
         <span class="xz-order-controls" aria-label="同级排序">

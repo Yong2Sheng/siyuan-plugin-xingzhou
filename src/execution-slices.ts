@@ -16,6 +16,12 @@ export type ExecutionSliceDayLoad = {
     unestimatedCount: number;
 };
 
+export type ExecutionSlicePlanSummary = {
+    kind: "unset" | "needs-planning" | "arranged" | "completed";
+    label: string;
+    title: string;
+};
+
 export function normalizeExecutionSlices(value: unknown): ExecutionSlice[] {
     if (!Array.isArray(value)) return [];
     const ids = new Set<string>();
@@ -58,6 +64,20 @@ export function scheduledSliceCount(item: WorkItem): number {
 export function availableSliceCount(item: WorkItem): number {
     const target = normalizedTarget(item.sliceTargetCount);
     return Math.max(0, target - completedSliceCount(item) - scheduledSliceCount(item));
+}
+
+export function executionSlicePlanSummary(item: WorkItem): ExecutionSlicePlanSummary | null {
+    if (item.type !== "事务") return null;
+    const target = normalizedTarget(item.sliceTargetCount);
+    const completed = completedSliceCount(item);
+    const scheduled = scheduledSliceCount(item);
+    const available = availableSliceCount(item);
+    const covered = Math.min(target, completed + scheduled);
+    if (!target) return { kind: "unset", label: "未设切片", title: "尚未设置目标切片数" };
+    const details = `目标 ${target} 片 · 已完成 ${completed} 片 · 已安排 ${scheduled} 片 · 待安排 ${available} 片`;
+    if (completed >= target) return { kind: "completed", label: `切片完成 ${target}/${target}`, title: details };
+    if (available === 0) return { kind: "arranged", label: `已安排 ${covered}/${target}`, title: details };
+    return { kind: "needs-planning", label: `待安排 ${available}`, title: details };
 }
 
 export function sliceCompletionPercent(item: WorkItem): number {
@@ -140,20 +160,11 @@ export function setSliceOutcome(
         : candidate));
 }
 
-/**
- * Complete a slice from the weekly view. Past slices retain their historical
- * date, while future slices move to today before completion so the record does
- * not claim that work was completed on a future date.
- */
+/** Complete a slice while preserving its planned date; completedAt records when the work actually finished. */
 export function completeSliceNow(item: WorkItem, sliceId: string, now = Date.now()): ExecutionSlice[] {
     const slice = (item.executionSlices ?? []).find((candidate) => candidate.id === sliceId);
     if (!slice || (slice.status !== "scheduled" && slice.status !== "missed")) {
         throw new Error("只能完成已安排或未完成的切片。");
-    }
-    const today = localDateKey(now);
-    if (slice.scheduledDate > today) {
-        const moved = moveScheduledSlice(item, sliceId, today, now);
-        return setSliceOutcome({ ...item, executionSlices: moved }, sliceId, "completed", now);
     }
     return normalizeExecutionSlices((item.executionSlices ?? []).map((candidate) => candidate.id === sliceId
         ? { ...candidate, status: "completed" as const, completedAt: now, updatedAt: now }

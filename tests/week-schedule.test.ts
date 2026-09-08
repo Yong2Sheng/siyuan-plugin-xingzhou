@@ -56,6 +56,27 @@ describe("本周执行切片安排", () => {
     it("提供切片文案且切片卡片不折叠", () => {
         expect(weekOccurrenceLabel("slice")).toBe("执行切片");
         expect(isWeekOccurrenceCompact("slice")).toBe(false);
+        expect(weekOccurrenceLabel("early-completion")).toBe("提前完成记录");
+        expect(isWeekOccurrenceCompact("early-completion")).toBe(true);
         expect(weekOccurrenceLabel("carry-in")).toBe("承接上周");
+    });
+
+    it("把提前完成记录投影到实际完成日，同时保留原计划日的切片", () => {
+        const grouped = groupWeekOccurrences([item({
+            executionSlices: [{
+                id: "early",
+                scheduledDate: "2026-09-03",
+                status: "completed",
+                completedAt: localDate(2026, 9, 1),
+                updatedAt: localDate(2026, 9, 1),
+            }],
+        })], localDate(2026, 8, 31));
+
+        expect(grouped.get("2026-09-01")).toEqual([
+            expect.objectContaining({ phase: "early-completion", slice: expect.objectContaining({ id: "early" }) }),
+        ]);
+        expect(grouped.get("2026-09-03")).toEqual([
+            expect.objectContaining({ phase: "slice", slice: expect.objectContaining({ id: "early" }) }),
+        ]);
     });
 });

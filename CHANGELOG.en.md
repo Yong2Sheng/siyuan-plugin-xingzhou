@@ -4,6 +4,37 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
+## 1.2.0 - 2026-09-08
+
+### Added
+
+- Added a Conference Day profile for conferences, talks, and collaborative meetings. It does not assume free time before the event ends, asks whether personal tasks should be scheduled afterward, and explicitly skips nutrition logging for that day.
+- Added Partial and Missed outcomes to Daily Checklist, forming a four-state flow with Pending and Completed. Partial outcomes contribute half credit, while legacy checks remain Completed.
+- Added an automatically generated Relationship Graph under Projects & Tasks. It shows unfinished projects and transactions with their long-term-area context, hierarchy links, hard prerequisites, and should-stay-ahead relationships.
+- Added transaction slice indicators to hierarchy browsing: Not configured, N to schedule, X/Y scheduled, and X/Y completed.
+- Added context-menu completion actions to transaction calendars: complete future slices early, complete today's slice, or correct a missed past slice. The keyboard Context Menu key and Shift+F10 are supported as well.
+- Added explicit Yes/No availability decisions before Watch Sleep Score and Morning Weight, so days without a watch or scale no longer appear incomplete.
+
+### Changed
+
+- The Today badge now appears only on Transactions that still have an unfinished slice today. It disappears after completion and no longer rolls up to area or project ancestors. Ongoing, Focused, and Today indicators use green, red, and blue respectively.
+- Dependency pickers now list only Ready and In Progress transaction candidates, reducing noise from closed or currently irrelevant work items.
+- Completing a future slice early now preserves its planned date and the one-slice-per-transaction-per-day scheduling rule. Week also shows a separate achievement on the actual completion date without counting it as that day's scheduled workload.
+- Relationship edges now use explicit directional labels such as “A completed → B starts” and “A stays ahead → B.” Node spacing, related-item highlighting, blank-canvas clearing, and inspector typography were also refined.
+- Reworked the Research Workday Today Plan layout: work start and planned end remain in one left-hand row, while adjustments and their conditional details stay aligned on the right.
+
+### Fixed
+
+- Fixed the Relationship Graph rendering an empty canvas despite loaded data, overlapping dependency arrows, ambiguous edge direction, and status pills that diverged from the intended design.
+- Fixed Complete Early in Week doing nothing or removing the planned card. The original date now retains a completed card while the actual completion date receives a separate achievement.
+- Fixed transaction calendars showing only one visual slice while reporting confusing totals when legacy data contains multiple slices for the same transaction and date. The day cell now reports both slice and completed counts.
+- Fixed stale Life Rhythm stage status and layout shifts after conditional Today Plan fields appeared.
+
+### Compatibility
+
+- No manual migration is required for work items, execution slices, Life Rhythm, Checklist, or nutrition data, and existing planned slice dates are not rewritten.
+- Legacy Checklist `checkedKeys` are normalized to Completed. Existing sleep-score and weight values are used to infer their new availability decisions.
+
 ## 1.1.0 - 2026-09-06
 
 ### Changed

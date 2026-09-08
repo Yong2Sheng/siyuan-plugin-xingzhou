@@ -8,7 +8,7 @@ describe("层级浏览今日提示", () => {
     const yesterday = new Date(2026, 8, 2, 12).getTime();
     const tomorrow = new Date(2026, 8, 4, 12).getTime();
 
-    it("把今日开始、今日截止和跨越今日的未结束工作项汇总到上层路径", () => {
+    it("不再把日期范围或上层路径当作层级浏览的今日切片提醒", () => {
         const area = item({ id: "area", type: "长期领域" });
         const project = item({ id: "project", parentIds: [area.id] });
         const startsToday = item({ id: "start", parentIds: [project.id], planDate: today });
@@ -18,11 +18,7 @@ describe("层级浏览今日提示", () => {
 
         const counts = getTodayFocusCounts(items, buildWorkItemTree(items), today);
 
-        expect(counts.get(area.id)).toBe(3);
-        expect(counts.get(project.id)).toBe(3);
-        expect(counts.get(startsToday.id)).toBe(1);
-        expect(counts.get(endsToday.id)).toBe(1);
-        expect(counts.get(activeWindow.id)).toBe(1);
+        expect(counts.size).toBe(0);
     });
 
     it("不把已结束或只有过去开始日的工作项标记为今日", () => {
@@ -33,8 +29,8 @@ describe("层级浏览今日提示", () => {
         expect(getTodayFocusCounts(items, buildWorkItemTree(items), today).size).toBe(0);
     });
 
-    it("把今天已安排或已完成的有效执行切片标记为今日并汇总到上层", () => {
-        const project = item({ id: "project" });
+    it("只给今天仍未完成切片的事务标记今日，不汇总到上层", () => {
+        const project = item({ id: "project", executionSlices: [slice("scheduled", "2026-09-03")] });
         const scheduled = item({
             id: "scheduled",
             type: "事务",
@@ -51,9 +47,9 @@ describe("层级浏览今日提示", () => {
 
         const counts = getTodayFocusCounts(items, buildWorkItemTree(items), today);
 
-        expect(counts.get(project.id)).toBe(2);
+        expect(counts.has(project.id)).toBe(false);
         expect(counts.get(scheduled.id)).toBe(1);
-        expect(counts.get(completed.id)).toBe(1);
+        expect(counts.has(completed.id)).toBe(false);
     });
 
     it("不把其他日期、未完成或已放弃的切片标记为今日", () => {

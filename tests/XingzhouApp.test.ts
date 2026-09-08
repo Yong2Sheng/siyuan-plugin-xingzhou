@@ -59,7 +59,7 @@ describe("XingzhouApp", () => {
             },
         });
         await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
-        expect([...document.querySelectorAll(".xz-main-nav button")].map((button) => button.textContent?.trim())).toEqual(["全部", "本周", "整理"]);
+        expect([...document.querySelectorAll(".xz-main-nav button")].map((button) => button.textContent?.trim())).toEqual(["全部", "本周", "整理", "关系图"]);
         expect(document.querySelector(".xz-global-capture-button")).toBeNull();
         expect(document.querySelector("#xz-inbox-input")).toBeNull();
     });
@@ -307,7 +307,8 @@ describe("XingzhouApp", () => {
         await tick();
         expect(exactScope?.classList.contains("active"), document.body.textContent ?? "").toBe(true);
         expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("清理房间中的垃圾");
-        expect(document.querySelector(".xz-tree-row.selected .xz-today-focus")?.textContent).toBe("今日");
+        expect(document.querySelector(".xz-tree-row.selected .xz-today-focus")).toBeNull();
+        expect(document.querySelector(".xz-tree-row.selected .xz-slice-plan-indicator.completed")?.textContent).toBe("切片完成 1/1");
         expect(document.querySelector(".xz-tree-row.selected .xz-tag")?.classList.contains("xz-tag--secondary")).toBe(false);
         expect(document.body.textContent).toContain("这是行舟内部工作项，当前没有关联思源文档");
         expect(document.querySelector(".xz-date-hint--today")).toBeNull();
@@ -418,6 +419,17 @@ describe("XingzhouApp", () => {
         const unscheduledProject = {
             ...unscheduled, id: "project", rowId: "project", title: "不应进入待安排的项目", type: "项目",
         };
+        const later = new Date(today);
+        later.setDate(later.getDate() + 40);
+        const dayAfterLater = new Date(later);
+        dayAfterLater.setDate(dayAfterLater.getDate() + 1);
+        const fullyScheduled = {
+            ...scheduled, id: "fully-scheduled", rowId: "fully-scheduled", title: "已经排齐的事务", deadline: null, noDeadline: true,
+            executionSlices: [
+                { id: "later-1", scheduledDate: localDateKey(later), status: "scheduled" as const, completedAt: null, updatedAt: Date.now() },
+                { id: "later-2", scheduledDate: localDateKey(dayAfterLater), status: "scheduled" as const, completedAt: null, updatedAt: Date.now() },
+            ],
+        };
         const completed = {
             ...scheduled, id: "completed-week", rowId: "completed-week", title: "本周已完成的事务", status: "已完成",
             sliceTargetCount: 1,
@@ -425,7 +437,7 @@ describe("XingzhouApp", () => {
         };
         const workItemData = {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
-            items: [scheduled, unscheduled, unscheduledProject, completed], missingFields: [],
+            items: [scheduled, unscheduled, unscheduledProject, fullyScheduled, completed], missingFields: [],
             fields: {
                 title: { id: "title", name: "工作项", type: "block", options: [] },
                 status: { id: "status", name: "状态", type: "select", options: [{ name: "待开始" }, { name: "进行中" }] },
@@ -453,6 +465,11 @@ describe("XingzhouApp", () => {
             },
         });
         await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        expect(document.querySelector('[data-work-item-id="scheduled"] .xz-today-focus')?.textContent).toBe("今日");
+        expect(document.querySelector('[data-work-item-id="scheduled"] .xz-slice-plan-indicator.needs-planning')?.textContent).toBe("待安排 1");
+        expect(document.querySelector('[data-work-item-id="unscheduled"] .xz-slice-plan-indicator.needs-planning')?.textContent).toBe("待安排 1");
+        expect(document.querySelector('[data-work-item-id="fully-scheduled"] .xz-slice-plan-indicator.arranged')?.textContent).toBe("已安排 2/2");
+        expect(document.querySelector('[data-work-item-id="project"] .xz-slice-plan-indicator')).toBeNull();
 
         [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "本周")?.click();
         await tick();
@@ -479,6 +496,12 @@ describe("XingzhouApp", () => {
         await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="scheduled"][data-week-date="${todayKey}"]`)?.classList.contains("xz-week-item--date-completed")).toBe(true));
         expect(document.querySelector(`[data-work-item-id="scheduled"] .xz-week-slice-status`)?.textContent).toContain("已完成");
 
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "全部")?.click();
+        await tick();
+        expect(document.querySelector('[data-work-item-id="scheduled"] .xz-today-focus')).toBeNull();
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "本周")?.click();
+        await tick();
+
         saveItem.mockClear();
         const assignment = document.querySelector('select[aria-label="安排“整理书架”"]') as HTMLSelectElement;
         const targetDate = localDateKey(today);
@@ -488,7 +511,7 @@ describe("XingzhouApp", () => {
         expect(saveItem.mock.calls[0][2].executionSlices?.[0]).toMatchObject({ scheduledDate: targetDate, status: "scheduled" });
     });
 
-    it("每周页允许提前完成未来切片，并自动把记录日期移到今天", async () => {
+    it("每周页允许提前完成未来切片，并保留在原计划日期", async () => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today);
@@ -497,8 +520,11 @@ describe("XingzhouApp", () => {
             id: "future", rowId: "future", title: "提前完成的事务", documentId: null, detached: true,
             type: "事务", status: "待开始", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
             planDate: null, deadline: tomorrow.getTime(), noDeadline: false, durationMinutes: 30, energy: "低", updatedAt: Date.now(),
-            sliceTargetCount: 1,
-            executionSlices: [{ id: "future-slice", scheduledDate: localDateKey(tomorrow), status: "scheduled", completedAt: null, updatedAt: Date.now() }],
+            sliceTargetCount: 2,
+            executionSlices: [
+                { id: "today-slice", scheduledDate: localDateKey(today), status: "scheduled", completedAt: null, updatedAt: Date.now() - 1 },
+                { id: "future-slice", scheduledDate: localDateKey(tomorrow), status: "scheduled", completedAt: null, updatedAt: Date.now() },
+            ],
         };
         const workItemData: WorkItemData = {
             attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
@@ -524,19 +550,29 @@ describe("XingzhouApp", () => {
             await tick();
         }
 
-        const futureCard = document.querySelector<HTMLElement>('[data-work-item-id="future"]');
+        const futureCard = document.querySelector<HTMLElement>(`[data-work-item-id="future"][data-week-date="${localDateKey(tomorrow)}"]`);
         const completeEarly = [...(futureCard?.querySelectorAll<HTMLButtonElement>(".xz-week-item-actions button") ?? [])]
             .find((button) => button.textContent === "提前完成");
         expect(completeEarly).toBeInstanceOf(HTMLButtonElement);
         completeEarly?.click();
 
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalledOnce());
-        expect(saveItem.mock.calls[0][2].executionSlices?.[0]).toMatchObject({
-            id: "future-slice",
-            scheduledDate: localDateKey(today),
-            status: "completed",
-        });
+        expect(saveItem.mock.calls[0][2].executionSlices).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: "today-slice", scheduledDate: localDateKey(today), status: "scheduled" }),
+            expect.objectContaining({ id: "future-slice", scheduledDate: localDateKey(tomorrow), status: "completed" }),
+        ]));
         expect(saveItem.mock.calls[0][2].status).toBe("进行中");
+        await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="future"][data-week-date="${localDateKey(tomorrow)}"]`)?.classList.contains("xz-week-item--date-completed")).toBe(true));
+        expect(document.querySelector(`[data-work-item-id="future"][data-week-date="${localDateKey(tomorrow)}"] .xz-week-slice-status`)?.textContent).toContain("已提前完成");
+        expect(document.querySelector(`[data-work-item-id="future"][data-week-date="${localDateKey(tomorrow)}"] .xz-week-item-meta`)?.textContent).toContain("完成于今天");
+        if (today.getDay() === 0) {
+            [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "上一周")?.click();
+            await tick();
+        }
+        const achievement = document.querySelector(`[data-work-item-id="future"][data-week-date="${localDateKey(today)}"][data-week-phase="early-completion"]`);
+        expect(achievement?.textContent).toContain("今日提前完成");
+        expect(achievement?.textContent).toContain(`原计划 ${tomorrow.getMonth() + 1}月${tomorrow.getDate()}日`);
+        expect(achievement?.textContent).toContain("不计入当日安排");
     });
 
     it("在任意工作项入口右键可安全删除内部工作项，并提示保留下级与关联文档", async () => {
@@ -697,5 +733,76 @@ describe("XingzhouApp", () => {
         (document.querySelector('[data-work-item-id="learning"] .xz-tree-main') as HTMLButtonElement).click();
         await tick();
         expect(document.querySelector(".xz-dependency-supported")?.textContent).toContain("恶魔的尾巴小说地图设计");
+    });
+
+    it("自动生成未完成工作关系图，并从图中进入现有详情", async () => {
+        const base: WorkItem = {
+            id: "base", rowId: "base", title: "基础条目", documentId: null, detached: true,
+            type: "项目", status: "待开始", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            hardPrerequisiteIds: [], softPrerequisiteIds: [], planDate: null, deadline: null, noDeadline: false,
+            durationMinutes: null, energy: "", updatedAt: Date.now(),
+        };
+        const domain = { ...base, id: "domain", rowId: "domain", title: "写小说", type: "长期领域", status: "重点投入" };
+        const project = { ...base, id: "project", rowId: "project", title: "恶魔的尾巴第一季", status: "进行中", parentIds: [domain.id] };
+        const prerequisite = { ...base, id: "prerequisite", rowId: "prerequisite", title: "完成世界观设定", type: "事务", status: "进行中", parentIds: [project.id] };
+        const transaction = { ...base, id: "transaction", rowId: "transaction", title: "完成第二章", type: "事务", status: "待开始", parentIds: [project.id], hardPrerequisiteIds: [prerequisite.id] };
+        const completed = { ...base, id: "completed", rowId: "completed", title: "已完成章节", type: "事务", status: "已完成", parentIds: [project.id] };
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn().mockResolvedValue({
+                    attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+                    items: [domain, project, prerequisite, transaction, completed], missingFields: [], fields: {},
+                }),
+                captureInbox: vi.fn(), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
+            },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll<HTMLButtonElement>(".xz-main-nav button")].find((button) => button.textContent?.trim() === "关系图")?.click();
+        await vi.waitFor(() => expect(document.querySelector(".xz-relationship-page")).not.toBeNull());
+
+        expect(document.querySelector('[data-work-item-id="domain"].xz-relationship-node')).not.toBeNull();
+        expect(document.querySelector('[data-work-item-id="project"].xz-relationship-node')).not.toBeNull();
+        expect(document.querySelector('[data-work-item-id="transaction"].xz-relationship-node')).not.toBeNull();
+        expect(document.querySelector('[data-work-item-id="completed"].xz-relationship-node')).toBeNull();
+        expect(document.querySelector(".xz-relationship-node.dimmed")).toBeNull();
+        const graphSvg = document.querySelector<SVGSVGElement>(".xz-relationship-canvas > svg");
+        expect(graphSvg?.style.width).toMatch(/^\d+(?:\.\d+)?px$/);
+        expect(graphSvg?.style.height).toMatch(/^\d+(?:\.\d+)?px$/);
+        const ongoingPill = document.querySelector<SVGRectElement>('[data-work-item-id="project"] .xz-relationship-status-pill.ongoing');
+        expect(ongoingPill?.getAttribute("rx")).toBe("9");
+        expect(ongoingPill?.getAttribute("height")).toBe("18");
+        expect(document.querySelectorAll(".xz-relationship-edge.hierarchy").length).toBeGreaterThan(0);
+        expect(document.querySelectorAll(".xz-relationship-edge.hard")).toHaveLength(1);
+        expect(document.querySelector(".xz-relationship-edge-label.hard")?.textContent).toContain("“完成世界观…”完成 → “完成第二章”开始");
+        expect(document.querySelector('.xz-relationship-edge.hard.direct[data-from-id="prerequisite"][data-to-id="transaction"]')).not.toBeNull();
+
+        const transactionToggle = [...document.querySelectorAll<HTMLButtonElement>(".xz-relationship-toggle")].find((button) => button.textContent?.includes("事务"))!;
+        transactionToggle.click();
+        await tick();
+        expect(document.querySelector('[data-work-item-id="transaction"].xz-relationship-node')).toBeNull();
+        expect(document.querySelector('[data-work-item-id="project"].xz-relationship-node')).not.toBeNull();
+        transactionToggle.click();
+        await tick();
+        expect(document.querySelector('[data-work-item-id="transaction"].xz-relationship-node')).not.toBeNull();
+
+        const hardToggle = [...document.querySelectorAll<HTMLButtonElement>(".xz-relationship-toggle")].find((button) => button.textContent?.includes("完成后开始"))!;
+        hardToggle.click();
+        await tick();
+        expect(document.querySelector(".xz-relationship-edge.hard")).toBeNull();
+        hardToggle.click();
+        await tick();
+
+        (document.querySelector('[data-work-item-id="transaction"].xz-relationship-node') as SVGGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await tick();
+        expect(document.querySelector(".xz-relationship-inspector")?.textContent).toContain("完成世界观设定");
+        expect(document.querySelector(".xz-relationship-inspector")?.textContent).toContain("开始本项前必须完成");
+        expect(document.querySelector(".xz-relationship-node.dimmed")).not.toBeNull();
+        (document.querySelector(".xz-relationship-canvas") as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await tick();
+        expect(document.querySelector(".xz-relationship-node.dimmed")).toBeNull();
+        expect(document.querySelector(".xz-relationship-inspector")?.textContent).toContain("完成第二章");
+        (document.querySelector(".xz-relationship-open") as HTMLButtonElement).click();
+        await vi.waitFor(() => expect((document.querySelector('.xz-detail input[aria-label="名称"]') as HTMLInputElement)?.value).toBe("完成第二章"));
     });
 });

@@ -132,7 +132,7 @@ export type WorkItemData = {
 };
 
 export type WorkItemViewState = {
-    page: "week" | "all" | "inbox" | "review";
+    page: "week" | "all" | "inbox" | "review" | "graph";
     filter: "all" | "active" | "future" | "closed";
     includeClosed: boolean;
     scope: "all" | string;
