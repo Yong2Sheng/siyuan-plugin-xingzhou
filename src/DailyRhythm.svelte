@@ -52,12 +52,14 @@
 
     const dayTypes: Array<{ value: DailyDayType; label: string; guidance: string }> = [
         { value: "research-workday", label: "科研工作日", guidance: "记录完整科研工作、学习、下班边界和个人生活。" },
+        { value: "conference-day", label: "开会日", guidance: "会议、talk 或合作交流优先；会议结束后再决定是否安排个人事务。" },
         { value: "saturday-reset", label: "周六轻量复盘", guidance: "轻量复盘后进入至少 24 小时完全无工作区间。" },
         { value: "sunday-half-day", label: "周日半日科研", guidance: "上午休息，12:00–17:00 科研，17:00 后回到个人生活。" },
         { value: "holiday", label: "休假／节假日", guidance: "科研字段不适用，只记录身体、恢复、训练、生活与晚间观察。" },
     ];
     const profileRows = [
         ["科研工作日", "周一至周五默认", "早晨安排", "完整科研与工作边界", "晚间复盘"],
+        ["开会日", "按日期覆盖", "会议前准备", "会议开始至结束不预设自由时间", "会后再决定个人事务"],
         ["周六轻量复盘", "周六默认", "轻量工作复盘", "随后 24 小时无工作", "生活与恢复"],
         ["周日半日科研", "周日默认", "上午不工作", "12:00–17:00 科研", "17:00 后个人生活"],
         ["休假／节假日", "按日期覆盖", "科研字段不适用", "不计入工作达标率", "身体、休息与生活"],
@@ -85,6 +87,7 @@
 
     $: workApplicable = isWorkMetricApplicable(draft.dayType);
     $: isSaturdayReset = draft.dayType === "saturday-reset";
+    $: isConferenceDay = draft.dayType === "conference-day";
     $: dayGuidance = dayTypes.find((entry) => entry.value === draft.dayType)?.guidance ?? "";
     $: boundary = calculateBoundary(draft.fields.plannedWorkEndTime, draft.fields.actualWorkEndTime);
     $: resolvedSleep = resolveSleepDateTimes(draft);
@@ -275,6 +278,20 @@
         markDirty();
     }
 
+    function changePersonalAffairsPlanned(value: string) {
+        const allowed: PresenceState[] = ["", "yes", "no"];
+        if (!allowed.includes(value as PresenceState)) return;
+        draft.fields.personalAffairsPlanned = value as PresenceState;
+        if (value !== "yes") {
+            draft.fields.personalProjectLinks = [];
+            draft.fields.personalProjectPlan = "";
+            draft.fields.personalProjectDurationMinutes = null;
+            draft.fields.personalLifeResult = "";
+        }
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
     function changeSaturdayReviewOccurred(value: string) {
         const allowed: PresenceState[] = ["", "yes", "no"];
         if (!allowed.includes(value as PresenceState)) return;
@@ -372,6 +389,11 @@
 
     function syncPersonalProjectLinks() {
         if (!workItems) return;
+        if (draft.dayType === "conference-day" && draft.fields.personalAffairsPlanned !== "yes") {
+            draft.fields.personalProjectLinks = [];
+            draft = { ...draft, fields: { ...draft.fields } };
+            return;
+        }
         const tree = buildWorkItemTree(workItems.items);
         draft.fields.personalProjectLinks = flattenWorkItemTree(tree)
             .filter((item) => slicesOnDate(item, draft.date).length > 0)
@@ -530,7 +552,11 @@
     {:else if error && !store}
         <div class="xz-state xz-error"><h2>暂时无法读取生活节律数据</h2><p>{error}</p><button class="b3-button" type="button" on:click={() => void refresh()}>重试</button></div>
     {:else if view === "nutrition"}
-        <NutritionTracker date={currentDate} load={loadNutrition} save={saveNutrition} />
+        {#if isConferenceDay}
+            <div class="xz-state"><h2>开会日不记录营养摄入</h2><p>会议期间在外进食不可控，当天无需估算或补录；已有营养记录会原样保留。</p></div>
+        {:else}
+            <NutritionTracker date={currentDate} load={loadNutrition} save={saveNutrition} />
+        {/if}
     {:else if view === "today"}
         <div class="xz-daily-context">
             <label><span>今日类型</span><select value={draft.dayType} on:change|stopPropagation={(event) => changeDayType(event.currentTarget.value)}>{#each dayTypes as type}<option value={type.value}>{type.label}</option>{/each}</select></label>
@@ -538,11 +564,11 @@
         </div>
 
         <div class="xz-daily-progress" class:holiday={!workApplicable}>
-            <div><i>1</i><span><strong>早晨记录</strong><small>{isSaturdayReset ? "睡眠、身体与训练" : "睡眠、身体与科研安排"}</small></span></div>
+            <div><i>1</i><span><strong>早晨记录</strong><small>{isSaturdayReset ? "睡眠、身体与训练" : isConferenceDay ? "睡眠、身体与会议安排" : "睡眠、身体与科研安排"}</small></span></div>
             {#if workApplicable}
                 <div><i>{isSaturdayReset && draft.fields.saturdayReviewOccurred === "no" ? "—" : "2"}</i><span><strong>{isSaturdayReset ? "上午轻量复盘" : "午饭后学习"}</strong><small>{isSaturdayReset ? (draft.fields.saturdayReviewOccurred === "no" ? "今日不复盘" : "回顾、整理与下周计划") : "材料、主题与停点"}</small></span></div>
-                <div class:late={boundary?.late}><i>{isSaturdayReset && draft.fields.saturdayReviewOccurred === "no" ? "—" : boundary ? boundary.late ? "×" : "✓" : "3"}</i><span><strong>{isSaturdayReset ? "中午下班" : "工作边界"}</strong><small>{isSaturdayReset && draft.fields.saturdayReviewOccurred === "no" ? "无需填写" : boundary?.label ?? (isSaturdayReset ? "等待中午下班记录" : "等待下班记录")}</small></span></div>
-                <div><i>4</i><span><strong>{isSaturdayReset ? "自由时间" : "下班后"}</strong><small>{isSaturdayReset ? "完全离开工作" : "工作闭环与个人事务"}</small></span></div>
+                <div class:late={!isConferenceDay && boundary?.late}><i>{isSaturdayReset && draft.fields.saturdayReviewOccurred === "no" ? "—" : isConferenceDay ? (draft.fields.actualWorkEndTime ? "✓" : "3") : boundary ? boundary.late ? "×" : "✓" : "3"}</i><span><strong>{isSaturdayReset ? "中午下班" : isConferenceDay ? "会议结束" : "工作边界"}</strong><small>{isSaturdayReset && draft.fields.saturdayReviewOccurred === "no" ? "无需填写" : isConferenceDay ? (draft.fields.actualWorkEndTime ? "已记录实际结束时间" : "等待会议结束") : boundary?.label ?? (isSaturdayReset ? "等待中午下班记录" : "等待下班记录")}</small></span></div>
+                <div><i>4</i><span><strong>{isSaturdayReset ? "自由时间" : isConferenceDay ? "会后" : "下班后"}</strong><small>{isSaturdayReset ? "完全离开工作" : isConferenceDay ? "工作闭环与晚间选择" : "工作闭环与个人事务"}</small></span></div>
             {:else}
                 <div><i>2</i><span><strong>恢复与生活</strong><small>科研字段不适用</small></span></div>
             {/if}
@@ -561,7 +587,7 @@
                         </div>
                         <nav class="xz-daily-stage-nav" aria-label="填写阶段">
                             <button class={`completion-${morningCompletion.state}`} class:active={stage === "morning"} data-completion={morningCompletion.badge} aria-label={`早晨，${morningCompletion.statusLabel}`} title={morningCompletion.statusLabel} type="button" on:click={() => void changeStage("morning")}>早晨</button>
-                            {#if workApplicable}<button class={`completion-${learningCompletion.state}`} class:active={stage === "learning"} data-completion={learningCompletion.badge} aria-label={`${isSaturdayReset ? "上午复盘" : "午饭后"}，${learningCompletion.statusLabel}`} title={learningCompletion.statusLabel} type="button" on:click={() => void changeStage("learning")}>{isSaturdayReset ? "上午复盘" : "午饭后"}</button><button class={`completion-${boundaryCompletion.state}`} class:active={stage === "boundary"} data-completion={boundaryCompletion.badge} aria-label={`${isSaturdayReset ? "中午下班" : "下班"}，${boundaryCompletion.statusLabel}`} title={boundaryCompletion.statusLabel} type="button" on:click={() => void changeStage("boundary")}>{isSaturdayReset ? "中午下班" : "下班"}</button><button class={`completion-${afterWorkCompletion.state}`} class:active={stage === "after-work"} data-completion={afterWorkCompletion.badge} aria-label={`${isSaturdayReset ? "自由时间" : "下班后"}，${afterWorkCompletion.statusLabel}`} title={afterWorkCompletion.statusLabel} type="button" on:click={() => void changeStage("after-work")}>{isSaturdayReset ? "自由时间" : "下班后"}</button>{:else}<button class={`completion-${recoveryCompletion.state}`} class:active={stage === "recovery"} data-completion={recoveryCompletion.badge} aria-label={`恢复，${recoveryCompletion.statusLabel}`} title={recoveryCompletion.statusLabel} type="button" on:click={() => void changeStage("recovery")}>恢复</button>{/if}
+                            {#if workApplicable}<button class={`completion-${learningCompletion.state}`} class:active={stage === "learning"} data-completion={learningCompletion.badge} aria-label={`${isSaturdayReset ? "上午复盘" : "午饭后"}，${learningCompletion.statusLabel}`} title={learningCompletion.statusLabel} type="button" on:click={() => void changeStage("learning")}>{isSaturdayReset ? "上午复盘" : "午饭后"}</button><button class={`completion-${boundaryCompletion.state}`} class:active={stage === "boundary"} data-completion={boundaryCompletion.badge} aria-label={`${isSaturdayReset ? "中午下班" : isConferenceDay ? "会议结束" : "下班"}，${boundaryCompletion.statusLabel}`} title={boundaryCompletion.statusLabel} type="button" on:click={() => void changeStage("boundary")}>{isSaturdayReset ? "中午下班" : isConferenceDay ? "会议结束" : "下班"}</button><button class={`completion-${afterWorkCompletion.state}`} class:active={stage === "after-work"} data-completion={afterWorkCompletion.badge} aria-label={`${isSaturdayReset ? "自由时间" : isConferenceDay ? "会后" : "下班后"}，${afterWorkCompletion.statusLabel}`} title={afterWorkCompletion.statusLabel} type="button" on:click={() => void changeStage("after-work")}>{isSaturdayReset ? "自由时间" : isConferenceDay ? "会后" : "下班后"}</button>{:else}<button class={`completion-${recoveryCompletion.state}`} class:active={stage === "recovery"} data-completion={recoveryCompletion.badge} aria-label={`恢复，${recoveryCompletion.statusLabel}`} title={recoveryCompletion.statusLabel} type="button" on:click={() => void changeStage("recovery")}>恢复</button>{/if}
                             <button class={`completion-${eveningCompletion.state}`} class:active={stage === "evening"} data-completion={eveningCompletion.badge} aria-label={`21:00，${eveningCompletion.statusLabel}`} title={eveningCompletion.statusLabel} type="button" on:click={() => void changeStage("evening")}>21:00</button>
                             <button class:active={stage === "all"} type="button" on:click={() => void changeStage("all")}>全部</button>
                         </nav>
@@ -603,10 +629,10 @@
                             <div class="xz-daily-flow-column">
                                 {#if workApplicable && !isSaturdayReset}
                                     <div class="xz-daily-time-pair">
-                                        <div class="xz-daily-field xz-daily-flow-start"><span>上班时间</span><TimeSelect bind:value={draft.fields.workStartTime} ariaLabel="上班时间" /></div>
-                                        <div class="xz-daily-field xz-daily-flow-end"><span>计划下班时间</span><TimeSelect bind:value={draft.fields.plannedWorkEndTime} ariaLabel="计划下班时间" /></div>
+                                        <div class="xz-daily-field xz-daily-flow-start"><span>{isConferenceDay ? "会议开始时间" : "上班时间"}</span><TimeSelect bind:value={draft.fields.workStartTime} ariaLabel={isConferenceDay ? "会议开始时间" : "上班时间"} /></div>
+                                        <div class="xz-daily-field xz-daily-flow-end"><span>{isConferenceDay ? "预计会议结束时间（可选）" : "计划下班时间"}</span><TimeSelect bind:value={draft.fields.plannedWorkEndTime} ariaLabel={isConferenceDay ? "预计会议结束时间" : "计划下班时间"} /></div>
                                     </div>
-                                    <label class="xz-daily-flow-primary"><span>今天最重要的工作内容</span><textarea bind:value={draft.fields.importantWorkPlan}></textarea></label>
+                                    <label class="xz-daily-flow-primary"><span>{isConferenceDay ? "今天最重要的会议／工作内容" : "今天最重要的工作内容"}</span><textarea bind:value={draft.fields.importantWorkPlan}></textarea></label>
                                 {:else if !workApplicable}
                                     <label class="xz-daily-flow-primary"><span>今天如何休息／个人生活重点</span><textarea bind:value={draft.fields.restAndLifePlan} placeholder="例如：散步、做饭、陪伴家人、完全离开科研"></textarea></label>
                                 {/if}
@@ -669,11 +695,11 @@
                         </section>
                     {:else}
                     <section class="xz-daily-form-section">
-                        <h3>{isSaturdayReset ? "中午工作边界" : "工作时间边界"}</h3>
+                        <h3>{isSaturdayReset ? "中午工作边界" : isConferenceDay ? "会议结束记录" : "工作时间边界"}</h3>
                         <div class="xz-daily-fields three">
-                            <label><span>{isSaturdayReset ? "上午确定的计划结束时间" : "早晨确定的计划下班时间"}</span><output>{draft.fields.plannedWorkEndTime || "未填写"}</output></label>
-                            <div class="xz-daily-field"><span>实际下班时间</span><TimeSelect bind:value={draft.fields.actualWorkEndTime} ariaLabel="实际下班时间" /></div>
-                            <label><span>下班结果（自动计算）</span><output class:late={boundary?.late} class:good={boundary && !boundary.late}>{boundary ? `${boundary.late ? "×" : "✓"} ${boundary.label}` : "填写两项时间后自动计算"}</output></label>
+                            <label><span>{isSaturdayReset ? "上午确定的计划结束时间" : isConferenceDay ? "预计会议结束时间（可选）" : "早晨确定的计划下班时间"}</span><output>{draft.fields.plannedWorkEndTime || "未填写"}</output></label>
+                            <div class="xz-daily-field"><span>{isConferenceDay ? "会议实际结束时间" : "实际下班时间"}</span><TimeSelect bind:value={draft.fields.actualWorkEndTime} ariaLabel={isConferenceDay ? "会议实际结束时间" : "实际下班时间"} /></div>
+                            <label><span>{isConferenceDay ? "会议结束说明" : "下班结果（自动计算）"}</span><output class:late={!isConferenceDay && boundary?.late} class:good={isConferenceDay ? Boolean(draft.fields.actualWorkEndTime) : boundary && !boundary.late}>{isConferenceDay ? (draft.fields.actualWorkEndTime ? "✓ 已记录；开会日不评价是否超时" : "会议结束后记录实际时间") : boundary ? `${boundary.late ? "×" : "✓"} ${boundary.label}` : "填写两项时间后自动计算"}</output></label>
                         </div>
                     </section>
                     <section class="xz-daily-form-section">
@@ -692,7 +718,7 @@
 
                 {#if workApplicable && (stage === "after-work" || stage === "all")}
                     {#if !isSaturdayReset}<section class="xz-daily-form-section">
-                        <h3>下班后工作闭环（按需）</h3>
+                        <h3>{isConferenceDay ? "会议结束后工作闭环（按需）" : "下班后工作闭环（按需）"}</h3>
                         <div class="xz-daily-fields two">
                             <label class="xz-daily-closure-choice">
                                 <span>本次是否需要工作闭环</span>
@@ -722,23 +748,34 @@
                         {/if}
                     </section>{/if}
                     <section class="xz-daily-form-section">
-                        <h3>{isSaturdayReset ? "自由时间与个人安排" : "下班后个人安排"}</h3>
+                        <h3>{isSaturdayReset ? "自由时间与个人安排" : isConferenceDay ? "会后个人事务" : "下班后个人安排"}</h3>
                         {#if isSaturdayReset}<p class="xz-daily-closure-note">完全无工作区间已经开始；这里只记录个人生活或兴趣事务，不进行科研、专业学习或工作闭环。</p>{/if}
-                        <div class="xz-daily-fields two">
-                            <div class="xz-daily-personal-project-row">
-                                <DailyWorkItemPicker
-                                    data={workItems}
-                                    date={currentDate}
-                                    loading={workItemsLoading}
-                                    error={workItemsError}
-                                    {saveWorkItem}
-                                    {openWorkItem}
-                                    on:change={applyWorkItemChange}
-                                />
-                                <label class="xz-daily-project-note"><span>{isSaturdayReset ? "今日个人事务补充说明（可选）" : "今晚个人事务补充说明（可选）"}</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder={isSaturdayReset ? "可补充今天准备如何休息或推进兴趣事务" : "可补充今晚准备如何推进这些个人事务"}></textarea></label>
+                        {#if isConferenceDay}
+                            <div class="xz-daily-fields two">
+                                <label><span>会后是否安排个人事务</span><select value={draft.fields.personalAffairsPlanned} on:change|stopPropagation={(event) => changePersonalAffairsPlanned(event.currentTarget.value)}><option value="">尚未确认</option><option value="no">不安排</option><option value="yes">安排</option></select></label>
                             </div>
-                            <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
-                        </div>
+                            {#if draft.fields.personalAffairsPlanned === "yes"}
+                                <div class="xz-daily-fields two xz-daily-closure-details">
+                                    <div class="xz-daily-personal-project-row">
+                                        <DailyWorkItemPicker data={workItems} date={currentDate} loading={workItemsLoading} error={workItemsError} {saveWorkItem} {openWorkItem} on:change={applyWorkItemChange} />
+                                        <label class="xz-daily-project-note"><span>会后个人事务补充说明（可选）</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder="可补充会议结束后准备如何安排个人事务"></textarea></label>
+                                    </div>
+                                    <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
+                                </div>
+                            {:else if draft.fields.personalAffairsPlanned === "no"}
+                                <p class="xz-daily-closure-note">今晚用于同事活动、社交或休息，不安排个人事务，无需填写相关计划和时长。</p>
+                            {:else}
+                                <p class="xz-daily-closure-note">等会议结束后再决定；会议期间不预设自由时间。</p>
+                            {/if}
+                        {:else}
+                            <div class="xz-daily-fields two">
+                                <div class="xz-daily-personal-project-row">
+                                    <DailyWorkItemPicker data={workItems} date={currentDate} loading={workItemsLoading} error={workItemsError} {saveWorkItem} {openWorkItem} on:change={applyWorkItemChange} />
+                                    <label class="xz-daily-project-note"><span>{isSaturdayReset ? "今日个人事务补充说明（可选）" : "今晚个人事务补充说明（可选）"}</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder={isSaturdayReset ? "可补充今天准备如何休息或推进兴趣事务" : "可补充今晚准备如何推进这些个人事务"}></textarea></label>
+                                </div>
+                                <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
+                            </div>
+                        {/if}
                     </section>
                 {/if}
 
@@ -769,15 +806,15 @@
                     <section class="xz-daily-form-section">
                         <h3>21:00 简要复盘</h3>
                         <div class="xz-daily-fields two">
-                            {#if workApplicable}<label><span>今天的个人生活或兴趣项目结果</span><textarea bind:value={draft.fields.personalLifeResult}></textarea></label>{/if}
+                            {#if workApplicable && (!isConferenceDay || draft.fields.personalAffairsPlanned === "yes")}<label><span>今天的个人生活或兴趣项目结果</span><textarea bind:value={draft.fields.personalLifeResult}></textarea></label>{/if}
                             <label><span>今天做得最好的一件事</span><textarea bind:value={draft.fields.bestThing}></textarea></label>
                             <label><span>今天最大的阻碍或消耗</span><textarea bind:value={draft.fields.obstacleOrCost}></textarea></label>
                             {#if workApplicable && !isSaturdayReset}<label><span>明天开始工作时的第一个动作</span><textarea bind:value={draft.fields.tomorrowFirstAction}></textarea></label>{/if}
                             {#if workApplicable}
                                 <div class="xz-daily-decision-pair">
                                     <div class="xz-daily-decision-column">
-                                        <label><span>{isSaturdayReset ? "中午下班后是否接触了工作" : "下班后是否处理了工作"}</span><select value={draft.fields.afterHoursWorkOccurred} on:change|stopPropagation={(event) => changeAfterHoursWorkOccurred(event.currentTarget.value)}><option value="">尚未确认</option><option value="no">否</option><option value="yes">是</option></select></label>
-                                        {#if draft.fields.afterHoursWorkOccurred === "yes"}<label><span>处理工作的原因</span><textarea bind:value={draft.fields.afterHoursWorkReason} placeholder={isSaturdayReset ? "记录为什么打破了完全无工作区间" : "记录为什么需要在下班后继续处理工作"}></textarea></label>{/if}
+                                        <label><span>{isSaturdayReset ? "中午下班后是否接触了工作" : isConferenceDay ? "会议结束后是否继续处理工作" : "下班后是否处理了工作"}</span><select value={draft.fields.afterHoursWorkOccurred} on:change|stopPropagation={(event) => changeAfterHoursWorkOccurred(event.currentTarget.value)}><option value="">尚未确认</option><option value="no">否</option><option value="yes">是</option></select></label>
+                                        {#if draft.fields.afterHoursWorkOccurred === "yes"}<label><span>处理工作的原因</span><textarea bind:value={draft.fields.afterHoursWorkReason} placeholder={isSaturdayReset ? "记录为什么打破了完全无工作区间" : isConferenceDay ? "记录会议结束后仍需继续处理工作的原因" : "记录为什么需要在下班后继续处理工作"}></textarea></label>{/if}
                                     </div>
                                     <div class="xz-daily-decision-column">
                                         <label><span>是否有其他异常或观察需要记录</span><select value={draft.fields.hasAnomalyOrObservation} on:change|stopPropagation={(event) => changeHasAnomalyOrObservation(event.currentTarget.value)}><option value="">尚未确认</option><option value="no">否</option><option value="yes">是</option></select></label>
@@ -828,7 +865,7 @@
             </aside>
         </div>
     {:else if view === "checklist"}
-        <DailyChecklist date={currentDate} {loadChecklist} {saveChecklist} />
+        <DailyChecklist date={currentDate} dayType={draft.dayType} {loadChecklist} {saveChecklist} />
     {:else if view === "history"}
         <section class="xz-daily-list-view">
             <header><div><span class="xz-section-kicker">插件内部数据库</span><h2>历史数据</h2></div><span>{store?.records.length ?? 0} 天</span></header>

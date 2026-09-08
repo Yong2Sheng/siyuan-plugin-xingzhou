@@ -1,5 +1,6 @@
 <script lang="ts">
     import { tick } from "svelte";
+    import type { DailyDayType } from "./daily-records";
     import {
         cloneChecklistStore,
         createDefaultChecklistStore,
@@ -15,6 +16,7 @@
     } from "./checklist";
 
     export let date: string;
+    export let dayType: DailyDayType | null = null;
     export let loadChecklist: () => Promise<ChecklistStore>;
     export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore>;
 
@@ -37,7 +39,7 @@
     let trainingMode: ChecklistTrainingMode = "";
     let saveSequence = 0;
 
-    $: templateId = templateIdForDate(date);
+    $: templateId = dayType === "conference-day" ? "conference" : templateIdForDate(date);
     $: template = store.templates.find((candidate) => candidate.id === templateId) ?? store.templates[0];
     $: allReminderKeys = template.entries.flatMap((item) => visibleReminders(item, trainingMode).map((reminder) => reminder.key));
     $: completedCount = allReminderKeys.filter((key) => checked.has(key)).length;
@@ -203,7 +205,7 @@
     }
 
     function splitPaperEntries(currentTemplate: ChecklistTemplate): [ChecklistEntry[], ChecklistEntry[]] {
-        const preferredSplit = currentTemplate.id === "workday" ? 9 : currentTemplate.id === "saturday" ? 7 : 8;
+        const preferredSplit = currentTemplate.id === "workday" ? 9 : currentTemplate.id === "conference" ? 5 : currentTemplate.id === "saturday" ? 7 : 8;
         const splitAt = Math.min(Math.max(1, preferredSplit), Math.max(1, currentTemplate.entries.length - 1));
         return [currentTemplate.entries.slice(0, splitAt), currentTemplate.entries.slice(splitAt)];
     }

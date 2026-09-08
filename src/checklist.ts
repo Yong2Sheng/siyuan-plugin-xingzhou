@@ -2,7 +2,7 @@ export const CHECKLIST_STORE_FILE = "checklist.json";
 export const CHECKLIST_STORE_VERSION = 1;
 
 export type ChecklistViewMode = "xingzhou" | "paper";
-export type ChecklistTemplateId = "workday" | "saturday" | "sunday";
+export type ChecklistTemplateId = "workday" | "conference" | "saturday" | "sunday";
 export type ChecklistTone = "plain" | "mint" | "sand" | "rose";
 export type ChecklistTrainingMode = "training" | "rest" | "";
 
@@ -81,6 +81,22 @@ export function createDefaultChecklistStore(now = Date.now()): ChecklistStore {
                     entry("wd-prepare", "20:15–21:00", "准备明天", ["整理书包；训练用品、蛋白粉和肌酸提前装好，确保拎起就走", "净水器加满水；给蒸锅换水", "早餐入蒸锅：2 个鸡蛋、1/4 红薯、半根玉米、100g 冻虾", "洗净所有脏杯子和碗"], "sand"),
                     entry("wd-review", "21:00", "日评估晚间段＋睡前准备", ["完成生活节律晚间段，补齐当天记录", "正文记成果、阻碍和明天第一步", "21:00 停止全部工作（含整理与计划）；不看手机，洗漱降刺激"], "rose"),
                     entry("wd-sleep", "22:00", "熄灯", ["优先保证睡眠；不为兴趣项目推迟", "久睡不着：离床，在暗光下读平静纸书；不读科研笔记或自己的小说"], "mint"),
+                ],
+            },
+            {
+                id: "conference",
+                label: "开会日",
+                subtitle: "会议开始至结束不预设自由时间；会后再决定社交、个人事务或休息",
+                entries: [
+                    entry("conf-morning", "起床后", "晨间记录与基本准备", ["完成睡眠、身体和训练状态记录", "开会日在外进食不可控，今天不记录或补录营养摄入"], "mint"),
+                    entry("conf-depart", "出发／上线前", "检查会议准备", ["确认 conference、talk 或合作会议的时间、地点与接入方式", "带齐电脑、充电器、会议材料和必要证件；只处理必须在会前完成的消息"], "sand"),
+                    entry("conf-focus", "会议开始前", "确认今日会议重点", ["写下今天最重要的会议／工作内容和希望带走的一个结果", "记录会议开始时间；预计结束时间可以留空，不把估计当作下班承诺"], "mint"),
+                    entry("conf-meeting", "会议开始–会议结束", "会议与交流优先", ["会议、talk 和合作交流优先，不并行安排深度科研或专业学习", "会议结束前不预设自由时间，也不要求推进个人事务", "只在间隙处理必要消息，并给自己留出喝水、走动和短暂恢复的空间"], "rose"),
+                    entry("conf-meals", "会议间隙", "正常进食与恢复", ["按现场条件正常吃饭和补水，不追求精确控制", "不估算热量和营养素，也不在晚上凭记忆补录"], "plain"),
+                    entry("conf-end", "会议结束后", "记录实际结束与关键结果", ["记录会议实际结束时间；开会日不评价是否超出预计时间", "写下关键结果、承诺事项和下一步入口；需要整理时只做低压力闭环"], "sand"),
+                    entry("conf-evening-choice", "会后", "确认晚间安排", ["在生活节律中选择是否安排个人事务", "与同事聚餐、活动或需要休息时选择“不安排”；无需填写个人事务", "选择“安排”后，再照常选择个人事务并记录计划与实际时长"], "mint"),
+                    entry("conf-review", "睡前", "简要复盘与明日承接", ["完成生活节律晚间记录，写下成果、消耗和明天第一个动作", "不补录营养；会议结束较晚时优先缩短流程并保证睡眠"], "rose"),
+                    entry("conf-sleep", "准备好后", "降低刺激并熄灯", ["会议带来的兴奋或疲劳不延伸成额外工作", "按现实尽快休息，不用个人事务补偿白天失去的自由时间"], "mint"),
                 ],
             },
             {

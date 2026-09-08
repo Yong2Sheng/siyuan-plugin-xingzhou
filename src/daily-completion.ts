@@ -29,10 +29,11 @@ type Check = Omit<DailyMissingItem, "stage"> & { filled: boolean };
 export function calculateDailyCompletion(record: DailyRecord): DailyCompletion {
     const fields = record.fields;
     const saturday = record.dayType === "saturday-reset";
+    const conference = record.dayType === "conference-day";
     const holiday = record.dayType === "holiday";
     const stages: DailyStageCompletion[] = [];
 
-    stages.push(stageResult("morning", "早晨", morningChecks(record), morningTouched(fields, holiday, saturday)));
+    stages.push(stageResult("morning", "早晨", morningChecks(record), morningTouched(fields, holiday, saturday, conference)));
 
     if (holiday) {
         stages.push(stageResult("recovery", "恢复", recoveryChecks(fields), touched(fields, [
@@ -48,7 +49,7 @@ export function calculateDailyCompletion(record: DailyRecord): DailyCompletion {
         } else if (saturday && fields.saturdayReviewOccurred === "") {
             stages.push(stageResult("boundary", "中午下班", [], false));
         } else {
-            stages.push(stageResult("boundary", saturday ? "中午下班" : "下班", boundaryChecks(fields), touched(fields, [
+            stages.push(stageResult("boundary", saturday ? "中午下班" : conference ? "会议结束" : "下班", boundaryChecks(record), touched(fields, [
                 "actualWorkEndTime", "keyWorkResult", "importantWorkResult", "daytimeEnergy", "workEfficiency", "promotingStress", "depletingStress",
             ])));
         }
@@ -56,14 +57,11 @@ export function calculateDailyCompletion(record: DailyRecord): DailyCompletion {
         if (saturday) {
             stages.push(notApplicable("after-work", "自由时间"));
         } else {
-            stages.push(stageResult("after-work", "下班后", afterWorkChecks(fields), touched(fields, [
-                "closureNeed", "closureObject", "closurePlannedMinutes", "closureHasNextStep", "closureNextStep", "closureActualMinutes",
-                "personalProjectPlan", "personalProjectDurationMinutes",
-            ])));
+            stages.push(stageResult("after-work", conference ? "会后" : "下班后", afterWorkChecks(record), afterWorkTouched(fields, conference)));
         }
     }
 
-    stages.push(stageResult("evening", "21:00", eveningChecks(record), eveningTouched(fields, holiday, saturday)));
+    stages.push(stageResult("evening", "21:00", eveningChecks(record), eveningTouched(fields, holiday, saturday, conference)));
 
     const applicable = stages.filter((entry) => entry.state !== "not-applicable");
     return {
@@ -96,10 +94,10 @@ function morningChecks(record: DailyRecord): Check[] {
         checks.push(check("rest-plan", "休息／个人生活重点", "今天如何休息／个人生活重点", text(fields.restAndLifePlan)));
     } else if (record.dayType !== "saturday-reset") {
         checks.push(
-            check("work-start", "上班时间", "上班时间", text(fields.workStartTime)),
-            check("planned-work-end", "计划下班时间", "计划下班时间", text(fields.plannedWorkEndTime)),
-            check("important-work-plan", "最重要的工作内容", "今天最重要的工作内容", text(fields.importantWorkPlan)),
+            check("work-start", record.dayType === "conference-day" ? "会议开始时间" : "上班时间", record.dayType === "conference-day" ? "会议开始时间" : "上班时间", text(fields.workStartTime)),
+            check("important-work-plan", record.dayType === "conference-day" ? "最重要的会议／工作内容" : "最重要的工作内容", record.dayType === "conference-day" ? "今天最重要的会议／工作内容" : "今天最重要的工作内容", text(fields.importantWorkPlan)),
         );
+        if (record.dayType !== "conference-day") checks.push(check("planned-work-end", "计划下班时间", "计划下班时间", text(fields.plannedWorkEndTime)));
     }
     if (fields.hasDayAdjustments === "yes") checks.push(check("day-adjustment", "调整内容", "调整内容", text(fields.dayAdjustments)));
     if (fields.trainingCompleted === "yes") checks.push(check("training-plan", "训练内容", "今天的训练内容", text(fields.trainingPlan)));
@@ -126,9 +124,10 @@ function learningChecks(fields: DailyRecordFields, saturday: boolean): Check[] {
     return checks;
 }
 
-function boundaryChecks(fields: DailyRecordFields): Check[] {
+function boundaryChecks(record: DailyRecord): Check[] {
+    const fields = record.fields;
     return [
-        check("actual-work-end", "实际下班时间", "实际下班时间", text(fields.actualWorkEndTime)),
+        check("actual-work-end", record.dayType === "conference-day" ? "会议实际结束时间" : "实际下班时间", record.dayType === "conference-day" ? "会议实际结束时间" : "实际下班时间", text(fields.actualWorkEndTime)),
         check("key-work-result", "关键工作结果", "关键工作结果", text(fields.keyWorkResult)),
         check("important-work-result", "最重要的工作结果", "今天最重要的工作结果", text(fields.importantWorkResult)),
         check("daytime-energy", "白天精力", "白天精力", number(fields.daytimeEnergy)),
@@ -138,7 +137,8 @@ function boundaryChecks(fields: DailyRecordFields): Check[] {
     ];
 }
 
-function afterWorkChecks(fields: DailyRecordFields): Check[] {
+function afterWorkChecks(record: DailyRecord): Check[] {
+    const fields = record.fields;
     const checks = [check("closure-decision", "是否需要工作闭环", "本次是否需要工作闭环", text(fields.closureNeed))];
     if (fields.closureNeed === "needed") {
         checks.push(
@@ -148,6 +148,15 @@ function afterWorkChecks(fields: DailyRecordFields): Check[] {
             check("closure-actual", "实际闭环时长", "实际闭环时长", number(fields.closureActualMinutes)),
         );
         if (fields.closureHasNextStep === "yes") checks.push(check("closure-next", "闭环下一步", "下一步内容", text(fields.closureNextStep)));
+    }
+    if (record.dayType === "conference-day") {
+        checks.push(check("personal-affairs-decision", "会后是否安排个人事务", "会后是否安排个人事务", text(fields.personalAffairsPlanned)));
+        if (fields.personalAffairsPlanned === "yes") checks.push(check(
+            "personal-affairs-plan",
+            "会后个人事务",
+            "今日个人安排（来自项目与事务）",
+            fields.personalProjectLinks.length > 0 || text(fields.personalProjectPlan),
+        ));
     }
     return checks;
 }
@@ -163,16 +172,17 @@ function eveningChecks(record: DailyRecord): Check[] {
     const fields = record.fields;
     const workApplicable = record.dayType !== "holiday";
     const saturday = record.dayType === "saturday-reset";
+    const conference = record.dayType === "conference-day";
     const checks = [
         check("best-thing", "今天做得最好的一件事", "今天做得最好的一件事", text(fields.bestThing)),
         check("obstacle", "今天最大的阻碍或消耗", "今天最大的阻碍或消耗", text(fields.obstacleOrCost)),
         check("anomaly-decision", "是否有其他异常或观察", "是否有其他异常或观察需要记录", text(fields.hasAnomalyOrObservation)),
         check("bedtime-decision", "今晚的睡前安排", "今晚的睡前安排", text(fields.bedtimePreparation)),
     ];
-    if (workApplicable) checks.push(
+    if (workApplicable && (!conference || fields.personalAffairsPlanned === "yes")) checks.push(
         check("personal-life-result", "个人生活或兴趣项目结果", "今天的个人生活或兴趣项目结果", text(fields.personalLifeResult)),
-        check("after-hours-decision", saturday ? "中午下班后是否接触工作" : "下班后是否处理工作", saturday ? "中午下班后是否接触了工作" : "下班后是否处理了工作", text(fields.afterHoursWorkOccurred)),
     );
+    if (workApplicable) checks.push(check("after-hours-decision", saturday ? "中午下班后是否接触工作" : conference ? "会议结束后是否继续处理工作" : "下班后是否处理工作", saturday ? "中午下班后是否接触了工作" : conference ? "会议结束后是否继续处理工作" : "下班后是否处理了工作", text(fields.afterHoursWorkOccurred)));
     if (workApplicable && !saturday) checks.push(check("tomorrow-first-action", "明天工作的第一个动作", "明天开始工作时的第一个动作", text(fields.tomorrowFirstAction)));
     if (fields.afterHoursWorkOccurred === "yes") checks.push(check("after-hours-reason", "处理工作的原因", "处理工作的原因", text(fields.afterHoursWorkReason)));
     if (fields.hasAnomalyOrObservation === "yes") checks.push(check("anomaly-content", "异常或观察内容", "异常或观察内容", text(fields.anomalyOrObservation)));
@@ -183,23 +193,35 @@ function eveningChecks(record: DailyRecord): Check[] {
     return checks;
 }
 
-function morningTouched(fields: DailyRecordFields, holiday: boolean, saturday: boolean): boolean {
+function morningTouched(fields: DailyRecordFields, holiday: boolean, saturday: boolean, conference: boolean): boolean {
     const keys: Array<keyof DailyRecordFields> = [
         "lightsOffTime", "wakeTime", "sleepDurationMinutes", "hasWatchSleepScore", "watchSleepScore", "subjectiveSleepQuality",
         "hasMorningWeight", "morningWeight",
         "hasDayAdjustments", "dayAdjustments", "trainingCompleted", "trainingPlan",
     ];
     if (holiday) keys.push("restAndLifePlan");
-    else if (!saturday) keys.push("workStartTime", "plannedWorkEndTime", "importantWorkPlan");
+    else if (!saturday) keys.push("workStartTime", "importantWorkPlan");
+    if (!holiday && !saturday && !conference) keys.push("plannedWorkEndTime");
     return touched(fields, keys);
 }
 
-function eveningTouched(fields: DailyRecordFields, holiday: boolean, saturday: boolean): boolean {
+function eveningTouched(fields: DailyRecordFields, holiday: boolean, saturday: boolean, conference: boolean): boolean {
     const keys: Array<keyof DailyRecordFields> = [
         "bestThing", "obstacleOrCost", "hasAnomalyOrObservation", "anomalyOrObservation", "bedtimePreparation", "plannedLightsOffDay", "plannedLightsOffTime",
     ];
-    if (!holiday) keys.push("personalLifeResult", "afterHoursWorkOccurred", "afterHoursWorkReason");
+    if (!holiday) keys.push("afterHoursWorkOccurred", "afterHoursWorkReason");
+    if (!holiday && (!conference || fields.personalAffairsPlanned === "yes")) keys.push("personalLifeResult");
+    if (conference) keys.push("personalAffairsPlanned");
     if (!holiday && !saturday) keys.push("tomorrowFirstAction");
+    return touched(fields, keys);
+}
+
+function afterWorkTouched(fields: DailyRecordFields, conference: boolean): boolean {
+    const keys: Array<keyof DailyRecordFields> = [
+        "closureNeed", "closureObject", "closurePlannedMinutes", "closureHasNextStep", "closureNextStep", "closureActualMinutes",
+        "personalProjectPlan", "personalProjectDurationMinutes",
+    ];
+    if (conference) keys.push("personalAffairsPlanned", "personalProjectLinks");
     return touched(fields, keys);
 }
 

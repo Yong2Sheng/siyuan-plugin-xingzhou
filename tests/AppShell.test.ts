@@ -81,6 +81,41 @@ describe("行舟一级模块外壳", () => {
         expect(document.body.textContent).toContain("科研字段不适用");
     });
 
+    it("开会日使用会议边界、条件个人事务、专属 Checklist，并停止营养录入", async () => {
+        let store = researchDailyStore();
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-context select")).not.toBeNull());
+
+        const type = document.querySelector(".xz-daily-context select") as HTMLSelectElement;
+        type.value = "conference-day";
+        type.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.body.textContent).toContain("会议开始时间");
+        expect(document.body.textContent).toContain("预计会议结束时间（可选）");
+        expect(document.body.textContent).toContain("今天最重要的会议／工作内容");
+
+        clickButton("会后");
+        await vi.waitFor(() => expect(document.body.textContent).toContain("会后是否安排个人事务"));
+        expect(document.querySelector(".xz-daily-project-picker")).toBeNull();
+        const decision = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("会后是否安排个人事务"))
+            ?.querySelector("select") as HTMLSelectElement;
+        decision.value = "yes";
+        decision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.querySelector(".xz-daily-project-picker")).not.toBeNull();
+
+        clickButton("每日 Checklist");
+        await vi.waitFor(() => expect(document.body.textContent).toContain("开会日 · 会议开始至结束不预设自由时间"));
+        expect(document.body.textContent).toContain("会议与交流优先");
+
+        clickButton("营养摄入");
+        await vi.waitFor(() => expect(document.body.textContent).toContain("开会日不记录营养摄入"));
+        expect(document.querySelector(".xz-nutrition-page")).toBeNull();
+    });
+
     it("周六使用上午复盘、中午下班和自由时间的独立动线", async () => {
         const properties = props();
         component = new DailyRhythm({ target: document.body, props: { loadDaily: properties.loadDaily, saveDaily: properties.saveDaily } });

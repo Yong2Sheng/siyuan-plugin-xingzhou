@@ -87,4 +87,22 @@ describe("生活节律完整度检查", () => {
         expect(result.missing.map((item) => item.label)).not.toEqual(expect.arrayContaining(["上班时间", "关键工作结果", "是否需要工作闭环"]));
         expect(result.missing.map((item) => item.label)).toEqual(expect.arrayContaining(["休息／个人生活重点", "个人生活或兴趣项目结果"]));
     });
+
+    it("开会日不要求预计结束时间，会后不安排个人事务时不检查个人结果", () => {
+        const record = createDailyRecord("2026-09-07", "conference-day", 1000);
+        record.fields.workStartTime = "09:00";
+        record.fields.importantWorkPlan = "参加合作会议";
+        record.fields.personalAffairsPlanned = "no";
+        const result = calculateDailyCompletion(record);
+        const missing = result.missing.map((item) => item.label);
+
+        expect(missing).not.toContain("计划下班时间");
+        expect(missing).not.toContain("个人生活或兴趣项目结果");
+        expect(missing).not.toContain("会后是否安排个人事务");
+        expect(result.stages.find((item) => item.stage === "boundary")?.label).toBe("会议结束");
+        expect(result.stages.find((item) => item.stage === "after-work")?.label).toBe("会后");
+
+        record.fields.personalAffairsPlanned = "yes";
+        expect(calculateDailyCompletion(record).missing.map((item) => item.label)).toContain("会后个人事务");
+    });
 });

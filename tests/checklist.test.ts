@@ -2,11 +2,19 @@ import { describe, expect, it } from "vitest";
 import { checklistStoresMatch, createDefaultChecklistStore, parseChecklistStore, updateChecklistDayState, updateChecklistStore } from "../src/checklist";
 
 describe("Checklist 配置", () => {
-    it("提供工作日、周六和周日三套默认提醒，且不包含需要填写的横线字段", () => {
+    it("提供工作日、开会日、周六和周日四套默认提醒，且不包含需要填写的横线字段", () => {
         const store = createDefaultChecklistStore(1000);
-        expect(store.templates.map((template) => template.id)).toEqual(["workday", "saturday", "sunday"]);
+        expect(store.templates.map((template) => template.id)).toEqual(["workday", "conference", "saturday", "sunday"]);
         expect(store.templates.find((template) => template.id === "workday")?.entries.some((entry) => entry.title.includes("专业学习"))).toBe(true);
+        expect(store.templates.find((template) => template.id === "conference")?.entries.map((entry) => entry.title)).toEqual(expect.arrayContaining(["会议与交流优先", "确认晚间安排"]));
+        expect(JSON.stringify(store.templates.find((template) => template.id === "conference"))).toContain("不记录或补录营养摄入");
         expect(JSON.stringify(store.templates)).not.toContain("\\rule");
+    });
+
+    it("旧配置没有开会日模板时自动补入默认模板", () => {
+        const source = createDefaultChecklistStore(1000);
+        const parsed = parseChecklistStore({ ...source, templates: source.templates.filter((template) => template.id !== "conference") });
+        expect(parsed?.templates.find((template) => template.id === "conference")?.entries.length).toBeGreaterThan(5);
     });
 
     it("保存显示方式和模板修改时递增修订号", () => {

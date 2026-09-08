@@ -55,6 +55,22 @@ describe("每日 Checklist", () => {
         await vi.waitFor(() => expect(document.body.textContent).toContain("周六 · 轻量复盘后"));
     });
 
+    it("开会日覆盖星期模板并显示事件节点式清单", async () => {
+        const store = createDefaultChecklistStore(1000);
+        component = new DailyChecklist({
+            target: document.body,
+            props: {
+                date: "2026-09-05",
+                dayType: "conference-day",
+                loadChecklist: async () => store,
+                saveChecklist: async (incoming: ChecklistStore) => incoming,
+            },
+        });
+        await vi.waitFor(() => expect(document.body.textContent).toContain("开会日 · 会议开始至结束不预设自由时间"));
+        expect(document.body.textContent).toContain("会议开始–会议结束");
+        expect(document.body.textContent).toContain("今天不记录或补录营养摄入");
+    });
+
     it("周末训练或休息按日期保存并能在重启后恢复", async () => {
         let store = createDefaultChecklistStore(1000);
         const saveChecklist = vi.fn(async (incoming: ChecklistStore) => store = incoming);

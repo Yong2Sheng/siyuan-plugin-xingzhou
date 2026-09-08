@@ -2,7 +2,7 @@ export const DAILY_STORE_FILE = "daily-records.json";
 export const DAILY_STORE_VERSION = 1;
 export const DAILY_PROFILE_VERSION = 1;
 
-export type DailyDayType = "research-workday" | "saturday-reset" | "sunday-half-day" | "holiday";
+export type DailyDayType = "research-workday" | "conference-day" | "saturday-reset" | "sunday-half-day" | "holiday";
 export type WeightUnit = "kg" | "lb";
 export type TriState = "yes" | "no" | "not-applicable" | "";
 export type PresenceState = "yes" | "no" | "";
@@ -37,6 +37,7 @@ export type DailyRecordFields = {
     hasDayAdjustments: PresenceState;
     dayAdjustments: string;
     trainingPlan: string;
+    personalAffairsPlanned: PresenceState;
     personalProjectLinks: DailyWorkItemLink[];
     personalProjectPlan: string;
     restAndLifePlan: string;
@@ -257,7 +258,8 @@ function emptyDailyFields(): DailyRecordFields {
         lightsOffTime: "", wakeTime: "", lightsOffAt: "", wakeAt: "", sleepDurationMinutes: null,
         hasWatchSleepScore: "", watchSleepScore: null, subjectiveSleepQuality: null,
         hasMorningWeight: "", morningWeight: null, weightUnit: "kg", workStartTime: "",
-        plannedWorkEndTime: "", importantWorkPlan: "", saturdayReviewOccurred: "", hasDayAdjustments: "", dayAdjustments: "", trainingPlan: "", personalProjectLinks: [],
+        plannedWorkEndTime: "", importantWorkPlan: "", saturdayReviewOccurred: "", hasDayAdjustments: "", dayAdjustments: "", trainingPlan: "",
+        personalAffairsPlanned: "", personalProjectLinks: [],
         personalProjectPlan: "", restAndLifePlan: "", professionalStudyPlanned: "", studyMaterial: "", studyTopic: "", studyPlan: "",
         studyResult: "", actualWorkEndTime: "", keyWorkResult: "", trainingCompleted: "",
         importantWorkResult: "", personalProjectDurationMinutes: null, daytimeEnergy: null,
@@ -284,6 +286,8 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
     const normalizedAnomaly = presenceState(fields.hasAnomalyOrObservation, fields.anomalyOrObservation);
     const normalizedHasWatchSleepScore = measurementPresenceState(fields.hasWatchSleepScore, fields.watchSleepScore);
     const normalizedHasMorningWeight = measurementPresenceState(fields.hasMorningWeight, fields.morningWeight);
+    const normalizedPersonalProjectLinks = normalizeWorkItemLinks(fields.personalProjectLinks);
+    const normalizedPersonalAffairsPlanned = personalAffairsState(fields, source.dayType, normalizedPersonalProjectLinks);
     return resolveSleepDateTimes({
         date: source.date,
         dayType: source.dayType,
@@ -315,8 +319,10 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             studyTopic: normalizedProfessionalStudy === "yes" ? textValue(fields.studyTopic) : "",
             studyPlan: normalizedProfessionalStudy === "yes" ? textValue(fields.studyPlan) : "",
             studyResult: normalizedProfessionalStudy === "yes" ? textValue(fields.studyResult) : "",
-            personalProjectLinks: normalizeWorkItemLinks(fields.personalProjectLinks),
-            personalProjectDurationMinutes: nullableNonnegativeNumber(fields.personalProjectDurationMinutes),
+            personalAffairsPlanned: normalizedPersonalAffairsPlanned,
+            personalProjectLinks: source.dayType === "conference-day" && normalizedPersonalAffairsPlanned !== "yes" ? [] : normalizedPersonalProjectLinks,
+            personalProjectPlan: source.dayType === "conference-day" && normalizedPersonalAffairsPlanned !== "yes" ? "" : textValue(fields.personalProjectPlan),
+            personalProjectDurationMinutes: source.dayType === "conference-day" && normalizedPersonalAffairsPlanned !== "yes" ? null : nullableNonnegativeNumber(fields.personalProjectDurationMinutes),
             daytimeEnergy: nullableScore(fields.daytimeEnergy),
             workEfficiency: nullableScore(fields.workEfficiency),
             promotingStress: nullableScore(fields.promotingStress),
@@ -327,6 +333,7 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             closureHasNextStep: normalizedClosureNeed === "not-needed" ? "" : normalizedClosureHasNextStep,
             closureNextStep: normalizedClosureNeed === "needed" && normalizedClosureHasNextStep === "yes" ? textValue(fields.closureNextStep) : "",
             closureActualMinutes: normalizedClosureNeed === "not-needed" ? null : nullableNonnegativeNumber(fields.closureActualMinutes),
+            personalLifeResult: source.dayType === "conference-day" && normalizedPersonalAffairsPlanned !== "yes" ? "" : textValue(fields.personalLifeResult),
             afterHoursWorkOccurred: normalizedAfterHoursWork,
             afterHoursWorkReason: normalizedAfterHoursWork === "yes" ? textValue(fields.afterHoursWorkReason) : "",
             hasAnomalyOrObservation: normalizedAnomaly,
@@ -377,7 +384,7 @@ function isDateKey(value: unknown): value is string {
 }
 
 function isDayType(value: unknown): value is DailyDayType {
-    return value === "research-workday" || value === "saturday-reset" || value === "sunday-half-day" || value === "holiday";
+    return value === "research-workday" || value === "conference-day" || value === "saturday-reset" || value === "sunday-half-day" || value === "holiday";
 }
 
 function triState(value: unknown): TriState {
@@ -404,6 +411,12 @@ function presenceState(value: unknown, legacyText: unknown): PresenceState {
 function measurementPresenceState(value: unknown, legacyNumber: unknown): PresenceState {
     if (value === "yes" || value === "no") return value;
     return finiteNumber(legacyNumber) !== null ? "yes" : "";
+}
+
+function personalAffairsState(fields: Partial<DailyRecordFields>, dayType: DailyDayType, links: DailyWorkItemLink[]): PresenceState {
+    if (dayType !== "conference-day") return "";
+    if (fields.personalAffairsPlanned === "yes" || fields.personalAffairsPlanned === "no") return fields.personalAffairsPlanned;
+    return links.length > 0 || Boolean(textValue(fields.personalProjectPlan).trim()) || nullableNonnegativeNumber(fields.personalProjectDurationMinutes) !== null ? "yes" : "";
 }
 
 function saturdayReviewOccurred(fields: Partial<DailyRecordFields>, dayType: DailyDayType): PresenceState {

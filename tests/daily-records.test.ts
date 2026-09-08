@@ -17,6 +17,7 @@ describe("生活节律内部数据库", () => {
         expect(defaultDayType("2026-09-05")).toBe("saturday-reset");
         expect(defaultDayType("2026-09-06")).toBe("sunday-half-day");
         expect(createDailyRecord("2026-09-03", "holiday", 1000).dayType).toBe("holiday");
+        expect(createDailyRecord("2026-09-03", "conference-day", 1000).dayType).toBe("conference-day");
     });
 
     it("从空仓库写入并更新同一天，不产生重复记录", () => {
@@ -69,10 +70,34 @@ describe("生活节律内部数据库", () => {
 
     it("休假日不参与工作指标，备份在三个文件间轮换", () => {
         expect(isWorkMetricApplicable("holiday")).toBe(false);
+        expect(isWorkMetricApplicable("conference-day")).toBe(true);
         expect(isWorkMetricApplicable("sunday-half-day")).toBe(true);
         expect([1, 2, 3, 4].map(dailyBackupFileForRevision)).toEqual([
             "daily-records.backup-1.json", "daily-records.backup-2.json", "daily-records.backup-3.json", "daily-records.backup-1.json",
         ]);
+    });
+
+    it("开会日明确不安排个人事务时清空相关填写，安排时保留内容", () => {
+        const record = createDailyRecord("2026-09-03", "conference-day", 1000);
+        record.fields.personalAffairsPlanned = "no";
+        record.fields.personalProjectPlan = "此前的个人计划";
+        record.fields.personalProjectDurationMinutes = 60;
+        record.fields.personalLifeResult = "此前的结果";
+        record.fields.personalProjectLinks = [{ workItemId: "personal-1", titleSnapshot: "写小说", pathSnapshot: "", typeSnapshot: "事务" }];
+
+        const skipped = upsertDailyRecord(createEmptyDailyStore(900), record, 1100).records[0];
+        expect(skipped.fields).toMatchObject({
+            personalAffairsPlanned: "no",
+            personalProjectLinks: [],
+            personalProjectPlan: "",
+            personalProjectDurationMinutes: null,
+            personalLifeResult: "",
+        });
+
+        record.fields.personalAffairsPlanned = "yes";
+        const planned = upsertDailyRecord(createEmptyDailyStore(1200), record, 1300).records[0];
+        expect(planned.fields).toMatchObject({ personalAffairsPlanned: "yes", personalProjectPlan: "此前的个人计划", personalProjectDurationMinutes: 60 });
+        expect(planned.fields.personalProjectLinks).toHaveLength(1);
     });
 
     it("把只选择时分的睡眠输入解析为明确的跨日日期时间", () => {
