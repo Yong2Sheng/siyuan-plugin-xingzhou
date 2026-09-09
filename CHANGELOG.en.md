@@ -10,6 +10,7 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ### Changed
 
+- The Life Rhythm top toolbar is now left-aligned: the date navigation and the six view-switcher buttons sit side by side on the left with blank space on the right, reducing pointer travel on wide screens. Narrow screens still stack them vertically.
 - Compressed the Transaction Execution Slices card vertically: the header now fits on one line (the “slices are not work items” note moved into an ⓘ hover hint), and the completion percentage sits on the same row as the progress bar and the planning summary, wasting no space on small screens.
 - The Target Slice Count label now states the 366 input cap, making it clear that a single transaction can hold at most 366 slices.
 
