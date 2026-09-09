@@ -167,6 +167,27 @@ describe("执行切片配置", () => {
         expect(document.querySelector(".xz-slice-day.today .xz-slice-day-own-count")?.textContent).toContain("本事务 2 片 · 完成 2");
         expect(document.querySelector(".xz-slice-day.today")?.getAttribute("aria-label")).toContain("当前事务 2 个切片，已完成 2 个");
     });
+
+    it("在“目标切片数”标签后标明输入上限 366", async () => {
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: transaction() } });
+        await tick();
+
+        const input = document.querySelector('[aria-label="目标切片数"]') as HTMLInputElement;
+        expect(input?.closest("label")?.textContent ?? "").toContain("输入上限 366");
+    });
+
+    it("头部说明移入提示图标，进度百分比与标签同行", async () => {
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: transaction() } });
+        await tick();
+
+        const info = document.querySelector(".xz-slice-info");
+        expect(info?.getAttribute("title")).toContain("切片属于当前事务，不会成为上下层工作项");
+        expect(info?.getAttribute("aria-label")).toContain("切片属于当前事务，不会成为上下层工作项");
+        const first = document.querySelector<HTMLElement>(".xz-slice-progress-row > div:first-child");
+        expect(first?.querySelector("strong")?.textContent).toBe("0%");
+        expect(first?.querySelector("span")?.textContent).toBe("事务完成度");
+        expect(document.body.textContent).not.toContain("切片属于当前事务，不会成为上下层工作项。");
+    });
 });
 
 function localDateKey(): string {

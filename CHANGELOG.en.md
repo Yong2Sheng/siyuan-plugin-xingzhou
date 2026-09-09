@@ -4,6 +4,11 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
+### Changed
+
+- Compressed the Transaction Execution Slices card vertically: the header now fits on one line (the “slices are not work items” note moved into an ⓘ hover hint), and the completion percentage sits on the same row as the progress bar and the planning summary, wasting no space on small screens.
+- The Target Slice Count label now states the 366 input cap, making it clear that a single transaction can hold at most 366 slices.
+
 ## 1.2.0 - 2026-09-08
 
 ### Added

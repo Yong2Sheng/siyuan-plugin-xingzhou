@@ -267,8 +267,7 @@
 <section class="xz-slice-card" aria-busy={saving}>
     <header>
         <div class="xz-slice-heading">
-            <div><h3>执行切片</h3><strong>{investmentSummary}</strong></div>
-            <p>切片属于当前事务，不会成为上下层工作项。</p>
+            <div><h3>执行切片</h3><strong>{investmentSummary}</strong><span class="xz-slice-info" role="img" aria-label="切片属于当前事务，不会成为上下层工作项。" title="切片属于当前事务，不会成为上下层工作项。">i</span></div>
         </div>
         <div class="xz-slice-header-meta">
             <strong class="xz-slice-arranged">已完成 {completed}／{target || "—"}</strong>
@@ -296,7 +295,7 @@
     {/if}
 
     <div class="xz-slice-config">
-        <label><span>目标切片数</span><input class="b3-text-field" aria-label="目标切片数" type="number" min="1" max="366" step="1" bind:value={targetDraft} {disabled} on:change={() => void saveTarget()} /></label>
+        <label><span>目标切片数（输入上限 366）</span><input class="b3-text-field" aria-label="目标切片数" type="number" min="1" max="366" step="1" bind:value={targetDraft} {disabled} on:change={() => void saveTarget()} /></label>
         <label><span>每片预计时长（分钟）</span><input class="b3-text-field" aria-label="每片预计时长（分钟）" type="number" min="0" step="1" bind:value={durationDraft} {disabled} on:change={() => void saveDuration()} /></label>
     </div>
 

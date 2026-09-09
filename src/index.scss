@@ -502,9 +502,10 @@
 .xz-slice-arranged { color: var(--xingzhou-muted); font-size: 12px; white-space: nowrap; }
 .xz-slice-available { padding: 2px 6px; border-radius: 999px; color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-size: 9px; white-space: nowrap; }
 .xz-slice-progress-row { display: grid; grid-template-columns: auto minmax(110px, 1fr) minmax(220px, auto); align-items: center; gap: 9px; margin-top: 6px; }
-.xz-slice-progress-row > div:first-child { display: grid; }
-.xz-slice-progress-row > div:first-child strong { color: var(--xingzhou-primary); font-size: 22px; }
+.xz-slice-progress-row > div:first-child { display: flex; align-items: baseline; gap: 4px; }
+.xz-slice-progress-row > div:first-child strong { color: var(--xingzhou-primary); font-size: 15px; }
 .xz-slice-progress-row > div:first-child span { color: var(--xingzhou-muted); font-size: 10px; }
+.xz-slice-info { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; padding: 0; border: 1px solid var(--xingzhou-muted); border-radius: 50%; color: var(--xingzhou-muted); background: transparent; font-size: 9px; line-height: 1; cursor: help; }
 .xz-slice-progress-summary { display: grid; justify-items: end; gap: 1px; color: var(--xingzhou-muted); text-align: right; font-size: 10px; }
 .xz-slice-progress-summary small { color: var(--xingzhou-muted); font-size: 9px; }
 .xz-slice-progress-summary .xz-slice-actions { justify-content: flex-end; margin-top: 3px; }
