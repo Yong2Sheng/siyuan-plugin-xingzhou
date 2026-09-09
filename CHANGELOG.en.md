@@ -4,6 +4,10 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ## Unreleased
 
+### Added
+
+- Life Rhythm's morning Today Plan now shows a read-only hint: the “first action when work starts tomorrow” written in the previous evening's 21:00 review appears automatically the next morning for reference. The hint is not editable and stays hidden when the previous day's note is missing or empty.
+
 ### Changed
 
 - Compressed the Transaction Execution Slices card vertically: the header now fits on one line (the “slices are not work items” note moved into an ⓘ hover hint), and the completion percentage sits on the same row as the progress bar and the planning summary, wasting no space on small screens.
