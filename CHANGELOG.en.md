@@ -10,6 +10,7 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ### Changed
 
+- Reshaped the color system of hierarchy browsing: type badges use a calm Morandi low-saturation palette (gray-khaki, gray-green, gray-teal, gray-blue, terracotta, gray-purple), while status and slice indicator chips use a vivid summer palette (vivid green for ongoing, sky blue for pending, vivid orange for focused, bright yellow for paused, turquoise for future, vivid indigo for maintaining, vivid red for blocked, bright amber for needs-scheduling, deep blue for arranged/today, gray for terminal states), all as square chips with a colored outline and a 3px left color bar. Shape and color temperament now separate the two dimensions, so type and status can no longer be confused.
 - The Life Rhythm top toolbar is now left-aligned: the date navigation and the six view-switcher buttons sit side by side on the left with blank space on the right, reducing pointer travel on wide screens. Narrow screens still stack them vertically.
 - Compressed the Transaction Execution Slices card vertically: the header now fits on one line (the “slices are not work items” note moved into an ⓘ hover hint), and the completion percentage sits on the same row as the progress bar and the planning summary, wasting no space on small screens.
 - The Target Slice Count label now states the 366 input cap, making it clear that a single transaction can hold at most 366 slices.

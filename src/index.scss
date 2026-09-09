@@ -385,12 +385,13 @@
 }
 .xz-tree-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-:is(.xz-role-badge, .xz-tree-row)[data-role="domain"] { --xz-role-base: var(--xingzhou-primary); }
-:is(.xz-role-badge, .xz-tree-row)[data-role="topProject"] { --xz-role-base: var(--b3-theme-success, #4f9d62); }
-:is(.xz-role-badge, .xz-tree-row)[data-role="subproject"] { --xz-role-base: #3f9094; }
-:is(.xz-role-badge, .xz-tree-row)[data-role="task"] { --xz-role-base: #5078bd; }
-:is(.xz-role-badge, .xz-tree-row)[data-role="transaction"] { --xz-role-base: var(--b3-theme-warning, #cf7c30); }
-:is(.xz-role-badge, .xz-tree-row)[data-role="idea"] { --xz-role-base: #8669ad; }
+/* 类型徽章与选中底色：沉稳莫兰迪色板（低饱和，与活泼的状态色形成气质反差） */
+:is(.xz-role-badge, .xz-tree-row)[data-role="domain"] { --xz-role-base: #94835a; }
+:is(.xz-role-badge, .xz-tree-row)[data-role="topProject"] { --xz-role-base: #6f8f7c; }
+:is(.xz-role-badge, .xz-tree-row)[data-role="subproject"] { --xz-role-base: #638a94; }
+:is(.xz-role-badge, .xz-tree-row)[data-role="task"] { --xz-role-base: #748aa8; }
+:is(.xz-role-badge, .xz-tree-row)[data-role="transaction"] { --xz-role-base: #a2765e; }
+:is(.xz-role-badge, .xz-tree-row)[data-role="idea"] { --xz-role-base: #8e7fa6; }
 :is(.xz-role-badge, .xz-tree-row)[data-role="unclassified"] { --xz-role-base: var(--xingzhou-muted); }
 .xz-role-badge {
     display: inline-flex;
@@ -408,30 +409,43 @@
 }
 .xz-role-badge.compact { padding: 2px 6px; font-size: 9px; }
 
+/* 状态芯片：方片小圆角 + 彩色描边 + 左侧 3px 语义彩条（方片＝状态，全圆药丸＝类型） */
 .xz-tag {
     display: inline-flex;
     align-items: center;
     max-width: 120px;
-    padding: 2px 7px;
-    border-radius: 999px;
-    color: var(--xingzhou-muted);
-    background: var(--xingzhou-surface-light);
     font-size: 11px;
     white-space: nowrap;
 }
-.xz-tag[data-status="活跃"], .xz-tag[data-status="进行中"] { color: var(--b3-theme-success); background: color-mix(in srgb, var(--b3-theme-success) 13%, transparent); }
-.xz-tag[data-status="重点投入"] { color: color-mix(in srgb, #d88a16 78%, var(--xingzhou-text)); background: color-mix(in srgb, #d88a16 14%, transparent); }
-.xz-tag[data-status="阻塞"], .xz-tag[data-status="已失败"] { color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 12%, transparent); }
-.xz-tag[data-status="将来／也许"], .xz-tag[data-status="暂停"] { color: var(--xingzhou-muted); }
+.xz-tag[data-status], .xz-slice-plan-indicator, .xz-today-focus {
+    --chip: var(--xingzhou-muted);
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    padding: 2px 7px;
+    border: 1px solid color-mix(in srgb, var(--chip) 42%, transparent);
+    border-left: 3px solid var(--chip);
+    border-radius: 4px;
+    color: color-mix(in srgb, var(--chip) 76%, var(--xingzhou-text));
+    background: var(--xingzhou-panel);
+    white-space: nowrap;
+}
+/* 状态芯片：高饱和夏日色板（活泼，每态一色；与沉稳的类型色形成读感反差） */
+.xz-tag[data-status="活跃"], .xz-tag[data-status="进行中"], .xz-slice-plan-indicator.completed { --chip: #26c281; }
+.xz-tag[data-status="待开始"] { --chip: #33b5e5; }
+.xz-tag[data-status="重点投入"] { --chip: #f37c1f; }
+.xz-tag[data-status="阻塞"], .xz-tag[data-status="已失败"] { --chip: #e6493c; }
+.xz-tag[data-status="将来／也许"] { --chip: #17c0a3; }
+.xz-tag[data-status="暂停"] { --chip: #e8b61f; }
+.xz-tag[data-status="持续维持"] { --chip: #6f7bf7; }
+.xz-slice-plan-indicator.unset { --chip: var(--xingzhou-muted); }
+.xz-slice-plan-indicator.needs-planning { --chip: #e8a02e; }
+.xz-slice-plan-indicator.arranged { --chip: #3d7ce0; }
+.xz-today-focus { --chip: #3d7ce0; font-size: 10px; font-weight: 650; }
+.xz-slice-plan-indicator { font-size: 10px; font-weight: 650; }
+.xz-tag--today { --chip: var(--b3-theme-success); }
+.xz-tag--overdue { --chip: var(--xingzhou-danger); }
 .xz-tag--type { color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
-.xz-tag--today { color: var(--b3-theme-success); background: color-mix(in srgb, var(--b3-theme-success) 13%, transparent); }
-.xz-tag--overdue { color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 12%, transparent); }
-.xz-today-focus { display: inline-flex; flex: 0 0 auto; align-items: center; padding: 2px 7px; border: 1px solid color-mix(in srgb, #4c9cff 34%, transparent); border-radius: 999px; color: color-mix(in srgb, #4c9cff 78%, var(--xingzhou-text)); background: color-mix(in srgb, #4c9cff 14%, transparent); font-size: 10px; font-weight: 650; white-space: nowrap; }
-.xz-slice-plan-indicator { display: inline-flex; flex: 0 0 auto; align-items: center; padding: 2px 7px; border: 1px solid transparent; border-radius: 999px; font-size: 10px; font-weight: 650; white-space: nowrap; }
-.xz-slice-plan-indicator.unset { color: var(--xingzhou-muted); border-color: var(--xingzhou-border); background: var(--xingzhou-panel-subtle); }
-.xz-slice-plan-indicator.needs-planning { color: #c56f26; border-color: color-mix(in srgb, #d98945 34%, transparent); background: color-mix(in srgb, #d98945 12%, transparent); }
-.xz-slice-plan-indicator.arranged { color: color-mix(in srgb, #4c9cff 78%, var(--xingzhou-text)); border-color: color-mix(in srgb, #4c9cff 34%, transparent); background: color-mix(in srgb, #4c9cff 12%, transparent); }
-.xz-slice-plan-indicator.completed { color: var(--b3-theme-success); border-color: color-mix(in srgb, var(--b3-theme-success) 30%, transparent); background: color-mix(in srgb, var(--b3-theme-success) 11%, transparent); }
 
 .xz-detail { container-type: inline-size; padding: 22px 24px 32px; background: var(--xingzhou-panel); }
 .xz-detail p,
