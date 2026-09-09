@@ -1029,6 +1029,7 @@
 .xz-daily-closure-choice { width: min(100%, var(--xz-daily-structured-width)); }
 .xz-daily-closure-details { margin-top: 12px; }
 .xz-daily-closure-note { box-sizing: border-box; width: min(100%, 680px); margin: 12px 0 0; padding: 10px 12px; border-left: 3px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; line-height: 1.6; }
+.xz-daily-yesterday-hint { box-sizing: border-box; width: min(100%, 680px); margin: 0 0 12px; padding: 8px 10px; border-left: 3px solid color-mix(in srgb, var(--xingzhou-primary) 55%, transparent); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 12px; line-height: 1.6; }
 .xz-daily-closure-bottom { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 10px; }
 .xz-daily-decision-pair { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .xz-daily-decision-column { min-width: 0; display: grid; align-content: start; gap: 10px; }

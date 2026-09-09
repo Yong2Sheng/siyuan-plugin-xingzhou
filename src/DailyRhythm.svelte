@@ -6,6 +6,7 @@
         createDailyRecord,
         defaultDayType,
         isWorkMetricApplicable,
+        previousDayFirstAction,
         resolveSleepDateTimes,
         type BedtimePreparation,
         type ClosureNeed,
@@ -88,6 +89,7 @@
     $: workApplicable = isWorkMetricApplicable(draft.dayType);
     $: isSaturdayReset = draft.dayType === "saturday-reset";
     $: isConferenceDay = draft.dayType === "conference-day";
+    $: yesterdayFirstAction = previousDayFirstAction(store?.records ?? [], currentDate);
     $: dayGuidance = dayTypes.find((entry) => entry.value === draft.dayType)?.guidance ?? "";
     $: boundary = calculateBoundary(draft.fields.plannedWorkEndTime, draft.fields.actualWorkEndTime);
     $: resolvedSleep = resolveSleepDateTimes(draft);
@@ -625,6 +627,9 @@
                     </section>
                     <section class="xz-daily-form-section">
                         <h3>今日安排</h3>
+                        {#if yesterdayFirstAction}
+                            <p class="xz-daily-yesterday-hint">昨晚记录 · 明天开始工作时的第一个动作：{yesterdayFirstAction}</p>
+                        {/if}
                         <div class="xz-daily-fields xz-daily-flow-columns">
                             <div class="xz-daily-flow-column">
                                 {#if workApplicable && !isSaturdayReset}

@@ -7,7 +7,9 @@ import {
     defaultDayType,
     isWorkMetricApplicable,
     parseDailyStore,
+    previousDayFirstAction,
     resolveSleepDateTimes,
+    type DailyRecord,
     upsertDailyRecord,
 } from "../src/daily-records";
 
@@ -280,5 +282,32 @@ describe("生活节律内部数据库", () => {
         const cloned = cloneDailyRecord(saved);
         cloned.fields.personalProjectLinks[0].titleSnapshot = "修改克隆";
         expect(saved.fields.personalProjectLinks[0].titleSnapshot).toBe("完善行舟");
+    });
+});
+
+describe("previousDayFirstAction 次日早晨提示", () => {
+    function record(date: string, firstAction: string): DailyRecord {
+        const value = createDailyRecord(date);
+        value.fields.tomorrowFirstAction = firstAction;
+        return value;
+    }
+
+    it("返回前一天记录中“明天开始工作时的第一个动作”", () => {
+        const records = [record("2026-09-08", "打开实验记录"), record("2026-09-09", "写讨论部分")];
+        expect(previousDayFirstAction(records, "2026-09-09")).toBe("打开实验记录");
+    });
+
+    it("前一天没有记录时返回空串", () => {
+        expect(previousDayFirstAction([record("2026-09-07", "旧提示")], "2026-09-09")).toBe("");
+    });
+
+    it("前一天有记录但未填写时返回空串，不采用更早的非空提示", () => {
+        const records = [record("2026-09-06", "旧提示"), record("2026-09-08", "")];
+        expect(previousDayFirstAction(records, "2026-09-09")).toBe("");
+    });
+
+    it("跨月与跨年边界仍取字面前一天的记录", () => {
+        expect(previousDayFirstAction([record("2026-02-28", "月界")], "2026-03-01")).toBe("月界");
+        expect(previousDayFirstAction([record("2025-12-31", "年界")], "2026-01-01")).toBe("年界");
     });
 });

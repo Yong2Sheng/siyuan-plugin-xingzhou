@@ -197,6 +197,12 @@ export function dailyBackupFileForRevision(revision: number): string {
     return `daily-records.backup-${Math.abs(revision - 1) % 3 + 1}.json`;
 }
 
+/** 返回给定日期前一天记录中“明天开始工作时的第一个动作”，供次日早晨只读提示使用；前一天没有记录或未填写时返回空串。 */
+export function previousDayFirstAction(records: DailyRecord[], date: string): string {
+    const record = records.find((candidate) => candidate.date === shiftDateKey(date, -1));
+    return record ? (record.fields.tomorrowFirstAction ?? "").trim() : "";
+}
+
 export function isWorkMetricApplicable(dayType: DailyDayType): boolean {
     return dayType !== "holiday";
 }

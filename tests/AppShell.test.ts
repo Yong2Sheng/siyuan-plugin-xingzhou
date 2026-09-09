@@ -81,6 +81,28 @@ describe("行舟一级模块外壳", () => {
         expect(document.body.textContent).toContain("科研字段不适用");
     });
 
+    it("早晨展示前晚记录的明天第一个动作（只读提示）", async () => {
+        const key = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        const now = new Date();
+        const todayKey = key(now);
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+
+        let store = createEmptyDailyStore(100);
+        const previous = createDailyRecord(key(yesterday));
+        previous.fields.tomorrowFirstAction = "先看实验记录，再开始写讨论";
+        store = upsertDailyRecord(store, previous, 100);
+        store = upsertDailyRecord(store, createDailyRecord(todayKey), 100);
+
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-context select")).not.toBeNull());
+
+        expect(document.querySelector(".xz-daily-yesterday-hint")?.textContent ?? "").toContain("昨晚记录");
+        expect(document.body.textContent).toContain("先看实验记录，再开始写讨论");
+    });
+
     it("开会日使用会议边界、条件个人事务、专属 Checklist，并停止营养录入", async () => {
         let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);
