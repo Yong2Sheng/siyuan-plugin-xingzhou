@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupWeekOccurrences, isWeekOccurrenceCompact, weekOccurrenceLabel } from "../src/week-schedule";
+import { groupWeekOccurrences, isWeekOccurrenceCompact, weekDayLoads, weekOccurrenceLabel } from "../src/week-schedule";
 import type { WorkItem } from "../src/work-items";
 
 function localDate(year: number, month: number, day: number): number {
@@ -78,5 +78,38 @@ describe("本周执行切片安排", () => {
         expect(grouped.get("2026-09-03")).toEqual([
             expect.objectContaining({ phase: "slice", slice: expect.objectContaining({ id: "early" }) }),
         ]);
+    });
+
+    it("汇总一周七天的总量与待做，周日以外返回零值", () => {
+        const loads = weekDayLoads([item({
+            durationMinutes: 60,
+            executionSlices: [
+                { id: "done", scheduledDate: "2026-09-01", status: "completed", completedAt: 1, updatedAt: 1 },
+                { id: "todo", scheduledDate: "2026-09-02", status: "scheduled", completedAt: null, updatedAt: 2 },
+                { id: "failed", scheduledDate: "2026-09-03", status: "missed", completedAt: null, updatedAt: 3 },
+                { id: "next-week", scheduledDate: "2026-09-09", status: "scheduled", completedAt: null, updatedAt: 4 },
+            ],
+        })], localDate(2026, 8, 31));
+
+        expect([...loads.keys()]).toEqual([
+            "2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05", "2026-09-06",
+        ]);
+        expect(loads.get("2026-09-01")).toEqual({
+            load: { count: 1, minutes: 60, unestimatedCount: 0 },
+            remaining: { count: 0, minutes: 0, unestimatedCount: 0 },
+        });
+        expect(loads.get("2026-09-02")).toEqual({
+            load: { count: 1, minutes: 60, unestimatedCount: 0 },
+            remaining: { count: 1, minutes: 60, unestimatedCount: 0 },
+        });
+        /* 未完成不算待做，也不算总量 */
+        expect(loads.get("2026-09-03")).toEqual({
+            load: { count: 0, minutes: 0, unestimatedCount: 0 },
+            remaining: { count: 0, minutes: 0, unestimatedCount: 0 },
+        });
+        expect(loads.get("2026-09-06")).toEqual({
+            load: { count: 0, minutes: 0, unestimatedCount: 0 },
+            remaining: { count: 0, minutes: 0, unestimatedCount: 0 },
+        });
     });
 });

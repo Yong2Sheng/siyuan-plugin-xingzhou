@@ -1,5 +1,6 @@
 import { isClosed } from "./tree";
-import type { ExecutionSlice } from "./execution-slices";
+import { executionSliceLoadsByDate, executionSliceRemainingByDate } from "./execution-slices";
+import type { ExecutionSlice, ExecutionSliceDayLoad } from "./execution-slices";
 import type { WorkItem } from "./work-items";
 
 export type WeekOccurrencePhase = "slice" | "early-completion" | "single" | "start" | "ongoing" | "deadline" | "carry-in" | "carry-out";
@@ -9,6 +10,27 @@ export type WeekOccurrence = {
     phase: WeekOccurrencePhase;
     slice?: ExecutionSlice;
 };
+
+export type WeekDayLoad = {
+    /** 当天所有事务「已安排＋已完成」的时长合计（与执行切片日历同一口径）。 */
+    load: ExecutionSliceDayLoad;
+    /** 当天「尚未完成」（状态仍为已安排）的时长合计，即待做。 */
+    remaining: ExecutionSliceDayLoad;
+};
+
+/** 汇总一周七天每天的负载与待做，供周看板展示。 */
+export function weekDayLoads(items: WorkItem[], weekStart: number): Map<string, WeekDayLoad> {
+    const loadsByDate = executionSliceLoadsByDate(items);
+    const remainingByDate = executionSliceRemainingByDate(items);
+    const result = new Map<string, WeekDayLoad>();
+    for (const dayKey of buildDayKeys(weekStart, 7)) {
+        result.set(dayKey, {
+            load: { ...(loadsByDate.get(dayKey) ?? { count: 0, minutes: 0, unestimatedCount: 0 }) },
+            remaining: { ...(remainingByDate.get(dayKey) ?? { count: 0, minutes: 0, unestimatedCount: 0 }) },
+        });
+    }
+    return result;
+}
 
 export function groupWeekOccurrences(items: WorkItem[], weekStart: number): Map<string, WeekOccurrence[]> {
     const dayKeys = buildDayKeys(weekStart, 7);

@@ -22,6 +22,24 @@ export type ExecutionSlicePlanSummary = {
     title: string;
 };
 
+/** 一天的时长/片数口径；count、minutes 与 unestimatedCount 始终表示同一批切片。 */
+export type DayLoadValue = {
+    count: number;
+    minutes: number;
+    unestimatedCount: number;
+    /** 有切片但完全没有可用的分钟数（都未估时）。 */
+    unestimatedOnly: boolean;
+    /** 存在未估时切片，分钟数只能是下限。 */
+    atLeast: boolean;
+};
+
+export type MonthLoadSummary = {
+    remainingMinutes: number;
+    totalMinutes: number;
+    /** 当天承诺过、且已全部做完的日期（按日期升序）。 */
+    clearedDates: string[];
+};
+
 export function normalizeExecutionSlices(value: unknown): ExecutionSlice[] {
     if (!Array.isArray(value)) return [];
     const ids = new Set<string>();
@@ -95,11 +113,24 @@ export function slicesOnDate(item: WorkItem, date: string): ExecutionSlice[] {
  * represents time that was committed on that date.
  */
 export function executionSliceLoadsByDate(items: WorkItem[]): Map<string, ExecutionSliceDayLoad> {
+    return aggregateSlicesByDate(items, (slice) => slice.status === "scheduled" || slice.status === "completed");
+}
+
+/**
+ * 汇总当天「待做」的时长：只统计状态仍为 scheduled（尚未完成）的切片。
+ * 提前完成的切片状态已变成 completed、计划日期保持不变，因此会从待做里消失——
+ * 这就是「当天原本要 300 分钟、全部提前做完后当天待做是 0 分钟」的依据。
+ */
+export function executionSliceRemainingByDate(items: WorkItem[]): Map<string, ExecutionSliceDayLoad> {
+    return aggregateSlicesByDate(items, (slice) => slice.status === "scheduled");
+}
+
+function aggregateSlicesByDate(items: WorkItem[], accept: (slice: ExecutionSlice) => boolean): Map<string, ExecutionSliceDayLoad> {
     const loads = new Map<string, ExecutionSliceDayLoad>();
     for (const item of items) {
         if (item.type !== "事务") continue;
         for (const slice of item.executionSlices ?? []) {
-            if (slice.status !== "scheduled" && slice.status !== "completed") continue;
+            if (!accept(slice)) continue;
             const current = loads.get(slice.scheduledDate) ?? { count: 0, minutes: 0, unestimatedCount: 0 };
             current.count += 1;
             if (item.durationMinutes === null || !Number.isFinite(item.durationMinutes) || item.durationMinutes < 0) {
@@ -111,6 +142,42 @@ export function executionSliceLoadsByDate(items: WorkItem[]): Map<string, Execut
         }
     }
     return loads;
+}
+
+/** 把一天的负载整理成展示需要的口径，避免各组件各写一套判断。 */
+export function dayLoadValue(load: ExecutionSliceDayLoad | undefined): DayLoadValue {
+    const count = load?.count ?? 0;
+    const minutes = load?.minutes ?? 0;
+    const unestimatedCount = load?.unestimatedCount ?? 0;
+    return {
+        count,
+        minutes,
+        unestimatedCount,
+        unestimatedOnly: count > 0 && minutes === 0 && unestimatedCount > 0,
+        atLeast: minutes > 0 && unestimatedCount > 0,
+    };
+}
+
+/** 汇总某段日期区间（含首尾，ISO 日期键可直接比较）的待做与总量。 */
+export function summarizeDayLoads(
+    loads: Map<string, ExecutionSliceDayLoad>,
+    remaining: Map<string, ExecutionSliceDayLoad>,
+    from: string,
+    to: string,
+): MonthLoadSummary {
+    let remainingMinutes = 0;
+    let totalMinutes = 0;
+    const clearedDates: string[] = [];
+    for (const [date, load] of loads) {
+        if (date < from || date > to) continue;
+        totalMinutes += load.minutes;
+        const pending = dayLoadValue(remaining.get(date));
+        remainingMinutes += pending.minutes;
+        /* 当天承诺过事、且已经没有待做切片（未估时的待做也算“还没做完”，不计入已清空） */
+        if (load.count > 0 && pending.count === 0) clearedDates.push(date);
+    }
+    clearedDates.sort((a, b) => a.localeCompare(b));
+    return { remainingMinutes, totalMinutes, clearedDates };
 }
 
 export function scheduleSlice(item: WorkItem, date: string, id = createExecutionSliceId(), now = Date.now()): ExecutionSlice[] {

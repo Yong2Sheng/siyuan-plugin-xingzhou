@@ -4,13 +4,17 @@
         cancelScheduledSlice,
         completeSliceNow,
         completedSliceCount,
+        dayLoadValue,
         executionSliceLoadsByDate,
+        executionSliceRemainingByDate,
         localDateKey,
         scheduleSlice,
         setSliceOutcome,
         sliceCompletionPercent,
         slicesOnDate,
+        summarizeDayLoads,
         validateSliceTarget,
+        type DayLoadValue,
         type ExecutionSlice,
         type ExecutionSliceDayLoad,
     } from "./execution-slices";
@@ -30,8 +34,8 @@
         isPast: boolean;
         afterDeadline: boolean;
         slice: ExecutionSlice | null;
-        slices: ExecutionSlice[];
         load: ExecutionSliceDayLoad;
+        remaining: ExecutionSliceDayLoad;
     };
 
     const today = localDateKey();
@@ -60,8 +64,10 @@
         && !["已完成", "已失败", "已取消", "已放弃"].includes(item.status);
     $: loadItems = items.some((candidate) => candidate.id === item.id) ? items : [...items, item];
     $: loadsByDate = executionSliceLoadsByDate(loadItems);
-    $: calendarDays = buildCalendarDays(monthCursor, item, loadsByDate);
+    $: remainingByDate = executionSliceRemainingByDate(loadItems);
+    $: calendarDays = buildCalendarDays(monthCursor, item, loadsByDate, remainingByDate);
     $: monthLabel = `${monthCursor.getFullYear()} 年 ${monthCursor.getMonth() + 1} 月`;
+    $: monthSummary = summarizeDayLoads(loadsByDate, remainingByDate, monthRangeStart(monthCursor), localDateKey(monthEnd(monthCursor).getTime()));
     $: todaySlices = slicesOnDate(item, today);
     $: todaySlice = todaySlices.find((slice) => slice.status === "scheduled") ?? todaySlices[0] ?? null;
     $: investmentSummary = target && item.durationMinutes !== null
@@ -205,7 +211,12 @@
         monthCursor = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + offset, 1);
     }
 
-    function buildCalendarDays(month: Date, workItem: WorkItem, dailyLoads: Map<string, ExecutionSliceDayLoad>): CalendarDay[] {
+    function buildCalendarDays(
+        month: Date,
+        workItem: WorkItem,
+        dailyLoads: Map<string, ExecutionSliceDayLoad>,
+        dailyRemaining: Map<string, ExecutionSliceDayLoad>,
+    ): CalendarDay[] {
         const first = new Date(month.getFullYear(), month.getMonth(), 1);
         const mondayOffset = (first.getDay() + 6) % 7;
         const start = new Date(first);
@@ -215,7 +226,8 @@
             const date = new Date(start);
             date.setDate(start.getDate() + index);
             const key = localDateKey(date.getTime());
-            const slices = slicesOnDate(workItem, key);
+            /* 同一事务同一天只允许一个切片（scheduleSlice／moveScheduledSlice 都会拦截），直接取第一条即可 */
+            const slice = slicesOnDate(workItem, key)[0] ?? null;
             return {
                 key,
                 day: date.getDate(),
@@ -223,9 +235,9 @@
                 isToday: key === today,
                 isPast: key < today,
                 afterDeadline: Boolean(deadline && key > deadline),
-                slice: slices.find((slice) => slice.status === "scheduled") ?? slices[0] ?? null,
-                slices,
+                slice,
                 load: dailyLoads.get(key) ?? { count: 0, minutes: 0, unestimatedCount: 0 },
+                remaining: dailyRemaining.get(key) ?? { count: 0, minutes: 0, unestimatedCount: 0 },
             };
         });
     }
@@ -235,6 +247,16 @@
         return new Date(date.getFullYear(), date.getMonth(), 1);
     }
 
+    function monthEnd(month: Date): Date {
+        return new Date(month.getFullYear(), month.getMonth() + 1, 0);
+    }
+
+    /** 月历汇总从今天开始算（今天之前的日期不再需要安排）。 */
+    function monthRangeStart(month: Date): string {
+        const first = localDateKey(month.getTime());
+        return first > today ? first : today;
+    }
+
     function statusLabel(status: ExecutionSlice["status"]): string {
         if (status === "completed") return "已完成";
         if (status === "missed") return "未完成";
@@ -242,23 +264,33 @@
         return "已安排";
     }
 
-    function completedSlicesOnDay(day: CalendarDay): number {
-        return day.slices.filter((slice) => slice.status === "completed").length;
+    /** 「共 X 分 · N 片」的文案；窄屏只保留数字与「分」。 */
+    function totalValueText(value: DayLoadValue): string {
+        return value.unestimatedOnly ? "未估时" : `${value.atLeast ? "≥" : ""}${value.minutes}`;
     }
 
-    function loadMinutesLabel(load: ExecutionSliceDayLoad): string {
-        if (load.unestimatedCount > 0 && load.minutes === 0) return "未估时";
-        return `${load.unestimatedCount > 0 ? "≥" : ""}${load.minutes}分`;
+    function remainingValueText(value: DayLoadValue): string {
+        return value.unestimatedOnly ? "未估时" : `${value.atLeast ? "≥" : ""}${value.minutes}`;
     }
 
-    function loadDescription(load: ExecutionSliceDayLoad): string {
-        if (!load.count) return "";
-        const estimate = load.unestimatedCount > 0
-            ? load.minutes > 0
-                ? `已知预计时长至少 ${load.minutes} 分钟，其中 ${load.unestimatedCount} 片未估时`
-                : `${load.unestimatedCount} 片均未设置预计时长`
-            : `预计 ${load.minutes} 分钟`;
-        return `当日共 ${load.count} 片，${estimate}`;
+    /** 悬停/读屏用的完整说明：把「共」与「待做」的口径写全，避免被读成空闲时间。 */
+    function dayLoadDescription(day: CalendarDay): string {
+        const load = dayLoadValue(day.load);
+        const remaining = dayLoadValue(day.remaining);
+        if (day.isPast) {
+            if (!load.count) return "";
+            return `${day.key} 当天共 ${load.count} 片已完成${load.unestimatedOnly ? "（未设置预计时长）" : `，合计 ${load.atLeast ? "至少 " : ""}${load.minutes} 分钟`}`;
+        }
+        if (!load.count && !remaining.count) return "";
+        if (!remaining.count) {
+            return `${day.key} 当日共 ${load.count} 片已全部完成${load.unestimatedOnly ? "" : `，合计 ${load.minutes} 分钟`}；当天没有待做事务`;
+        }
+        const parts = [`${day.key} 当日共 ${load.count} 片`];
+        if (!load.unestimatedOnly) parts.push(`预计 ${load.minutes} 分钟`);
+        const doneMinutes = Math.max(0, load.minutes - remaining.minutes);
+        if (doneMinutes > 0) parts.push(`已完成 ${doneMinutes} 分钟`);
+        parts.push(remaining.unestimatedOnly ? "待做时长未估时" : `待做 ${remaining.atLeast ? "至少 " : ""}${remaining.minutes} 分钟`);
+        return parts.join("，");
     }
 </script>
 
@@ -302,20 +334,32 @@
     <div class="xz-slice-layout">
         <div class="xz-slice-calendar">
             <div class="xz-slice-month"><button type="button" aria-label="上个月" on:click={() => shiftMonth(-1)}>‹</button><strong>{monthLabel}</strong><button type="button" aria-label="下个月" on:click={() => shiftMonth(1)}>›</button></div>
+            <p class="xz-slice-month-summary">
+                <span>今天起<strong>待做 {monthSummary.remainingMinutes} 分</strong></span>
+                <span>共 {monthSummary.totalMinutes} 分</span>
+                {#if monthSummary.clearedDates.length}
+                    <span class="is-clear">已清空 {monthSummary.clearedDates.length} 天</span>
+                {/if}
+            </p>
+            <p class="xz-slice-month-legend">待做＝当天已安排、但还没完成的切片时长；共＝当天已安排＋已完成的时长合计。</p>
             <div class="xz-slice-weekdays" aria-hidden="true">{#each ["一", "二", "三", "四", "五", "六", "日"] as label}<span>{label}</span>{/each}</div>
             <div class="xz-slice-days" aria-label="执行切片安排日历">
                 {#each calendarDays as day (day.key)}
+                    {@const remaining = dayLoadValue(day.remaining)}
+                    {@const load = dayLoadValue(day.load)}
+                    {@const isCleared = !day.isPast && remaining.count === 0 && load.count > 0}
                     <button
                         class:outside={!day.inMonth}
                         class:today={day.isToday}
+                        class:is-clear={isCleared}
                         class:scheduled={day.slice?.status === "scheduled"}
                         class:completed={day.slice?.status === "completed"}
                         class:missed={day.slice?.status === "missed"}
                         class:abandoned={day.slice?.status === "abandoned"}
                         class="xz-slice-day"
                         type="button"
-                        aria-label={`${day.key}${day.slices.length ? `，当前事务 ${day.slices.length} 个切片，已完成 ${completedSlicesOnDay(day)} 个` : ""}${day.load.count ? `，${loadDescription(day.load)}` : ""}`}
-                        title={canFinishFromContextMenu(day) ? `右键可${contextMenuActionLabel(day).replace("此切片", "")}` : day.load.count ? loadDescription(day.load) : undefined}
+                        data-date={day.key}
+                        aria-label={`${day.key}${dayLoadDescription(day) ? `，${dayLoadDescription(day)}` : ""}`}
                         aria-pressed={Boolean(day.slice)}
                         disabled={disabled || (!day.slice?.status && !canSchedule(day)) || Boolean(day.slice && day.slice.status !== "scheduled" && day.slice.status !== "missed")}
                         on:click={() => void toggleDate(day)}
@@ -326,11 +370,17 @@
                             <span>{day.day}</span>
                             {#if day.slice}<i class:scheduled={day.slice.status === "scheduled"} class:completed={day.slice.status === "completed"} class:missed={day.slice.status === "missed"} class:abandoned={day.slice.status === "abandoned"} class="xz-slice-day-status" aria-hidden="true"></i>{/if}
                         </span>
-                        {#if day.slices.length > 1}
-                            <small class="xz-slice-day-own-count">本事务 {day.slices.length} 片 · 完成 {completedSlicesOnDay(day)}</small>
-                        {/if}
                         {#if day.load.count}
-                            <small class="xz-slice-day-load"><strong>{loadMinutesLabel(day.load)}</strong><span class="xz-slice-day-count">{day.load.count}片</span></small>
+                            <small class="xz-slice-day-load xz-slice-day-load--stack">
+                                {#if !day.isPast}
+                                    <strong
+                                        class:is-clear={isCleared}
+                                        class:has-unestimated={remaining.atLeast || remaining.unestimatedOnly}
+                                        class="xz-slice-day-remaining"
+                                    ><span class="xz-slice-day-prefix">待做</span><span class="xz-slice-day-value">{remainingValueText(remaining)}</span>{#if !remaining.unestimatedOnly}<span class="xz-slice-day-unit">分</span>{/if}</strong>
+                                {/if}
+                                <span class="xz-slice-day-total"><span class="xz-slice-day-prefix">共</span><span class="xz-slice-day-value">{totalValueText(load)}</span>{#if !load.unestimatedOnly}<span class="xz-slice-day-total-unit">分</span>{/if}<span class="xz-slice-day-total-count">· {load.count} 片</span></span>
+                            </small>
                         {:else if day.slice}
                             <small>{statusLabel(day.slice.status)}</small>
                         {:else if item.deadline && day.key === localDateKey(item.deadline)}<small>截止</small>{/if}

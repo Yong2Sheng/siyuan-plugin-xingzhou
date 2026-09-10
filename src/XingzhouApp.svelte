@@ -29,7 +29,8 @@
     import { getTodayFocusCounts } from "./today-focus";
     import TreeNode from "./TreeNode.svelte";
     import { buildWorkItemTree, collectDescendantIds, compareWorkItemOrder, hasActiveDescendant, hasOngoingDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
-    import { groupWeekOccurrences, isWeekOccurrenceCompact, weekOccurrenceLabel } from "./week-schedule";
+    import { dayLoadValue } from "./execution-slices";
+    import { groupWeekOccurrences, isWeekOccurrenceCompact, weekDayLoads, weekOccurrenceLabel } from "./week-schedule";
     import { deriveTopProjectId, getWorkItemProfile, needsDeadlineDecision, WORK_ITEM_ROLE_LEGEND } from "./work-item-role";
     import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData, WorkItemViewState } from "./work-items";
 
@@ -237,6 +238,7 @@
     }
     $: weekDays = buildWeekDays(weekStart);
     $: weekItemsByDate = groupWeekOccurrences(data?.items ?? [], weekStart);
+    $: weekLoadsByDate = weekDayLoads(data?.items ?? [], weekStart);
     $: scheduledWeekIds = new Set([...weekItemsByDate.values()].flatMap((occurrences) => occurrences.filter(({ slice }) => !slice || slice.status === "scheduled").map(({ item }) => item.id)));
     $: scheduledWeekCount = [...weekItemsByDate.values()].flat().filter(({ slice }) => !slice || slice.status === "scheduled").length;
     $: unscheduledWeekItems = getUnscheduledWeekItems(data?.items ?? []);
@@ -1363,8 +1365,20 @@
                 <div class="xz-week-layout">
                     <section class="xz-week-board" aria-label="一周安排">
                         {#each weekDays as day (day.key)}
-                            <article class:xz-week-day--today={day.isToday} class="xz-week-day">
-                                <header><div><strong>{day.label}</strong><span>{day.dateLabel}</span></div>{#if day.isToday}<em>今天</em>{/if}</header>
+                            {@const dayLoad = weekLoadsByDate.get(day.key)}
+                            {@const dayRemaining = dayLoadValue(dayLoad?.remaining)}
+                            {@const dayTotal = dayLoadValue(dayLoad?.load)}
+                            {@const dayCleared = day.key >= localDateKey() && dayTotal.count > 0 && dayRemaining.count === 0}
+                            <article class:xz-week-day--today={day.isToday} class:is-clear={dayCleared} class="xz-week-day" data-week-day={day.key}>
+                                <header>
+                                    <div><strong>{day.label}</strong><span>{day.dateLabel}</span></div>
+                                    {#if day.isToday}<em>今天</em>{/if}
+                                    {#if dayCleared || dayRemaining.count > 0}
+                                        <em class:is-clear={dayCleared} class="xz-week-day-remaining">
+                                            <span class="xz-week-chip-prefix">待做</span><span class="xz-week-chip-value">{dayRemaining.unestimatedOnly ? "未估时" : `${dayRemaining.atLeast ? "≥" : ""}${dayRemaining.minutes}`}</span>{#if !dayRemaining.unestimatedOnly}<span class="xz-week-chip-unit">分</span>{/if}
+                                        </em>
+                                    {/if}
+                                </header>
                                 <div class="xz-week-day-items">
                                     {#if (weekItemsByDate.get(day.key) ?? []).length === 0}
                                         <p class="xz-week-day-empty">暂无安排</p>

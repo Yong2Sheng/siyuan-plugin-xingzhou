@@ -4,13 +4,16 @@ import {
     automaticStatusForSliceCompletion,
     cancelScheduledSlice,
     completeSliceNow,
+    dayLoadValue,
     expirePastSlices,
     executionSlicePlanSummary,
     executionSliceLoadsByDate,
+    executionSliceRemainingByDate,
     moveScheduledSlice,
     scheduleSlice,
     setSliceOutcome,
     sliceCompletionPercent,
+    summarizeDayLoads,
     validateSliceTarget,
 } from "../src/execution-slices";
 import type { WorkItem } from "../src/work-items";
@@ -149,6 +152,86 @@ describe("事务执行切片", () => {
             count: 3,
             minutes: 75,
             unestimatedCount: 1,
+        });
+    });
+
+    it("待做只统计尚未完成的切片：提前完成、已完成、未完成与放弃都不算", () => {
+        const day = "2026-09-10";
+        const scheduled = item({
+            id: "scheduled",
+            durationMinutes: 60,
+            executionSlices: [{ id: "a", scheduledDate: day, status: "scheduled", completedAt: null, updatedAt: 1 }],
+        });
+        const earlyCompleted = item({
+            id: "early",
+            durationMinutes: 120,
+            executionSlices: [{ id: "b", scheduledDate: day, status: "completed", completedAt: 9, updatedAt: 2 }],
+        });
+        const missed = item({
+            id: "missed",
+            durationMinutes: 45,
+            executionSlices: [{ id: "c", scheduledDate: day, status: "missed", completedAt: null, updatedAt: 3 }],
+        });
+        const abandoned = item({
+            id: "abandoned",
+            durationMinutes: 30,
+            executionSlices: [{ id: "d", scheduledDate: day, status: "abandoned", completedAt: null, updatedAt: 4 }],
+        });
+
+        const items = [scheduled, earlyCompleted, missed, abandoned];
+        expect(executionSliceRemainingByDate(items).get(day)).toEqual({ count: 1, minutes: 60, unestimatedCount: 0 });
+        /* 总量口径不变：已安排 + 已完成 */
+        expect(executionSliceLoadsByDate(items).get(day)).toEqual({ count: 2, minutes: 180, unestimatedCount: 0 });
+    });
+
+    it("当天全部提前完成时待做为 0，但总量仍保留承诺过的时长", () => {
+        const day = "2026-09-10";
+        const done = [
+            item({ id: "one", durationMinutes: 150, executionSlices: [{ id: "a", scheduledDate: day, status: "completed", completedAt: 1, updatedAt: 1 }] }),
+            item({ id: "two", durationMinutes: 150, executionSlices: [{ id: "b", scheduledDate: day, status: "completed", completedAt: 2, updatedAt: 2 }] }),
+        ];
+        /* 待做表里不再有这一天（没有已安排切片），展示层用 dayLoadValue 读成 0 */
+        expect(executionSliceRemainingByDate(done).get(day)).toBeUndefined();
+        expect(dayLoadValue(executionSliceRemainingByDate(done).get(day))).toMatchObject({ count: 0, minutes: 0 });
+        expect(executionSliceLoadsByDate(done).get(day)).toEqual({ count: 2, minutes: 300, unestimatedCount: 0 });
+    });
+
+    it("待做按事务分开统计未估时，并忽略非事务条目", () => {
+        const day = "2026-09-11";
+        const estimated = item({ id: "e", durationMinutes: 30, executionSlices: [{ id: "a", scheduledDate: day, status: "scheduled", completedAt: null, updatedAt: 1 }] });
+        const unestimated = item({ id: "u", durationMinutes: null, executionSlices: [{ id: "b", scheduledDate: day, status: "scheduled", completedAt: null, updatedAt: 2 }] });
+        const project = item({ id: "p", type: "项目", durationMinutes: 90, executionSlices: [{ id: "c", scheduledDate: day, status: "scheduled", completedAt: null, updatedAt: 3 }] });
+
+        expect(executionSliceRemainingByDate([estimated, unestimated, project]).get(day)).toEqual({ count: 2, minutes: 30, unestimatedCount: 1 });
+        expect(executionSliceRemainingByDate([estimated, unestimated, project]).get("2026-09-12")).toBeUndefined();
+    });
+
+    it("把一天的负载整理成展示口径", () => {
+        expect(dayLoadValue(undefined)).toMatchObject({ count: 0, minutes: 0, unestimatedOnly: false, atLeast: false });
+        expect(dayLoadValue({ count: 2, minutes: 0, unestimatedCount: 2 })).toMatchObject({ unestimatedOnly: true, atLeast: false });
+        expect(dayLoadValue({ count: 2, minutes: 60, unestimatedCount: 1 })).toMatchObject({ unestimatedOnly: false, atLeast: true });
+        expect(dayLoadValue({ count: 2, minutes: 60, unestimatedCount: 0 })).toMatchObject({ unestimatedOnly: false, atLeast: false });
+        expect(dayLoadValue({ count: 1, minutes: 0, unestimatedCount: 0 })).toMatchObject({ unestimatedOnly: false, atLeast: false });
+    });
+
+    it("按区间汇总待做、总量与已清空的日期", () => {
+        const loads = new Map([
+            ["2026-09-09", { count: 1, minutes: 60, unestimatedCount: 0 }],
+            ["2026-09-10", { count: 3, minutes: 300, unestimatedCount: 0 }],
+            ["2026-09-15", { count: 1, minutes: 90, unestimatedCount: 0 }],
+            ["2026-10-02", { count: 1, minutes: 30, unestimatedCount: 0 }],
+        ]);
+        const remaining = new Map([
+            ["2026-09-09", { count: 1, minutes: 60, unestimatedCount: 0 }],
+            ["2026-09-10", { count: 0, minutes: 0, unestimatedCount: 0 }],
+            ["2026-09-15", { count: 1, minutes: 0, unestimatedCount: 1 }],
+            ["2026-10-02", { count: 1, minutes: 30, unestimatedCount: 0 }],
+        ]);
+
+        expect(summarizeDayLoads(loads, remaining, "2026-09-09", "2026-09-30")).toEqual({
+            remainingMinutes: 60,
+            totalMinutes: 450,
+            clearedDates: ["2026-09-10"],
         });
     });
 });

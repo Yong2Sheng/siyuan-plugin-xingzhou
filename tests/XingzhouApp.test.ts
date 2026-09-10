@@ -486,6 +486,16 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-week-backlog")?.textContent).toContain("待安排 1 片");
         expect(document.querySelector(".xz-week-backlog")?.textContent).not.toContain("不应进入待安排的项目");
 
+        /* 日期行右侧的「待做」chip：今天 2 片共 60 分钟，其中 30 分钟还没做 */
+        const todayColumn = document.querySelector(`.xz-week-day[data-week-day="${localDateKey(today)}"]`);
+        const chip = todayColumn?.querySelector(".xz-week-day-remaining");
+        expect(chip?.textContent).toBe("待做30分");
+        expect(chip?.getAttribute("title")).toBeNull();
+        /* 三槽位：中间是「今天」，chip 永远在最后一个（右侧） */
+        const headerChildren = [...(todayColumn?.querySelector("header")?.children ?? [])];
+        expect(headerChildren[headerChildren.length - 1]?.classList.contains("xz-week-day-remaining")).toBe(true);
+        expect(headerChildren[headerChildren.length - 2]?.textContent).toBe("今天");
+
         saveItem.mockClear();
         const todayKey = localDateKey(today);
         const sliceCard = document.querySelector<HTMLElement>('[data-work-item-id="scheduled"][data-week-phase="slice"]');
@@ -509,6 +519,84 @@ describe("XingzhouApp", () => {
         assignment.dispatchEvent(new Event("change", { bubbles: true }));
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
         expect(saveItem.mock.calls[0][2].executionSlices?.[0]).toMatchObject({ scheduledDate: targetDate, status: "scheduled" });
+    });
+
+    it("本周页把当天已全部做完的列标成待做 0 分", async () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayKey = localDateKey(today);
+        const doneItem = {
+            id: "done", rowId: "done", title: "今天全做完的事务", documentId: null, detached: true,
+            type: "事务", status: "已完成", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: null, noDeadline: true, durationMinutes: 150, energy: "", updatedAt: null,
+            sliceTargetCount: 2,
+            executionSlices: [
+                { id: "done-1", scheduledDate: todayKey, status: "completed" as const, completedAt: Date.now(), updatedAt: 1 },
+                { id: "done-2", scheduledDate: todayKey, status: "completed" as const, completedAt: Date.now(), updatedAt: 2 },
+            ],
+        };
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn().mockResolvedValue({
+                    attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+                    items: [doneItem], missingFields: [],
+                    fields: { title: { id: "title", name: "工作项", type: "block", options: [] } },
+                }),
+                captureInbox: vi.fn(), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
+            },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "本周")?.click();
+        await tick();
+
+        const column = document.querySelector(`.xz-week-day[data-week-day="${todayKey}"]`);
+        expect(column?.classList.contains("is-clear")).toBe(true);
+        const chip = column?.querySelector(".xz-week-day-remaining");
+        expect(chip?.textContent).toBe("待做0分");
+        expect(chip?.classList.contains("is-clear")).toBe(true);
+        expect(chip?.getAttribute("title")).toBeNull();
+
+        /* 过去日期不显示 chip */
+        const pastKey = [...document.querySelectorAll<HTMLElement>(".xz-week-day")]
+            .map((node) => node.dataset.weekDay ?? "")
+            .filter((key) => key && key < todayKey)
+            .sort()
+            .reverse()[0];
+        if (pastKey) {
+            expect(document.querySelector(`.xz-week-day[data-week-day="${pastKey}"] .xz-week-day-remaining`)).toBeNull();
+        }
+    });
+
+    it("本周页对没有预计时长的切片显示待做未估时", async () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayKey = localDateKey(today);
+        const unknownItem = {
+            id: "unknown", rowId: "unknown", title: "未估时事务", documentId: null, detached: true,
+            type: "事务", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: null, noDeadline: true, durationMinutes: null, energy: "", updatedAt: null,
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "unknown-1", scheduledDate: todayKey, status: "scheduled" as const, completedAt: null, updatedAt: 1 }],
+        };
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn().mockResolvedValue({
+                    attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+                    items: [unknownItem], missingFields: [],
+                    fields: { title: { id: "title", name: "工作项", type: "block", options: [] } },
+                }),
+                captureInbox: vi.fn(), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
+            },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "本周")?.click();
+        await tick();
+
+        const chip = document.querySelector(`.xz-week-day[data-week-day="${todayKey}"] .xz-week-day-remaining`);
+        expect(chip?.textContent).toBe("待做未估时");
+        expect(chip?.querySelector(".xz-week-chip-unit")).toBeNull();
     });
 
     it("每周页允许提前完成未来切片，并保留在原计划日期", async () => {
