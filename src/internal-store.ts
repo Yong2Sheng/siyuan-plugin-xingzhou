@@ -153,6 +153,7 @@ export function addStoredWorkItem(
         completedDates: [],
         sliceTargetCount: null,
         executionSlices: [],
+        imageCleanup: null,
         planDate: null,
         deadline: null,
         noDeadline: false,
@@ -203,6 +204,16 @@ export function storesMatch(expected: InternalWorkItemStore, actual: InternalWor
     return JSON.stringify(expected) === JSON.stringify(actual);
 }
 
+/** 复核失败时给出首个差异位置，便于定位是哪个字段写读不一致。 */
+export function describeStoreMismatch(expected: InternalWorkItemStore, actual: InternalWorkItemStore): string {
+    const left = JSON.stringify(expected);
+    const right = JSON.stringify(actual);
+    if (left === right) return "";
+    let index = 0;
+    while (index < left.length && index < right.length && left[index] === right[index]) index += 1;
+    return `写入与读取不一致（第 ${index} 个字符起）：写「${left.slice(index, index + 60)}」读「${right.slice(index, index + 60)}」`;
+}
+
 export function backupFileForRevision(revision: number): string {
     return `work-items.backup-${Math.abs(revision - 1) % 3 + 1}.json`;
 }
@@ -225,6 +236,7 @@ function applyChanges(item: WorkItem, changes: WorkItemChanges, now: number): Wo
     if (changes.completedDates !== undefined) next.completedDates = normalizeDateKeys(changes.completedDates);
     if (changes.sliceTargetCount !== undefined) next.sliceTargetCount = normalizeSliceTarget(changes.sliceTargetCount);
     if (changes.executionSlices !== undefined) next.executionSlices = normalizeExecutionSlices(changes.executionSlices);
+    if (changes.imageCleanup !== undefined) next.imageCleanup = normalizeImageCleanup(changes.imageCleanup);
     if (changes.planDate !== undefined) next.planDate = normalizeDate(changes.planDate);
     if (changes.deadline !== undefined) next.deadline = normalizeDate(changes.deadline);
     if (changes.noDeadline !== undefined) next.noDeadline = Boolean(changes.noDeadline);
@@ -264,6 +276,7 @@ function normalizeWorkItem(value: unknown): WorkItem | null {
         completedDates: normalizeDateKeys(item.completedDates),
         sliceTargetCount: normalizeSliceTarget(item.sliceTargetCount),
         executionSlices: normalizeExecutionSlices(item.executionSlices),
+        imageCleanup: normalizeImageCleanup(item.imageCleanup),
         planDate: nullableNumber(item.planDate),
         deadline: nullableNumber(item.deadline),
         noDeadline: Boolean(item.noDeadline),
@@ -283,6 +296,7 @@ function cloneWorkItem(item: WorkItem): WorkItem {
         softPrerequisiteIds: [...(item.softPrerequisiteIds ?? [])],
         completedDates: [...(item.completedDates ?? [])],
         executionSlices: normalizeExecutionSlices(item.executionSlices),
+        imageCleanup: item.imageCleanup ? { startedAt: item.imageCleanup.startedAt, paths: [...item.imageCleanup.paths] } : null,
     };
 }
 
@@ -302,6 +316,18 @@ function internalFields(): WorkItemData["fields"] {
         duration: field("duration", "预计时长（分钟）", "number"),
         energy: field("energy", "所需精力", "select", ["低", "中", "高"].map((name) => ({ name }))),
     };
+}
+
+/** 图片待清理登记：只接受合法时间戳与非空路径，其余按"没有待清理"处理。 */
+export function normalizeImageCleanup(value: unknown): { startedAt: number; paths: string[] } | null {
+    if (!value || typeof value !== "object") return null;
+    const record = value as { startedAt?: unknown; paths?: unknown };
+    const startedAt = finiteNumber(record.startedAt);
+    if (startedAt === null || startedAt <= 0) return null;
+    if (!Array.isArray(record.paths)) return null;
+    const paths = [...new Set(record.paths.filter((path): path is string => typeof path === "string" && Boolean(path.trim())))];
+    if (paths.length === 0) return null;
+    return { startedAt, paths };
 }
 
 function normalizeIds(value: unknown): string[] {

@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
     addStoredWorkItem,
     backupFileForRevision,
+    createEmptyInternalStore,
+    describeStoreMismatch,
     isAbsentInternalStore,
     migrateWorkItemData,
     parseInternalStore,
     removeStoredWorkItem,
     reorderStoredWorkItems,
+    storesMatch,
     toInternalWorkItemData,
     updateStoredWorkItem,
 } from "../src/internal-store";
@@ -138,6 +141,40 @@ describe("行舟内部工作项仓库", () => {
             "work-items.backup-1.json", "work-items.backup-2.json", "work-items.backup-3.json",
             "work-items.backup-1.json", "work-items.backup-2.json", "work-items.backup-3.json",
         ]);
+    });
+});
+
+describe("写后复核：新建与修改对象必须与重新解析的结果一致", () => {
+    it("新建条目后序列化再解析完全一致（新增字段不能只加在解析器上）", () => {
+        const store = addStoredWorkItem(createEmptyInternalStore(1000), "测试图片清理", "item-new", { type: "事务", parentId: "parent" }, 2000);
+        const roundTrip = parseInternalStore(JSON.parse(JSON.stringify(store)));
+        expect(roundTrip).not.toBeNull();
+        expect(storesMatch(store, roundTrip!)).toBe(true);
+        expect(describeStoreMismatch(store, roundTrip!)).toBe("");
+        // 新建对象必须显式带上图片清理字段，否则写入与读取不一致会拦下所有新建
+        expect(store.items[0].imageCleanup).toBeNull();
+    });
+
+    it("修改条目（含图片登记）后序列化再解析完全一致", () => {
+        const store = addStoredWorkItem(createEmptyInternalStore(1000), "条目", "item-1", { type: "事务" }, 2000);
+        const updated = updateStoredWorkItem(store, "item-1", {
+            currentAction: "看这张\n![](assets/xz-a.png)",
+            imageCleanup: { startedAt: 5000, paths: ["assets/xz-a.png"] },
+        }, 3000);
+        const roundTrip = parseInternalStore(JSON.parse(JSON.stringify(updated)));
+        expect(storesMatch(updated, roundTrip!)).toBe(true);
+
+        const cleared = updateStoredWorkItem(updated, "item-1", { imageCleanup: null }, 4000);
+        const clearedRoundTrip = parseInternalStore(JSON.parse(JSON.stringify(cleared)));
+        expect(storesMatch(cleared, clearedRoundTrip!)).toBe(true);
+        expect(cleared.items[0].imageCleanup).toBeNull();
+    });
+
+    it("差异描述能指出首个不一致位置", () => {
+        const store = createEmptyInternalStore(1000);
+        const other = { ...store, revision: 99 };
+        expect(describeStoreMismatch(store, other)).toContain("不一致");
+        expect(describeStoreMismatch(store, store)).toBe("");
     });
 });
 

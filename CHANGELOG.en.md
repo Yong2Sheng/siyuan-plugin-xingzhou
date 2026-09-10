@@ -2,6 +2,41 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## 2.0.0 - 2026-09-10
+
+### Added
+
+- Images in the current-action field: paste a screenshot (Cmd/Ctrl+V) or drop an image file on the card. Images are stored in the SiYuan asset library at **original resolution** (no re-encoding, no compression); the action text keeps only an `assets/...` path reference, so image bytes never enter the plugin data.
+- Images are named after their content fingerprint and de-duplicated: pasting the same image twice stores one copy, and the SiYuan kernel itself reuses existing assets by content.
+- Edit mode shows thumbnails below the input: a spinner while uploading, red state on failure, a size badge, and per-image removal. Read mode renders images through Lute, capped in height, and clicking one opens the original.
+- When an item ends (Done / Failed / Cancelled / Abandoned) its images are registered for cleanup: the item plus all its descendants are queued with a 7-day grace period. During the grace period text and images stay untouched, and the item shows a "image cleanup · N days left" badge.
+- New "Image cleanup" page (toolbar entry with a count badge):
+  - Lists every pending item with thumbnails, image count, status and countdown; due items sort first and are highlighted;
+  - "Clean up now" opens an in-page confirmation step to pick items and individual images; images still referenced by other unfinished items are marked with the referencing item and cannot be selected;
+  - After confirmation, Xingzhou removes its own references first, then checks SiYuan's "unreferenced assets" list and deletes only files SiYuan considers unused. Images referenced by documents, databases or other plugins are always kept;
+  - Deletion goes through SiYuan's single-asset API, which copies the file into the history folder first, so it can be recovered from History. The result (deleted, kept, failures) is shown on the page.
+- New "Storage health" section: counts distinct images referenced by Xingzhou, space used by unfinished items, space pending cleanup, and the whole asset library, with a segmented usage bar and a per-item usage ranking (collapsible, top 20). Sizes are queried through SiYuan's asset API, cached, and can be refreshed manually.
+
+### Changed
+
+- The cleanup entry moved from an always-visible panel under the toolbar to a toolbar button plus a dedicated page: it no longer consumes vertical space and is no longer constrained by dialog width.
+- Cleanup confirmation moved from a dialog into a second in-page step; the checkbox sits above the thumbnail with a fixed "Delete / Cannot delete" label, and clicking the thumbnail toggles deletion too.
+- Thumbnails are shown complete and in their original aspect ratio (no cropping, no stretching), so tall screenshots stay readable.
+- View state now remembers the cleanup page, so reopening Xingzhou returns to it.
+
+### Fixed
+
+- Fixed a missing field on newly created items that made **every write fail the integrity re-check**: `addStoredWorkItem` now initialises `imageCleanup` explicitly so written and re-read data match. The error message now reports the first differing position when a re-check fails.
+- Fixed several image interaction defects:
+  - Pasting several images in a row inserted the next one into the middle of the previous image syntax and split it (cursor offset computed in the wrong direction);
+  - Blank lines appeared between consecutive images;
+  - Removing a thumbnail did not refresh the list because the Svelte dependency sat inside a `map` callback and was not tracked;
+  - Blurring while an upload was still running could save a half-finished path; it now refuses and removes the placeholder;
+  - Switching items before an upload finished could write the result into the new item (stale-draft and ownership checks added);
+  - The placeholder pattern missed the form that carries a file name, so a successful upload was not substituted back;
+  - Unchecking an image made it impossible to select again (selection was derived instead of tracked); selection is now maintained independently;
+  - "Cannot delete" was wrongly shown because deletability was coupled to selection; it now depends only on whether another unfinished item references the image.
+
 ## 1.3.0 - 2026-09-09
 
 ### Added

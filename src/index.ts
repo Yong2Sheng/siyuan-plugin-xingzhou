@@ -29,6 +29,7 @@ import {
     addStoredWorkItem,
     backupFileForRevision,
     createEmptyInternalStore,
+    describeStoreMismatch,
     INTERNAL_STORE_FILE,
     isAbsentInternalStore,
     MIGRATION_SNAPSHOT_FILE,
@@ -523,7 +524,8 @@ export default class XingzhouPlugin extends Plugin {
         if (response.code !== 0) throw new Error(response.msg || `无法保存 ${file}。`);
         const verified = parseInternalStore(await this.loadData(file));
         if (!verified || !storesMatch(store, verified)) {
-            throw new Error(`内部数据写入 ${file} 后未通过完整性复核。`);
+            const diff = verified ? describeStoreMismatch(store, verified) : "";
+            throw new Error(`内部数据写入 ${file} 后未通过完整性复核。${diff ? ` ${diff}` : ""}`);
         }
     }
 

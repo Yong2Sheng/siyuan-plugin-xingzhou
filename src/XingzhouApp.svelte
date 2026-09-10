@@ -1,5 +1,45 @@
 <script lang="ts">
     import { onDestroy, onMount, tick } from "svelte";
+    import { Dialog, showMessage } from "siyuan";
+    import {
+        countActionImages,
+        compactImageSpacing,
+        extractClipboardImages,
+        extractDroppedImages,
+        fileNameFromSource,
+        findPlaceholderSyntax,
+        formatImageBytes,
+        hashImageFile,
+        imageFileNameFor,
+        insertImageSyntax,
+        listActionImages,
+        listPendingActionImages,
+        markdownImageSyntax,
+        placeholderIdFor,
+        removeImageLine,
+        shiftCursorForReplacement,
+        resolveUploadPlaceholder,
+        uploadPlaceholderSyntax,
+        type ActionEdit,
+    } from "./action-images";
+    import {
+        buildImageCleanupPlan,
+        buildStorageStats,
+        cleanupBadgeLabel,
+        IMAGE_CLEANUP_GRACE_DAYS,
+        cleanupForStatusChange,
+        cleanupImagesOf,
+        cleanupParentChain,
+        cleanupRemainingDays,
+        isCleanupDue,
+        keptPathsOf,
+        referencingActiveItems,
+        listPendingImageCleanup,
+        removablePathsOf,
+        type ActionImageCleanupEntry,
+        type ImageCleanupTextUpdate,
+    } from "./action-image-cleanup";
+    import { listUnusedAssetPaths, readAssetLibrarySize, readAssetSizes, removeUnusedAsset, uploadActionImage, type AssetRemovalResult } from "./asset-upload";
     import type { CaptureDialogMode, CaptureDialogRequest, CaptureDialogValues } from "./capture-dialog";
     import { prerequisiteIds, validateDependencyUpdate, type DependencyKind } from "./dependencies";
     import { continueMarkdownList, normalizeMarkdownOrderedLists } from "./markdown-editor";
@@ -54,10 +94,30 @@
     export let saveViewState: ((state: WorkItemViewState) => Promise<void> | void) | null = null;
     export let loadSavedViewState: (() => Promise<WorkItemViewState | null>) | null = null;
 
-    type MainPage = "week" | "all" | "review" | "graph";
+    type MainPage = "week" | "all" | "review" | "graph" | "cleanup";
     type ItemFilter = "all" | "active" | "future" | "closed";
     type WeekDay = { timestamp: number; key: string; label: string; dateLabel: string; isToday: boolean };
     type ActionField = "currentAction" | "nextAction";
+    type ActionImageUpload = {
+        uploadId: string;
+        name: string;
+        bytes: number | null;
+        status: "uploading" | "done" | "failed";
+        src: string;
+        error: string;
+        field: ActionField;
+        /** 上传发起时的条目与字段标识，用于丢弃过期结果。 */
+        draftKey: string;
+    };
+    type ActionImageRow = {
+        key: string;
+        status: "uploading" | "done" | "failed";
+        src: string;
+        syntax: string;
+        label: string;
+        bytes: number | null;
+        error: string;
+    };
     type CompletionUndo = { rowId: string; title: string; status: string };
 
     const mainPages: Array<{ id: MainPage; label: string }> = [
@@ -105,6 +165,12 @@
     let temporalRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     let undoingCompletion = false;
     let actionErrors: Record<ActionField, string> = { currentAction: "", nextAction: "" };
+    let actionCursor: Record<ActionField, number> = { currentAction: 0, nextAction: 0 };
+    let actionImageUploads: Record<ActionField, ActionImageUpload[]> = { currentAction: [], nextAction: [] };
+    let actionImageSizes: Record<ActionField, Record<string, number | null>> = { currentAction: {}, nextAction: {} };
+    let savedActionValues: Record<ActionField, string> = { currentAction: "", nextAction: "" };
+    let actionDragging: ActionField | null = null;
+    let actionPreviewDialog: Dialog | null = null;
     let inlineError = "";
     let deleteTarget: WorkItem | null = null;
     let deleteDescendantCount = 0;
@@ -160,7 +226,12 @@
 
     $: { data; page; filter; includeClosed; scope; selectedId; expandedIds; weekStart; scheduleViewStateSave(); }
 
-    onDestroy(() => flushViewState());
+    onDestroy(() => {
+        flushViewState();
+        actionPreviewDialog?.destroy();
+        actionPreviewDialog = null;
+        closeCleanupManager();
+    });
 
     function revealRestoredItem(item: WorkItem | undefined) {
         if (!item) return;
@@ -175,6 +246,12 @@
         }
         expandedIds = next;
     }
+    // 图片行必须由响应式语句派生，并在块内显式引用依赖：
+    // 模板里调用函数或 `$: x = f("literal")` 都无法追踪 detailDraft / 上传队列的变化
+    $: currentActionImageRows = buildActionImageRows("currentAction", detailDraft.currentAction, actionImageUploads.currentAction, actionImageSizes.currentAction);
+    $: nextActionImageRows = buildActionImageRows("nextAction", detailDraft.nextAction, actionImageUploads.nextAction, actionImageSizes.nextAction);
+    $: currentActionImageTotal = buildActionImageTotal(detailDraft.currentAction, actionImageUploads.currentAction);
+    $: nextActionImageTotal = buildActionImageTotal(detailDraft.nextAction, actionImageUploads.nextAction);
     $: todayFocusCounts = getTodayFocusCounts(data?.items ?? [], tree);
     $: selectedProfile = selected ? getWorkItemProfile(selected, tree) : null;
     $: deleteDescendantCount = deleteTarget ? Math.max(0, collectDescendantIds(deleteTarget.id, tree).size - 1) : 0;
@@ -579,6 +656,9 @@
         editingAction = null;
         savingAction = null;
         actionErrors = { currentAction: "", nextAction: "" };
+        actionCursor = { currentAction: 0, nextAction: 0 };
+        savedActionValues = { currentAction: item.currentAction, nextAction: item.nextAction };
+        resetActionImages();
         inlineError = "";
     }
 
@@ -587,6 +667,7 @@
         if (!selected || !fieldAvailable) return;
         detailDraft = { ...detailDraft, [field]: selected[field] };
         actionErrors = { ...actionErrors, [field]: "" };
+        actionCursor = { ...actionCursor, [field]: selected[field].length };
         editingAction = field;
     }
 
@@ -594,13 +675,28 @@
         if (!selected) return;
         detailDraft = { ...detailDraft, [field]: selected[field] };
         actionErrors = { ...actionErrors, [field]: "" };
+        resetActionImages(field);
         if (editingAction === field) editingAction = null;
     }
 
     async function saveAction(field: ActionField) {
         if (!data || !selected || savingAction) return;
-        const value = detailDraft[field];
+        // 草稿必须属于当前选中条目，否则条目切换中的失焦会把内容写进错误的条目
+        if (draftSourceId !== selected.id) return;
+        if (pendingUploadCount(field) > 0) {
+            // 图片还在上传：先留在编辑态，上传流程结束后会补一次保存；
+            // 不写入半成品后仍可能被其它流程触发保存，这里退化为移除未完成的占位符。
+            const cleaned = markdownForStorage(reconcileActionUploads(field, detailDraft[field]));
+            detailDraft = { ...detailDraft, [field]: cleaned };
+            actionImageUploads = { ...actionImageUploads, [field]: [] };
+            resetActionImages(field);
+            if (editingAction === field) editingAction = null;
+            return;
+        }
+        const value = markdownForStorage(reconcileActionUploads(field, detailDraft[field]));
         if (value === selected[field]) {
+            actionImageUploads = { ...actionImageUploads, [field]: [] };
+            savedActionValues = { ...savedActionValues, [field]: value };
             if (editingAction === field) editingAction = null;
             return;
         }
@@ -615,6 +711,8 @@
                 detailDraft = { ...detailDraft, [field]: updated[field] };
                 if (selectedId === sourceId) draftSourceId = updated.id;
             }
+            actionImageUploads = { ...actionImageUploads, [field]: [] };
+            savedActionValues = { ...savedActionValues, [field]: updated?.[field] ?? value };
             if (editingAction === field) editingAction = null;
         } catch (caught) {
             actionErrors = { ...actionErrors, [field]: caught instanceof Error ? caught.message : String(caught) };
@@ -693,6 +791,13 @@
         if (normalized === currentValue) return;
 
         const changes: WorkItemChanges = { [role]: normalized };
+        if (role === "status" || role === "type") {
+            // 进入终态时登记待清理图片；由终态改回进行中时清除登记
+            const nextStatus = String(changes.status ?? normalized ?? "");
+            const cleanup = cleanupForStatusChange(selected, nextStatus, data.items);
+            if (cleanup) changes.imageCleanup = cleanup;
+            else if (selected.imageCleanup && !isClosed({ ...selected, status: nextStatus })) changes.imageCleanup = null;
+        }
         if (role === "parent" && data.fields.topProject) changes.topProject = deriveTopProjectId(value, tree) || null;
         if (role === "type") {
             const prospective = { ...selected, type: value };
@@ -1282,8 +1387,525 @@
         return deadline.getTime() < Date.now();
     }
 
+    // ===== 图片待清理 =====
+
+    $: pendingImageCleanups = listPendingImageCleanup(data?.items ?? []);
+    $: cleanupPageRows = cleanupRowsFor(data?.items ?? []);
+    // 依赖必须出现在表达式层级：放进 map 回调里 Svelte 追踪不到（会不重算）
+    $: cleanupConfirmExcluded = `${cleanupExcludedImages.size}:${cleanupExcludedItems.size}`;
+    $: cleanupConfirmCandidateSrcs = cleanupConfirmRows.flatMap((row) => cleanupImagesOf(row.item).map((image) => image.src));
+    $: cleanupConfirmPlan = cleanupConfirming
+        ? (void cleanupConfirmExcluded, buildCleanupPlanFromSelection())
+        : [];
+    $: cleanupConfirmRemovable = removablePathsOf(cleanupConfirmPlan);
+    $: cleanupConfirmBytes = cleanupConfirmRemovable.reduce(
+        (sum, path) => sum + (actionImageSizes.currentAction[path] ?? actionImageSizes.nextAction[path] ?? 0), 0);
+    $: storageStats = buildStorageStats(data?.items ?? [], assetSizes);
+    $: pendingCleanupBytes = pendingImageCleanups.reduce(
+        (sum, entry) => sum + entry.images.reduce((inner, image) => inner + (assetSizes[image.src] ?? 0), 0), 0);
+    $: storageShare = assetLibraryBytes && assetLibraryBytes > 0
+        ? Math.min(100, Math.round((storageStats.bytes / assetLibraryBytes) * 1000) / 10)
+        : null;
+    $: activeBytesForBar = Math.max(0, storageStats.bytes - pendingCleanupBytes);
+    $: storageSegments = assetLibraryBytes && assetLibraryBytes > 0
+        ? (() => {
+            const other = Math.max(0, assetLibraryBytes - storageStats.bytes);
+            const total = assetLibraryBytes;
+            return {
+                active: (activeBytesForBar / total) * 100,
+                pending: (pendingCleanupBytes / total) * 100,
+                other: (other / total) * 100,
+                otherBytes: other,
+            };
+        })()
+        : null;
+    $: cleanupConfirmGroups = cleanupConfirming
+        ? cleanupConfirmRows.map((row) => {
+            const images = cleanupImagesOf(row.item);
+            return {
+                row,
+                images: images.map((image) => {
+                    // 可删除只看"是否仍被其它未结束条目引用"，与勾选状态无关
+                    const referencedBy = referencingActiveItems(image.src, [row.item.id], data?.items ?? [])
+                        .map((item) => item.title)
+                        .join("、");
+                    return {
+                        ...image,
+                        removable: referencedBy === "",
+                        selected: cleanupSelectedImages.has(image.src),
+                        blockedReason: referencedBy,
+                    };
+                }),
+            };
+        })
+        : [];
+    $: pendingImageCleanupTotal = pendingImageCleanups.reduce((sum, entry) => sum + entry.images.length, 0);
+    $: selectedCleanupBadge = selected ? cleanupBadgeLabel(selected) : null;
+
+    type CleanupRow = { item: WorkItem; entry: ActionImageCleanupEntry; chain: string[] };
+    type CleanupResult = { deleted: number; kept: number; bytes: number; failures: string[] };
+
+    let cleanupConfirmRows: CleanupRow[] = [];
+    let cleanupConfirming = false;
+    /** 页内确认步骤：用户取消勾选的图片路径（默认全部勾选） */
+    let cleanupExcludedImages = new Set<string>();
+    /** 每张图的勾选状态：进入确认步骤时初始化一次，之后只由交互改变 */
+    let cleanupSelectedImages = new Set<string>();
+    let cleanupExcludedItems = new Set<string>();
+    /** 页内确认的进行状态与结果 */
+    let cleanupRunning = false;
+    let cleanupError = "";
+    let cleanupResult: CleanupResult | null = null;
+    /** 图库体检：行舟引用的图片体积（按资源路径）与资源库总量 */
+    let assetSizes: Record<string, number> = {};
+    let assetLibraryBytes: number | null = null;
+    let assetLibraryCount = 0;
+    let assetStatsLoading = false;
+    let assetStatsLoaded = false;
+    let assetStatsError = "";
+
+    function cleanupRowsFor(items: WorkItem[]): CleanupRow[] {
+        const byId = new Map(items.map((item) => [item.id, item]));
+        return pendingImageCleanups
+            .filter((entry) => byId.has(entry.item.id))
+            .map((entry) => ({ item: entry.item, entry, chain: cleanupParentChain(entry.item, items) }));
+    }
+
+    function formatCleanupCountdown(entry: ActionImageCleanupEntry): string {
+        if (entry.remainingDays <= 0) return "今天到期，可确认清理";
+        return `还剩 ${entry.remainingDays} 天（${IMAGE_CLEANUP_GRACE_DAYS} 天后解锁）`;
+    }
+
+    function cleanupEscape(value: string): string {
+        return value
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;");
+    }
+
+    /** 页内确认后真正执行：先摘引用 → 只删思源认为未引用的文件 → 清登记 */
+    async function runImageCleanup() {
+        if (!data || cleanupRunning) return;
+        // 必须在这里一次性取定：后面会清空勾选状态，重算会退回全选
+        const plan = buildCleanupPlanFromSelection();
+        const paths = removablePathsOf(plan);
+        if (paths.length === 0) {
+            cleanupError = "当前没有可删除的图片（被保留的图片仍被其它未结束条目引用，或你已取消勾选）。";
+            return;
+        }
+        cleanupRunning = true;
+        cleanupError = "";
+        cleanupResult = null;
+        const result: CleanupResult = { deleted: 0, kept: keptPathsOf(plan).length, bytes: 0, failures: [] };
+        try {
+                const touched = new Set<string>();
+            let current = data;
+            for (const entry of plan) {
+                const item = current.items.find((candidate) => candidate.id === entry.itemId);
+                if (!item) continue;
+                // 一次写完：摘引用 + 清登记。避免之后再写一次去覆盖正文
+                current = await saveItem(current, item, {
+                    ...entry.changes,
+                    imageCleanup: entry.hasImagesAfter ? item.imageCleanup ?? null : null,
+                });
+                touched.add(entry.itemId);
+            }
+            void touched;
+            applyData(current);
+
+            const unused = await listUnusedAssetPaths();
+            for (const path of paths) {
+                if (!unused.paths.has(path)) {
+                    result.kept += 1;
+                    continue;
+                }
+                const removal = await removeUnusedAsset(path);
+                if (removal.removed) result.deleted += 1;
+                else result.failures.push(`${removal.path}：${removal.reason}`);
+            }
+            if (unused.truncated && result.failures.length > 0) {
+                result.failures.push("思源一次最多返回 512 条未引用资源，部分图片需要稍后重试。");
+            }
+
+            cleanupResult = result;
+            cleanupConfirmRows = [];
+            cleanupExcludedImages = new Set();
+            cleanupExcludedItems = new Set();
+        } catch (caught) {
+            cleanupError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            cleanupRunning = false;
+        }
+    }
+
+    let cleanupManagerDialog: Dialog | null = null;
+    let cleanupManagerEvents: Array<() => void> = [];
+
+    /** 进入图片清理页面（整页渲染，避免弹窗宽度受限导致文字被截断）。 */
+    function openCleanupPage() {
+        closeCleanupManager();
+        page = "cleanup";
+        void loadAssetStats();
+    }
+
+    /** 图库体检：取行舟图片体积与资源库总量。结果缓存，避免每次进页面都重扫。 */
+    async function loadAssetStats(force = false) {
+        if (assetStatsLoading) return;
+        if (assetStatsLoaded && !force) return;
+        assetStatsLoading = true;
+        assetStatsError = "";
+        try {
+            const paths = [...new Set((data?.items ?? []).flatMap((item) =>
+                [...listActionImages(item.currentAction), ...listActionImages(item.nextAction)]
+                    .map((image) => image.src)
+                    .filter((src): src is string => Boolean(src) && src.startsWith("assets/"))))];
+            const sizes = await readAssetSizes(paths);
+            if (sizes.size > 0) {
+                const merged: Record<string, number> = { ...assetSizes };
+                for (const [path, bytes] of sizes) merged[path] = bytes;
+                assetSizes = merged;
+            }
+            const library = await readAssetLibrarySize();
+            if (library) {
+                assetLibraryBytes = library.totalBytes;
+                assetLibraryCount = library.fileCount;
+            }
+        } catch (caught) {
+            assetStatsError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            assetStatsLoading = false;
+            assetStatsLoaded = true;
+        }
+    }
+
+    /** 进入页内确认步骤（不再用弹窗：弹窗宽度不可控，内容右侧会留白） */
+    function openCleanupConfirmForItem(itemId: string) {
+        const item = data?.items.find((candidate) => candidate.id === itemId);
+        if (!item) return;
+        closeCleanupManager();
+        cleanupConfirmRows = cleanupRowsFor([item]);
+        cleanupExcludedImages = new Set();
+        cleanupSelectedImages = new Set(cleanupImagesOf(item).map((image) => image.src));
+        cleanupExcludedItems = new Set();
+        cleanupResult = null;
+        cleanupError = "";
+        cleanupConfirming = true;
+    }
+
+    function openCleanupConfirmForAll() {
+        closeCleanupManager();
+        cleanupConfirmRows = cleanupPageRows;
+        cleanupExcludedImages = new Set();
+        cleanupSelectedImages = new Set(cleanupPageRows.flatMap((row) => cleanupImagesOf(row.item).map((image) => image.src)));
+        cleanupExcludedItems = new Set();
+        cleanupResult = null;
+        cleanupError = "";
+        cleanupConfirming = true;
+    }
+
+    function leaveCleanupConfirm() {
+        cleanupConfirming = false;
+        cleanupExcludedImages = new Set();
+        cleanupExcludedItems = new Set();
+        cleanupResult = null;
+        cleanupError = "";
+    }
+
+    /** 点图片本身也能切换勾选（不只是点小方块） */
+    function toggleCleanupPick(src: string, removable: boolean) {
+        if (!removable) return;
+        toggleCleanupImage(src, !cleanupSelectedImages.has(src));
+    }
+
+    /**
+     * 勾选状态只由交互改变（cleanupSelectedImages），删除范围 = 未选中的那些。
+     * 之前每帧从派生值推导 checked，取消勾选后 Svelte 认为值仍是 true，导致无法再选。
+     */
+    function toggleCleanupImage(src: string, checked: boolean) {
+        const selected = new Set(cleanupSelectedImages);
+        if (checked) selected.add(src);
+        else selected.delete(src);
+        cleanupSelectedImages = selected;
+        cleanupExcludedImages = new Set(cleanupConfirmCandidateSrcs.filter((path) => !selected.has(path)));
+    }
+
+    /** 页内确认用的执行范围：按勾选状态现算 */
+    function buildCleanupPlanFromSelection(): ImageCleanupTextUpdate[] {
+        const rows = cleanupConfirmRows.filter((row) => !cleanupExcludedItems.has(row.item.id));
+        const all = cleanupImagesOf;
+        void all;
+        // 删除范围 = 已勾选的图片；未勾选的不参与删除
+        const onlyPaths = cleanupConfirmCandidateSrcs.filter((src) => cleanupSelectedImages.has(src));
+        return buildImageCleanupPlan(rows.map((row) => row.item), data?.items ?? [], { onlyPaths });
+    }
+
+    function closeCleanupManager() {
+        for (const off of cleanupManagerEvents) off();
+        cleanupManagerEvents = [];
+        cleanupManagerDialog?.destroy();
+        cleanupManagerDialog = null;
+    }
+
+    /** 工具栏入口：列出全部待清理条目；没有内容时给出空状态说明。 */
+
+
     function fieldLabel(item: WorkItem): string {
         return getWorkItemProfile(item, tree).actionLabel;
+    }
+
+    function otherActionField(field: ActionField): ActionField {
+        return field === "currentAction" ? "nextAction" : "currentAction";
+    }
+
+    function updateActionCursor(event: Event, field: ActionField) {
+        if (event.target instanceof HTMLTextAreaElement) actionCursor[field] = event.target.selectionStart ?? 0;
+    }
+
+    function resetActionImages(field?: ActionField) {
+        const target = field ? [field] : (["currentAction", "nextAction"] as ActionField[]);
+        const uploads = { ...actionImageUploads };
+        const sizes = { ...actionImageSizes };
+        for (const name of target) {
+            uploads[name] = [];
+            sizes[name] = {};
+        }
+        actionImageUploads = uploads;
+        actionImageSizes = sizes;
+    }
+
+    function applyDetailEdit(field: ActionField, edit: ActionEdit) {
+        actionCursor[field] = edit.cursor;
+        detailDraft = { ...detailDraft, [field]: edit.value };
+    }
+
+    /** 程序化插入的内容（含图片）按规范重排引用页，用户手动输入保持原样。 */
+    function markdownForStorage(value: string): string {
+        return compactImageSpacing(value).replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n").trim();
+    }
+    function pendingUploadCount(field: ActionField): number {
+        return listPendingActionImages(detailDraft[field]).length;
+    }
+
+    function actionDraftKey(field: ActionField): string {
+        return `${selected?.id ?? ""}:${field}`;
+    }
+
+    function queueUpload(field: ActionField, record: ActionImageUpload) {
+        actionImageUploads = { ...actionImageUploads, [field]: [...actionImageUploads[field], record] };
+    }
+
+    function patchUpload(field: ActionField, uploadId: string, changes: Partial<ActionImageUpload>) {
+        actionImageUploads = {
+            ...actionImageUploads,
+            [field]: actionImageUploads[field].map((entry) => (entry.uploadId === uploadId ? { ...entry, ...changes } : entry)),
+        };
+    }
+
+    function setImageSize(field: ActionField, src: string, bytes: number | null) {
+        actionImageSizes = { ...actionImageSizes, [field]: { ...actionImageSizes[field], [src]: bytes } };
+    }
+
+    function imageLabel(src: string): string {
+        return fileNameFromSource(src) || src;
+    }
+
+    function handleActionPaste(event: ClipboardEvent, field: ActionField) {
+        const images = extractClipboardImages(event.clipboardData);
+        if (images.length === 0) return;
+        event.preventDefault();
+        void uploadActionImages(field, images);
+    }
+
+    function handleActionDragOver(event: DragEvent, field: ActionField) {
+        const types = event.dataTransfer ? Array.from(event.dataTransfer.types) : [];
+        if (!types.includes("Files")) return;
+        event.preventDefault();
+        event.dataTransfer!.dropEffect = "copy";
+        actionDragging = field;
+    }
+
+    function handleActionDragLeave(event: DragEvent, field: ActionField) {
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget instanceof Node && event.currentTarget.contains(next)) return;
+        if (actionDragging === field) actionDragging = null;
+    }
+
+    function handleActionDrop(event: DragEvent, field: ActionField) {
+        const images = extractDroppedImages(event.dataTransfer);
+        actionDragging = null;
+        if (images.length === 0) return;
+        event.preventDefault();
+        void uploadActionImages(field, images);
+    }
+
+    function handleActionImageClick(event: MouseEvent, field: ActionField) {
+        const target = event.target;
+        if (!(target instanceof HTMLImageElement)) return;
+        const src = target.currentSrc || target.src;
+        if (!src) return;
+        event.stopPropagation();
+        openActionImagePreview(field, src);
+    }
+
+    function openActionImagePreview(field: ActionField, src: string) {
+        actionPreviewDialog?.destroy();
+        const name = imageLabel(src);
+        const known = actionImageSizes[field][src];
+        const size = typeof known === "number" ? ` · ${formatImageBytes(known)}` : "";
+        const dialog = new Dialog({
+            title: name,
+            width: "880px",
+            content: `<div class="xz-action-image-preview"><img src="${src}" alt="${name}"></div><p class="xz-action-image-preview__note">按原分辨率显示${size}</p>`,
+        });
+        actionPreviewDialog = dialog;
+        window.setTimeout(() => {
+            dialog.element.querySelector<HTMLButtonElement>(".b3-dialog__close")?.focus();
+        }, 0);
+    }
+
+    /** 草稿是否仍属于发起操作时的那条条目；用于丢弃条目切换后的迟到结果。 */
+    function isStaleActionDraft(field: ActionField, draftKey: string, sourceItemId: string): boolean {
+        return draftKey !== `${sourceItemId}:${field}` || actionDraftKey(field) !== draftKey;
+    }
+
+    async function uploadActionImages(field: ActionField, files: File[]) {
+        const draftKey = actionDraftKey(field);
+        const sourceItemId = selected?.id ?? "";
+        const staleUpload = () => isStaleActionDraft(field, draftKey, sourceItemId);
+        for (const file of files) {
+            let hash = "";
+            try {
+                hash = await hashImageFile(file);
+            } catch (caught) {
+                actionErrors = { ...actionErrors, [field]: caught instanceof Error ? caught.message : String(caught) };
+                return;
+            }
+            const uploadId = placeholderIdFor(hash);
+            if (findPlaceholderSyntax(detailDraft[field], uploadId)) {
+                showMessage(`这张图片已经插入过：${imageFileNameFor(hash, file)}`, 4000);
+                continue;
+            }
+
+            const cursor = actionCursor[field];
+            const inserted = insertImageSyntax(detailDraft[field], cursor, cursor, uploadPlaceholderSyntax(uploadId, file.name));
+            actionCursor[field] = inserted.cursor;
+            detailDraft = { ...detailDraft, [field]: inserted.value };
+            const upload: ActionImageUpload = {
+                uploadId,
+                name: file.name || imageFileNameFor(hash, file),
+                bytes: file.size || null,
+                status: "uploading",
+                src: "",
+                error: "",
+                field,
+                draftKey,
+            };
+            queueUpload(field, upload);
+
+            try {
+                const result = await uploadActionImage(file, hash);
+                if (staleUpload()) continue;
+                const done = { status: "done" as const, src: result.path, bytes: result.bytes ?? upload.bytes, name: result.name || upload.name };
+                patchUpload(field, uploadId, done);
+                setImageSize(field, result.path, result.bytes ?? upload.bytes);
+                const placeholder = findPlaceholderSyntax(detailDraft[field], uploadId);
+                if (placeholder) {
+                    const replacement = markdownImageSyntax(result.path);
+                    actionCursor[field] = shiftCursorForReplacement(detailDraft[field].indexOf(placeholder), placeholder.length, replacement.length, actionCursor[field]);
+                    detailDraft = { ...detailDraft, [field]: detailDraft[field].replace(placeholder, replacement) };
+                }
+            } catch (caught) {
+                if (staleUpload()) continue;
+                const message = caught instanceof Error ? caught.message : String(caught);
+                patchUpload(field, uploadId, { status: "failed", error: message });
+                actionErrors = { ...actionErrors, [field]: message };
+                // 失败后不能把占位符留在内容里：整行移除，用户可重新粘贴。
+                const placeholder = findPlaceholderSyntax(detailDraft[field], uploadId);
+                if (placeholder) detailDraft = { ...detailDraft, [field]: removeImageLine(detailDraft[field], placeholder) };            }
+        }
+        await flushActionImages(field, draftKey, sourceItemId);
+    }
+
+    /** 上传完成后把占位符换回真实路径；失败或中止的占位符不会写进条目。 */
+    function reconcileActionUploads(field: ActionField, saved: string) {
+        const uploads = actionImageUploads[field];
+        if (uploads.length === 0) return saved;
+        let next = saved;
+        let dropped = 0;
+        for (const upload of uploads) {
+            if (upload.status === "done" && upload.src) {
+                next = resolveUploadPlaceholder(next, upload.uploadId, { path: upload.src, bytes: upload.bytes ?? 0, reused: false });
+            } else {
+                const before = next;
+                next = resolveUploadPlaceholder(next, upload.uploadId, null);
+                if (before !== next) dropped += 1;
+            }
+        }
+        if (dropped > 0) showMessage(`${dropped} 张图片尚未上传完成，已从内容中移除占位符`, 5000);
+        return markdownForStorage(next);
+    }
+
+    /** 上传结束后按需补一次保存；占位符未就绪或草稿已失效时不写入。 */
+    async function flushActionImages(field: ActionField, draftKey: string, sourceItemId: string) {
+        if (!selected || savingAction) return;
+        if (isStaleActionDraft(field, draftKey, sourceItemId)) return;
+        if (pendingUploadCount(field) > 0) return;
+        if (detailDraft[field] === savedActionValues[field]) return;
+        await saveAction(field);
+    }
+
+    function removeDraftImage(field: ActionField, syntax: string) {
+        applyDetailEdit(field, { value: removeImageLine(detailDraft[field], syntax), cursor: actionCursor[field] });
+    }
+
+    /** 缩略图行始终由当前内容推导：从内容里删掉的图片不会从上传统计里"复活"。 */
+    function buildActionImageRows(
+        field: ActionField,
+        draft: string,
+        uploads: ActionImageUpload[],
+        sizes: Record<string, number | null>,
+    ): ActionImageRow[] {
+        const rows: ActionImageRow[] = [];
+        for (const upload of uploads) {
+            if (upload.status === "done") continue;
+            const syntax = findPlaceholderSyntax(draft, upload.uploadId);
+            if (!syntax) continue;
+            rows.push({
+                key: upload.uploadId,
+                status: upload.status,
+                src: upload.src,
+                syntax,
+                label: upload.name,
+                bytes: upload.bytes,
+                error: upload.error,
+            });
+        }
+        for (const image of listActionImages(draft)) {
+            if (!image.src) continue;
+            rows.push({
+                key: image.src,
+                status: "done",
+                src: image.src,
+                syntax: image.syntax,
+                label: image.name || image.src,
+                bytes: sizes[image.src] ?? null,
+                error: "",
+            });
+        }
+        return rows;
+    }
+
+    function buildActionImageTotal(draft: string, uploads: ActionImageUpload[]): number {
+        return countActionImages(draft) + uploads.filter((upload) => upload.status !== "failed").length;
+    }
+
+    function retryActionUpload(field: ActionField, uploadId: string) {
+        const upload = actionImageUploads[field].find((entry) => entry.uploadId === uploadId);
+        if (!upload) return;
+        removeDraftImage(field, findPlaceholderSyntax(detailDraft[field], uploadId) ?? "");
+        actionImageUploads = { ...actionImageUploads, [field]: actionImageUploads[field].filter((entry) => entry.uploadId !== uploadId) };
+        showMessage("请重新粘贴这张图片", 4000);
     }
 </script>
 
@@ -1302,6 +1924,7 @@
     </header>{/if}
 
     <div class="xz-project-toolbar">
+        <div class="xz-project-toolbar__scroll">
         <nav class="xz-main-nav" aria-label="主页面">
             {#each mainPages as entry}
                 <button class:active={page === entry.id} type="button" on:click={() => page = entry.id}>
@@ -1329,6 +1952,22 @@
                     {/if}
                     <button class="xz-link-button" type="button" on:click={collapseAll}>全部收起</button>
                 </div>
+            </div>
+        {/if}
+        </div>
+        {#if page === "all" && data}
+            <div class="xz-project-toolbar__aside">
+                <button
+                    class="xz-cleanup-entry"
+                    class:xz-cleanup-entry--idle={pendingImageCleanups.length === 0}
+                    type="button"
+                    title={pendingImageCleanups.length === 0 ? "当前没有可清理的图片" : `${pendingImageCleanups.length} 条已结束条目有图片待清理`}
+                    on:click={openCleanupPage}
+                >
+                    <span class="xz-cleanup-entry__icon" aria-hidden="true">🧹</span>
+                    <span class="xz-cleanup-entry__label">清理图片</span>
+                    <span class="xz-cleanup-entry__count">{pendingImageCleanups.length}</span>
+                </button>
             </div>
         {/if}
     </div>
@@ -1524,6 +2163,183 @@
                 </div>
             {/if}
         </main>
+    {:else if page === "cleanup"}
+        <main class="xz-cleanup-page">
+            {#if cleanupResult}
+                <section class="xz-cleanup-page__done">
+                    <span class="xz-cleanup-page__done-icon" aria-hidden="true">✓</span>
+                    <h3>清理完成</h3>
+                    <p>已删除 <b>{cleanupResult.deleted}</b> 张图片{cleanupResult.kept > 0 ? `，保留 ${cleanupResult.kept} 张（仍被引用）` : ""}。需要找回时可在思源「历史」里恢复被清理的资源文件。</p>
+                    {#if cleanupResult.failures.length > 0}
+                        <ul class="xz-cleanup-page__failures">
+                            {#each cleanupResult.failures as failure}<li>{failure}</li>{/each}
+                        </ul>
+                    {/if}
+                    <div class="xz-cleanup-page__actions">
+                        <button class="b3-button" type="button" on:click={leaveCleanupConfirm}>返回清理列表</button>
+                    </div>
+                </section>
+            {:else if cleanupConfirming}
+                <header class="xz-cleanup-page__head">
+                    <div>
+                        <span class="xz-section-kicker">第 2 步 · 确认范围</span>
+                        <h2>勾选要删除的图片</h2>
+                        <p>行舟会先摘掉引用，再逐张确认思源认为它没有被引用才删除。不想清的条目或图片，取消勾选即可，图片会留在条目里。</p>
+                    </div>
+                    <div class="xz-cleanup-page__actions">
+                        <button class="b3-button b3-button--outline" type="button" disabled={cleanupRunning} on:click={leaveCleanupConfirm}>返回</button>
+                        <button class="b3-button xz-danger-button" type="button" disabled={cleanupRunning || cleanupConfirmRemovable.length === 0} on:click={() => void runImageCleanup()}>
+                            {cleanupRunning ? "正在清理…" : `确认删除 ${cleanupConfirmRemovable.length} 张`}
+                        </button>
+                    </div>
+                </header>
+
+                {#if cleanupError}<p class="xz-cleanup-page__error" role="alert">{cleanupError}</p>{/if}
+
+                <div class="xz-cleanup-confirm-list">
+                    {#each cleanupConfirmGroups as group (group.row.item.id)}
+                        <section class="xz-cleanup-confirm-item">
+                            <header>
+                                <label class="xz-cleanup-confirm-item__check">
+                                    <input type="checkbox" checked={!cleanupExcludedItems.has(group.row.item.id)}
+                                        on:change={(event) => {
+                                            const next = new Set(cleanupExcludedItems);
+                                            if (event.currentTarget.checked) next.delete(group.row.item.id);
+                                            else next.add(group.row.item.id);
+                                            cleanupExcludedItems = next;
+                                        }} />
+                                    <strong>{group.row.item.title}</strong>
+                                </label>
+                                <span class="xz-cleanup-confirm-item__meta">
+                                    {group.images.filter((image) => image.removable).length} / {group.images.length} 张可删除
+                                </span>
+                            </header>
+                            <div class="xz-cleanup-confirm-item__images">
+                                {#each group.images as image (image.src)}
+                                    <div class="xz-cleanup-pick" class:xz-cleanup-pick--kept={!image.removable}>
+                                        <label class="xz-cleanup-pick__check">
+                                            <input type="checkbox" checked={cleanupSelectedImages.has(image.src)} disabled={!image.removable}
+                                                on:change={(event) => toggleCleanupImage(image.src, event.currentTarget.checked)} />
+                                            <span>{image.removable ? "删除" : "不可删除"}</span>
+                                        </label>
+                                        <button class="xz-cleanup-pick__image" type="button" disabled={!image.removable}
+                                            title={image.removable ? "点击切换是否删除这张图片" : image.blockedReason || "仍被引用，不可删除"}
+                                            on:click={() => toggleCleanupPick(image.src, image.removable)}>
+                                            <img src={image.src} alt={image.name} loading="lazy" />
+                                        </button>
+                                        <strong title={image.name}>{image.name}</strong>
+                                        {#if image.blockedReason}<em>仍被「{image.blockedReason}」引用，会保留</em>{/if}
+                                    </div>
+                                {/each}
+                            </div>
+                        </section>
+                    {/each}
+                </div>
+
+                <p class="xz-cleanup-page__note">
+                    本次将删除 <b>{cleanupConfirmRemovable.length}</b> 张{cleanupConfirmBytes > 0 ? `，约 ${formatImageBytes(cleanupConfirmBytes)}` : ""}；被保留的图片只摘除行舟的引用，文件留在资源库。
+                </p>
+            {:else}
+                <header class="xz-cleanup-page__head">
+                    <div>
+                        <span class="xz-section-kicker">图片清理</span>
+                        <h2>已结束条目的图片</h2>
+                        <p>条目结束（已完成／已放弃／已取消）时登记下来的图片会集中在这里。清理只删除思源认为「没有任何引用」的文件；仍被其它未结束条目或笔记引用的图片会保留，并在确认步骤里标明原因。</p>
+                    </div>
+                    <div class="xz-cleanup-page__actions">
+                        <button class="b3-button b3-button--outline" type="button" on:click={() => (page = "all")}>返回项目与事务</button>
+                        <button class="b3-button" type="button" disabled={pendingImageCleanups.length === 0} on:click={openCleanupConfirmForAll}>一次清理全部…</button>
+                    </div>
+                </header>
+
+                {#if pendingImageCleanups.length === 0}
+                    <section class="xz-cleanup-page__empty">
+                        <span class="xz-cleanup-page__empty-icon" aria-hidden="true">🧹</span>
+                        <h3>当前没有需要清理的图片</h3>
+                        <p>只有「条目结束的当下，正文里还带着图片」才会出现在这里。已经结束但只有文字的条目不会有任何待清理内容；如果某条引用的图片仍被别的未结束条目使用，它也会被保留。</p>
+                    </section>
+                {:else}
+                    <section class="xz-cleanup-page__summary" aria-label="清理概况">
+                        <div><strong>{pendingImageCleanups.length}</strong><span>条已结束条目</span></div>
+                        <div><strong>{pendingImageCleanupTotal}</strong><span>张登记图片</span></div>
+                        <div><strong>{IMAGE_CLEANUP_GRACE_DAYS}</strong><span>天宽限期</span></div>
+                    </section>
+
+                    <section class="xz-storage" aria-label="图库体检">
+                        <header class="xz-storage__head">
+                            <div>
+                                <h3>图库体检</h3>
+                                <p>只统计行舟引用的图片（同一张图多处引用只算一份）{assetStatsLoading ? " · 正在读取体积…" : ""}</p>
+                            </div>
+                            <button class="b3-button b3-button--outline" type="button" disabled={assetStatsLoading} on:click={() => void loadAssetStats(true)}>重新统计</button>
+                        </header>
+                        {#if assetStatsError}<p class="xz-storage__error" role="alert">{assetStatsError}</p>{/if}
+                        <div class="xz-storage__cards">
+                            <div><span>行舟图片</span><strong>{storageStats.imageCount}</strong><small>张 · 分布在 {storageStats.topItems.length} 条未结束条目</small></div>
+                            <div><span>未结束条目占用</span><strong>{formatImageBytes(Math.max(0, storageStats.bytes - pendingCleanupBytes))}</strong><small>当前正在使用{storageStats.missingSize > 0 ? `（${storageStats.missingSize} 张体积未知）` : ""}</small></div>
+                            <div class:xz-storage__card--warn={pendingCleanupBytes > 0}><span>待清理占用</span><strong>{formatImageBytes(pendingCleanupBytes)}</strong><small>{pendingImageCleanups.length} 条已结束条目 · {pendingImageCleanupTotal} 张</small></div>
+                            <div><span>资源库总量</span><strong>{assetLibraryBytes === null ? "统计中…" : formatImageBytes(assetLibraryBytes)}</strong><small>{assetLibraryCount} 个文件 · 含笔记里的其它资源</small></div>
+                        </div>
+                        {#if storageSegments}
+                            <div class="xz-storage__bar" aria-hidden="true">
+                                <i class="active" style={`width:${storageSegments.active}%`}></i>
+                                <i class="pending" style={`width:${storageSegments.pending}%`}></i>
+                                <i class="other" style={`width:${storageSegments.other}%`}></i>
+                            </div>
+                            <div class="xz-storage__legend">
+                                <span><i class="active"></i>行舟 · 未结束 {formatImageBytes(activeBytesForBar)}</span>
+                                <span><i class="pending"></i>行舟 · 待清理 {formatImageBytes(pendingCleanupBytes)}</span>
+                                <span><i class="other"></i>其它资源 {formatImageBytes(storageSegments.otherBytes)}</span>
+                            </div>
+                        {/if}
+                        {#if storageStats.topItems.length > 0}
+                            <details class="xz-storage__details">
+                                <summary>按条目查看占用（{storageStats.topItems.length} 条）</summary>
+                                <table class="xz-storage__table">
+                                    <thead><tr><th>条目</th><th>状态</th><th>图片</th><th>占用</th></tr></thead>
+                                    <tbody>
+                                        {#each storageStats.topItems.slice(0, 20) as row (row.item.id)}
+                                            <tr>
+                                                <td>{row.item.title}</td>
+                                                <td>{row.item.status || "未设置"}</td>
+                                                <td class="xz-storage__num">{row.count} 张</td>
+                                                <td class="xz-storage__num">{row.bytes > 0 ? formatImageBytes(row.bytes) : "未知"}</td>
+                                            </tr>
+                                        {/each}
+                                    </tbody>
+                                </table>
+                                {#if storageStats.topItems.length > 20}<p class="xz-storage__more">仅显示占用最大的 20 条。</p>{/if}
+                            </details>
+                        {:else}
+                            <p class="xz-storage__empty">目前没有任何未结束条目引用图片。</p>
+                        {/if}
+                    </section>
+
+                    <div class="xz-cleanup-page__list">
+                        {#each pendingImageCleanups as entry (entry.item.id)}
+                            <article class="xz-cleanup-page__item" class:xz-cleanup-page__item--due={entry.due}>
+                                <header>
+                                    <div class="xz-cleanup-page__title">
+                                        <strong>{entry.item.title}</strong>
+                                        <small>{entry.images.length} 张图片 · {entry.item.status || "已结束"} · {formatCleanupCountdown(entry)}</small>
+                                    </div>
+                                    <button class="b3-button" type="button" on:click={() => openCleanupConfirmForItem(entry.item.id)}>{entry.due ? "确认清理" : "现在清理"}</button>
+                                </header>
+                                <div class="xz-cleanup-page__thumbs">
+                                    {#each entry.images.slice(0, 12) as image (image.src)}
+                                        <a class="xz-cleanup-page__thumb" href={image.src} target="_blank" rel="noreferrer" title={`${image.name}（点击查看原图）`}>
+                                            <img src={image.src} alt={image.name} loading="lazy" />
+                                        </a>
+                                    {/each}
+                                    {#if entry.images.length > 12}<span class="xz-cleanup-page__more">还有 {entry.images.length - 12} 张</span>{/if}
+                                </div>
+                            </article>
+                        {/each}
+                    </div>
+                    <p class="xz-cleanup-page__note">点「现在清理」进入下一步，那里会逐条逐张让你勾选范围；被保留的图片会标明引用方。</p>
+                {/if}
+            {/if}
+        </main>
     {:else if loading}
         <main class="xz-state"><span class="xz-spinner"></span><p>正在读取行舟内部数据……</p></main>
     {:else if error}
@@ -1712,17 +2528,59 @@
                     {#if data.fields.currentAction}
                         <section
                             class:xz-action-card--editing={editingAction === "currentAction"}
+                            class:xz-action-card--drop={actionDragging === "currentAction"}
                             class="xz-action-card xz-action-card--primary xz-action-card--editable"
                             role="button"
                             tabindex="0"
                             on:click={() => startActionEditing("currentAction")}
                             on:keydown={(event) => handleActionCardKeydown(event, "currentAction")}
+                            on:dragover={(event) => handleActionDragOver(event, "currentAction")}
+                            on:dragleave={(event) => handleActionDragLeave(event, "currentAction")}
+                            on:drop={(event) => handleActionDrop(event, "currentAction")}
                         >
-                            <header><h3>{fieldLabel(selected)}</h3><span>{savingAction === "currentAction" ? "正在保存并复核…" : editingAction === "currentAction" ? "Esc 取消 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span></header>
+                            <header>
+                                <h3>{fieldLabel(selected)}</h3>
+                                <span class="xz-action-actions">
+                                    {#if selectedCleanupBadge}
+                                        <button class="xz-cleanup-badge" type="button" title="条目已结束，这些图片在宽限期后可以清理" on:mousedown|preventDefault on:click|stopPropagation={() => openCleanupPage()}>{selectedCleanupBadge}</button>
+                                    {/if}
+                                    <span>{savingAction === "currentAction" ? "正在保存并复核…" : editingAction === "currentAction" ? "Esc 取消 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span>
+                                </span>
+                            </header>
                             {#if editingAction === "currentAction"}
-                                <textarea use:focusOnMount use:autoResizeTextarea={detailDraft.currentAction} class="b3-text-field xz-action-editor" rows="6" aria-label={fieldLabel(selected)} value={detailDraft.currentAction} disabled={savingAction === "currentAction"} on:input={(event) => handleActionInput(event, "currentAction")} on:click|stopPropagation on:blur={() => void saveAction("currentAction")} on:keydown={(event) => handleActionKeydown(event, "currentAction")}></textarea>
+                                {#if actionDragging === "currentAction"}
+                                    <p class="xz-action-hint xz-action-hint--drop">松开即可插入图片</p>
+                                {:else}
+                                    <p class="xz-action-hint">可直接粘贴截图或拖入图片，图片按原分辨率存入思源资源库。</p>
+                                {/if}
+                            {/if}
+                            {#if editingAction === "currentAction"}
+                                <textarea use:focusOnMount use:autoResizeTextarea={detailDraft.currentAction} class="b3-text-field xz-action-editor" rows="6" aria-label={fieldLabel(selected)} value={detailDraft.currentAction} disabled={savingAction === "currentAction"} on:input={(event) => handleActionInput(event, "currentAction")} on:click|stopPropagation on:keyup={(event) => updateActionCursor(event, "currentAction")} on:select={(event) => updateActionCursor(event, "currentAction")} on:paste={(event) => handleActionPaste(event, "currentAction")} on:blur={() => void saveAction("currentAction")} on:keydown={(event) => handleActionKeydown(event, "currentAction")}></textarea>
+                                {#if currentActionImageRows.length > 0}
+                                    <div class="xz-action-images">
+                                        {#each currentActionImageRows as row (row.key)}
+                                            <div class="xz-action-images__item" class:xz-action-images__item--pending={row.status !== "done"} class:xz-action-images__item--failed={row.status === "failed"} title={row.error || row.label}>
+                                                {#if row.status === "done" && row.src}
+                                                    <img class="xz-action-thumb" src={row.src} alt={row.label} loading="lazy" />
+                                                {:else if row.status === "failed"}
+                                                    <span class="xz-action-images__state">上传失败</span>
+                                                {:else}
+                                                    <span class="xz-action-images__state"><i class="xz-spinner"></i>上传中…</span>
+                                                {/if}
+                                                <button class="xz-action-images__remove" type="button" aria-label={`移除图片 ${row.label}`} title="从细则中移除" on:mousedown|preventDefault on:click|stopPropagation={() => removeDraftImage("currentAction", row.syntax)}>×</button>
+                                                <small>{row.status === "failed" ? "重试请重新粘贴" : formatImageBytes(row.bytes ?? 0)}</small>
+                                            </div>
+                                        {/each}
+                                    </div>
+                                    <div class="xz-action-summary">
+                                        <span>🖼 {currentActionImageTotal} 张图</span>
+                                        {#if countActionImages(detailDraft.currentAction, (src) => src.startsWith("assets/")) > 0}<span class="is-pending">原分辨率</span>{/if}
+                                        <button type="button" on:mousedown|preventDefault on:click|stopPropagation={() => showMessage("直接粘贴截图，或把图片文件拖到这张卡片上", 4000)}>如何插入图片？</button>
+                                    </div>
+                                {/if}
                             {:else if selected.currentAction}
-                                <div class="xz-markdown-preview">{@html renderActionMarkdown(selected.currentAction)}</div>
+                                <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+                                <div class="xz-markdown-preview" on:click={(event) => handleActionImageClick(event, "currentAction")}>{@html renderActionMarkdown(selected.currentAction)}</div>
                             {:else}
                                 <p class="xz-action-empty">尚未填写。</p>
                             {/if}
@@ -1737,17 +2595,44 @@
                     {#if selectedProfile?.showNextAction}
                         <section
                             class:xz-action-card--editing={editingAction === "nextAction"}
+                            class:xz-action-card--drop={actionDragging === "nextAction"}
                             class="xz-action-card xz-action-card--editable"
                             role="button"
                             tabindex="0"
                             on:click={() => startActionEditing("nextAction")}
                             on:keydown={(event) => handleActionCardKeydown(event, "nextAction")}
+                            on:dragover={(event) => handleActionDragOver(event, "nextAction")}
+                            on:dragleave={(event) => handleActionDragLeave(event, "nextAction")}
+                            on:drop={(event) => handleActionDrop(event, "nextAction")}
                         >
                             <header><h3>下一步行动</h3><span>{savingAction === "nextAction" ? "正在保存并复核…" : editingAction === "nextAction" ? "Esc 取消 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span></header>
                             {#if editingAction === "nextAction"}
-                                <textarea use:focusOnMount use:autoResizeTextarea={detailDraft.nextAction} class="b3-text-field xz-action-editor" rows="4" aria-label="下一步行动" value={detailDraft.nextAction} disabled={savingAction === "nextAction"} on:input={(event) => handleActionInput(event, "nextAction")} on:click|stopPropagation on:blur={() => void saveAction("nextAction")} on:keydown={(event) => handleActionKeydown(event, "nextAction")}></textarea>
+                                {#if actionDragging === "nextAction"}
+                                    <p class="xz-action-hint xz-action-hint--drop">松开即可插入图片</p>
+                                {:else}
+                                    <p class="xz-action-hint">可直接粘贴截图或拖入图片，图片按原分辨率存入思源资源库。</p>
+                                {/if}
+                                <textarea use:focusOnMount use:autoResizeTextarea={detailDraft.nextAction} class="b3-text-field xz-action-editor" rows="4" aria-label="下一步行动" value={detailDraft.nextAction} disabled={savingAction === "nextAction"} on:input={(event) => handleActionInput(event, "nextAction")} on:click|stopPropagation on:keyup={(event) => updateActionCursor(event, "nextAction")} on:select={(event) => updateActionCursor(event, "nextAction")} on:paste={(event) => handleActionPaste(event, "nextAction")} on:blur={() => void saveAction("nextAction")} on:keydown={(event) => handleActionKeydown(event, "nextAction")}></textarea>
+                                {#if nextActionImageRows.length > 0}
+                                    <div class="xz-action-images">
+                                        {#each nextActionImageRows as row (row.key)}
+                                            <div class="xz-action-images__item" class:xz-action-images__item--pending={row.status !== "done"} class:xz-action-images__item--failed={row.status === "failed"} title={row.error || row.label}>
+                                                {#if row.status === "done" && row.src}
+                                                    <img class="xz-action-thumb" src={row.src} alt={row.label} loading="lazy" />
+                                                {:else if row.status === "failed"}
+                                                    <span class="xz-action-images__state">上传失败</span>
+                                                {:else}
+                                                    <span class="xz-action-images__state"><i class="xz-spinner"></i>上传中…</span>
+                                                {/if}
+                                                <button class="xz-action-images__remove" type="button" aria-label={`移除图片 ${row.label}`} title="从细则中移除" on:mousedown|preventDefault on:click|stopPropagation={() => removeDraftImage("nextAction", row.syntax)}>×</button>
+                                                <small>{row.status === "failed" ? "重试请重新粘贴" : formatImageBytes(row.bytes ?? 0)}</small>
+                                            </div>
+                                        {/each}
+                                    </div>
+                                {/if}
                             {:else if selected.nextAction}
-                                <div class="xz-markdown-preview">{@html renderActionMarkdown(selected.nextAction)}</div>
+                                <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+                                <div class="xz-markdown-preview" on:click={(event) => handleActionImageClick(event, "nextAction")}>{@html renderActionMarkdown(selected.nextAction)}</div>
                             {:else}
                                 <p class="xz-action-empty">尚未填写明确的下一步行动。</p>
                             {/if}

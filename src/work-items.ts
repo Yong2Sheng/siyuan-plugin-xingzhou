@@ -90,6 +90,7 @@ export type WorkItemChanges = Partial<Record<EditableWorkItemField, string | num
     completedDates?: string[];
     sliceTargetCount?: number | null;
     executionSlices?: ExecutionSlice[];
+    imageCleanup?: { startedAt: number; paths: string[] } | null;
 };
 
 export type WorkItem = {
@@ -112,6 +113,11 @@ export type WorkItem = {
     sliceTargetCount?: number | null;
     /** 事务的执行尝试。它们不是工作项，也不参与上下层关系。 */
     executionSlices?: ExecutionSlice[];
+    /**
+     * 条目进入终态后登记的图片待清理范围；null 或缺失表示没有待清理。
+     * 只记录当时引用的图片路径，之后新贴的图片不在范围内。
+     */
+    imageCleanup?: { startedAt: number; paths: string[] } | null;
     planDate: number | null;
     deadline: number | null;
     noDeadline: boolean;
@@ -132,7 +138,7 @@ export type WorkItemData = {
 };
 
 export type WorkItemViewState = {
-    page: "week" | "all" | "inbox" | "review" | "graph";
+    page: "week" | "all" | "inbox" | "review" | "graph" | "cleanup";
     filter: "all" | "active" | "future" | "closed";
     includeClosed: boolean;
     scope: "all" | string;

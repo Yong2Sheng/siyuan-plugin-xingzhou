@@ -5,7 +5,7 @@ import type { WorkItem, WorkItemViewState } from "./work-items";
 export const UI_STATE_FILE = "ui-state.json";
 export const UI_STATE_VERSION = 1;
 
-const PAGES = new Set(["week", "all", "inbox", "review", "graph"]);
+const PAGES = new Set(["week", "all", "inbox", "review", "graph", "cleanup"]);
 const FILTERS = new Set(["all", "active", "future", "closed"]);
 
 /**
