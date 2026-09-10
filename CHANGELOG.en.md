@@ -2,13 +2,12 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
-## Unreleased
+## 1.3.0 - 2026-09-09
 
 ### Added
 
 - The Execution Slice calendar and the Week page now show a "To do" duration: the total length of slices still scheduled (not yet finished) on that day. When everything committed for a day is done or finished early, the cell shows a green "To do 0 min" and the whole cell turns green, so it is obvious the day is free for other transactions; the original "Total X min · N slices" (scheduled + completed) stays beside it, and reading the two together rules out mistaking "To do" for free capacity.
 - The Execution Slice calendar header gained a summary row and a wording legend (outstanding total from today, committed total, and how many whole days are cleared), explaining that "To do = slices scheduled for that day that are not finished yet".
-
 - Reopening Xingzhou now restores the previous Projects & Tasks view state (page, filters, hierarchy expansion, selected transaction, and scroll position). If the previously selected item is completed or hidden, the selection falls back deterministically to the transaction with the most unfinished slices today (ties by tree order), otherwise to the first visible transaction in tree order.
 - Life Rhythm's morning Today Plan now shows a read-only hint: the “first action when work starts tomorrow” written in the previous evening's 21:00 review appears automatically the next morning for reference. The hint is not editable and stays hidden when the previous day's note is missing or empty.
 
