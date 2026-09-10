@@ -98,6 +98,7 @@ README 与 CHANGELOG 维护：
 
 - 面向用户的功能或行为变化，主动同步更新中文与英文 README、CHANGELOG；不影响用户可见行为的改动由我自行判断（通常只记 CHANGELOG 或都不记）。
 - 用户明确要求更新 README、CHANGELOG 或 Release Notes 时，必须更新。
+- 更新时机：测试全部通过后、准备推送时再更新 README/CHANGELOG；测试不通过时不更新文档，避免返工。
 
 用户明确要求“推送”时，先检查差异和验证结果，再创建内容明确的提交并推送 `main`。不要把无关的用户改动混入提交。
 
