@@ -14,6 +14,21 @@ describe("生活节律完整度检查", () => {
         ]);
         expect(empty.missing.map((item) => item.label)).toContain("是否安排专业学习");
         expect(empty.missing.map((item) => item.label)).not.toContain("今晚个人事务补充说明（可选）");
+        expect(empty.missing.map((item) => item.label)).not.toContain("今晚个人事务补充说明");
+    });
+
+    it("个人事务补充说明的决策只表示阶段已开始，不会成为必填项", () => {
+        const record = createDailyRecord("2026-09-04", "research-workday", 1000);
+        record.fields.hasPersonalProjectNote = "yes";
+        const decided = calculateDailyCompletion(record);
+        expect(decided.missing.map((item) => item.label)).not.toContain("今晚个人事务补充说明");
+        expect(decided.stages.find((stage) => stage.stage === "after-work")?.state).toBe("incomplete");
+
+        record.fields.hasPersonalProjectNote = "no";
+        record.fields.personalProjectNoteDraft = "先散步，再整理账目";
+        const skipped = calculateDailyCompletion(record);
+        expect(skipped.missing.map((item) => item.label)).not.toContain("今晚个人事务补充说明");
+        expect(skipped.stages.find((stage) => stage.stage === "after-work")?.state).toBe("incomplete");
     });
 
     it("根据条件判断动态加入或移除待补字段", () => {

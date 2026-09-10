@@ -1094,6 +1094,11 @@
 .xz-daily-lights-off-inline > .xz-daily-time-select { width: 100%; }
 .xz-daily-bedtime-note { box-sizing: border-box; min-height: 42px; display: flex; align-items: center; margin: 22px 0 0; padding: 8px 10px; border-left: 3px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; }
 .xz-daily-personal-project-row { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+/* 个人事务区：左列是「是否有补充说明」判断和它展开的输入框，右列是「今日个人安排」，避免触发控件与结果分离。 */
+.xz-daily-personal-decision { min-width: 0; display: grid; align-content: start; gap: 6px; }
+.xz-daily-personal-decision > label { min-width: 0; display: grid; align-content: start; gap: 6px; color: var(--xingzhou-muted); font-size: 14px; }
+.xz-daily-personal-decision + .xz-daily-project-picker, .xz-daily-personal-decision + .xz-daily-project-picker .xz-daily-project-note { min-width: 0; }
+.xz-daily-fields.two:has(> .xz-daily-personal-decision) > .xz-daily-field { grid-column: 1 / -1; }
 .xz-daily-project-picker { min-width: 0; display: grid; align-content: start; gap: 7px; color: var(--xingzhou-muted); font-size: 14px; }
 .xz-daily-project-picker__heading { min-height: 22px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .xz-daily-fields .xz-daily-project-note { grid-template-rows: 22px 76px; gap: 7px; }
@@ -1359,6 +1364,7 @@
     .xz-daily-flow-adjustments { order: 4; }
     .xz-daily-flow-training { order: 5; }
     .xz-daily-personal-project-row, .xz-daily-decision-pair, .xz-daily-lights-off-inline, .xz-daily-closure-bottom { grid-template-columns: 1fr; }
+    .xz-daily-fields.two:has(> .xz-daily-personal-decision) > .xz-daily-project-note > textarea { height: 88px; min-height: 88px; }
     .xz-daily-bedtime-note { margin-top: 0; }
     .xz-daily-history-row, .xz-daily-rubric-row, .xz-daily-timeline-row { grid-template-columns: 1fr 1fr; }
     .xz-slice-config, .xz-slice-progress-row { grid-template-columns: 1fr; }

@@ -39,7 +39,9 @@ export type DailyRecordFields = {
     trainingPlan: string;
     personalAffairsPlanned: PresenceState;
     personalProjectLinks: DailyWorkItemLink[];
+    hasPersonalProjectNote: PresenceState;
     personalProjectPlan: string;
+    personalProjectNoteDraft: string;
     restAndLifePlan: string;
     professionalStudyPlanned: PresenceState;
     studyMaterial: string;
@@ -266,7 +268,8 @@ function emptyDailyFields(): DailyRecordFields {
         hasMorningWeight: "", morningWeight: null, weightUnit: "kg", workStartTime: "",
         plannedWorkEndTime: "", importantWorkPlan: "", saturdayReviewOccurred: "", hasDayAdjustments: "", dayAdjustments: "", trainingPlan: "",
         personalAffairsPlanned: "", personalProjectLinks: [],
-        personalProjectPlan: "", restAndLifePlan: "", professionalStudyPlanned: "", studyMaterial: "", studyTopic: "", studyPlan: "",
+        hasPersonalProjectNote: "", personalProjectPlan: "", personalProjectNoteDraft: "",
+        restAndLifePlan: "", professionalStudyPlanned: "", studyMaterial: "", studyTopic: "", studyPlan: "",
         studyResult: "", actualWorkEndTime: "", keyWorkResult: "", trainingCompleted: "",
         importantWorkResult: "", personalProjectDurationMinutes: null, daytimeEnergy: null,
         workEfficiency: null, promotingStress: null, depletingStress: null, closureNeed: "", closureObject: "",
@@ -327,7 +330,7 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             studyResult: normalizedProfessionalStudy === "yes" ? textValue(fields.studyResult) : "",
             personalAffairsPlanned: normalizedPersonalAffairsPlanned,
             personalProjectLinks: source.dayType === "conference-day" && normalizedPersonalAffairsPlanned !== "yes" ? [] : normalizedPersonalProjectLinks,
-            personalProjectPlan: source.dayType === "conference-day" && normalizedPersonalAffairsPlanned !== "yes" ? "" : textValue(fields.personalProjectPlan),
+            ...personalProjectNoteFields(fields, source.dayType, normalizedPersonalAffairsPlanned),
             personalProjectDurationMinutes: source.dayType === "conference-day" && normalizedPersonalAffairsPlanned !== "yes" ? null : nullableNonnegativeNumber(fields.personalProjectDurationMinutes),
             daytimeEnergy: nullableScore(fields.daytimeEnergy),
             workEfficiency: nullableScore(fields.workEfficiency),
@@ -353,7 +356,7 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
 function stringFields(fields: Partial<DailyRecordFields>): Partial<DailyRecordFields> {
     const keys: Array<keyof DailyRecordFields> = [
         "lightsOffTime", "wakeTime", "lightsOffAt", "wakeAt", "workStartTime", "plannedWorkEndTime", "importantWorkPlan", "dayAdjustments",
-        "trainingPlan", "personalProjectPlan", "restAndLifePlan", "studyMaterial", "studyTopic", "studyPlan", "studyResult",
+        "trainingPlan", "personalProjectPlan", "personalProjectNoteDraft", "restAndLifePlan", "studyMaterial", "studyTopic", "studyPlan", "studyResult",
         "actualWorkEndTime", "importantWorkResult", "closureObject", "closureNextStep", "personalLifeResult", "bestThing",
         "obstacleOrCost", "afterHoursWorkReason", "tomorrowFirstAction", "anomalyOrObservation", "plannedLightsOffTime", "plannedLightsOffAt",
     ];
@@ -423,6 +426,27 @@ function personalAffairsState(fields: Partial<DailyRecordFields>, dayType: Daily
     if (dayType !== "conference-day") return "";
     if (fields.personalAffairsPlanned === "yes" || fields.personalAffairsPlanned === "no") return fields.personalAffairsPlanned;
     return links.length > 0 || Boolean(textValue(fields.personalProjectPlan).trim()) || nullableNonnegativeNumber(fields.personalProjectDurationMinutes) !== null ? "yes" : "";
+}
+
+/**
+ * 个人事务补充说明是条件字段：先用“是否有补充说明”做一次是／否判断，选“否”时正文清空但不销毁。
+ * 选“否”时已写内容移入 personalProjectNoteDraft，改回“是”即可恢复；因此草稿只在选“否”时保留。
+ */
+function personalProjectNoteFields(fields: Partial<DailyRecordFields>, dayType: DailyDayType, personalAffairsPlanned: PresenceState): Pick<DailyRecordFields, "hasPersonalProjectNote" | "personalProjectPlan" | "personalProjectNoteDraft"> {
+    const plan = textValue(fields.personalProjectPlan);
+    if (dayType === "conference-day" && personalAffairsPlanned !== "yes") {
+        return { hasPersonalProjectNote: "", personalProjectPlan: "", personalProjectNoteDraft: "" };
+    }
+    if (fields.hasPersonalProjectNote === "yes" || fields.hasPersonalProjectNote === "no") {
+        return fields.hasPersonalProjectNote === "yes"
+            ? { hasPersonalProjectNote: "yes", personalProjectPlan: plan, personalProjectNoteDraft: "" }
+            : { hasPersonalProjectNote: "no", personalProjectPlan: "", personalProjectNoteDraft: plan || textValue(fields.personalProjectNoteDraft) };
+    }
+    // 已发布的数据没有这个决策字段：有正文时推断为“是”，让老记录的文字继续可见、可编辑。
+    const legacyNote = presenceState(fields.hasPersonalProjectNote, plan);
+    return legacyNote === "yes"
+        ? { hasPersonalProjectNote: "yes", personalProjectPlan: plan, personalProjectNoteDraft: "" }
+        : { hasPersonalProjectNote: "", personalProjectPlan: plan, personalProjectNoteDraft: "" };
 }
 
 function saturdayReviewOccurred(fields: Partial<DailyRecordFields>, dayType: DailyDayType): PresenceState {

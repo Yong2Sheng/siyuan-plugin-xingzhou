@@ -10,6 +10,7 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - The Execution Slice calendar header gained a summary row and a wording legend (outstanding total from today, committed total, and how many whole days are cleared), explaining that "To do = slices scheduled for that day that are not finished yet".
 - Reopening Xingzhou now restores the previous Projects & Tasks view state (page, filters, hierarchy expansion, selected transaction, and scroll position). If the previously selected item is completed or hidden, the selection falls back deterministically to the transaction with the most unfinished slices today (ties by tree order), otherwise to the first visible transaction in tree order.
 - Life Rhythm's morning Today Plan now shows a read-only hint: the “first action when work starts tomorrow” written in the previous evening's 21:00 review appears automatically the next morning for reference. The hint is not editable and stays hidden when the previous day's note is missing or empty.
+- Life Rhythm's personal-task note now asks Yes/No first: the text box appears only for Yes, and choosing No collapses it without holding any height. The same decision applies in all four places: research workday / Sunday half-day, Saturday, holiday, and Conference Day after the meeting.
 
 ### Changed
 
@@ -21,6 +22,7 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - The Life Rhythm top toolbar is now left-aligned: the date navigation and the six view-switcher buttons sit side by side on the left with blank space on the right, reducing pointer travel on wide screens. Narrow screens still stack them vertically.
 - Compressed the Transaction Execution Slices card vertically: the header now fits on one line (the “slices are not work items” note moved into an ⓘ hover hint), and the completion percentage sits on the same row as the progress bar and the planning summary, wasting no space on small screens.
 - The Target Slice Count label now states the 366 input cap, making it clear that a single transaction can hold at most 366 slices.
+- Reworked the personal-task area into a left column holding the decision plus the box it opens, and a right column holding today's personal schedule, so the Yes/No selector and its text box sit directly above and below each other instead of one spanning the row and the other landing at the bottom right. Choosing No saves an empty note but keeps the text as a draft that comes back when Yes is chosen again, and notes already stored by earlier versions are recognized as Yes so they are never hidden.
 
 ## 1.2.0 - 2026-09-08
 

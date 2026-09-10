@@ -286,10 +286,33 @@
         draft.fields.personalAffairsPlanned = value as PresenceState;
         if (value !== "yes") {
             draft.fields.personalProjectLinks = [];
+            draft.fields.hasPersonalProjectNote = "";
             draft.fields.personalProjectPlan = "";
+            draft.fields.personalProjectNoteDraft = "";
             draft.fields.personalProjectDurationMinutes = null;
             draft.fields.personalLifeResult = "";
         }
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    /**
+     * 补充说明先做一次是／否判断：选“否”时正文清空但不销毁，改回“是”即可恢复。
+     * 正文存 personalProjectPlan，暂存内容存 personalProjectNoteDraft（只在选“否”时保留）。
+     */
+    function changeHasPersonalProjectNote(value: string) {
+        const allowed: PresenceState[] = ["", "yes", "no"];
+        if (!allowed.includes(value as PresenceState)) return;
+        if (value === "no") {
+            draft.fields.personalProjectNoteDraft = draft.fields.personalProjectPlan || draft.fields.personalProjectNoteDraft;
+            draft.fields.personalProjectPlan = "";
+        } else if (value === "yes") {
+            draft.fields.personalProjectPlan = draft.fields.personalProjectPlan || draft.fields.personalProjectNoteDraft;
+            draft.fields.personalProjectNoteDraft = "";
+        } else {
+            draft.fields.personalProjectNoteDraft = "";
+        }
+        draft.fields.hasPersonalProjectNote = value as PresenceState;
         draft = { ...draft, fields: { ...draft.fields } };
         markDirty();
     }
@@ -761,10 +784,17 @@
                             </div>
                             {#if draft.fields.personalAffairsPlanned === "yes"}
                                 <div class="xz-daily-fields two xz-daily-closure-details">
-                                    <div class="xz-daily-personal-project-row">
-                                        <DailyWorkItemPicker data={workItems} date={currentDate} loading={workItemsLoading} error={workItemsError} {saveWorkItem} {openWorkItem} on:change={applyWorkItemChange} />
-                                        <label class="xz-daily-project-note"><span>会后个人事务补充说明（可选）</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder="可补充会议结束后准备如何安排个人事务"></textarea></label>
+                                    <div class="xz-daily-personal-decision">
+                                        <label><span>会后是否有个人事务补充说明</span><select value={draft.fields.hasPersonalProjectNote} on:change|stopPropagation={(event) => changeHasPersonalProjectNote(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
+                                        {#if draft.fields.hasPersonalProjectNote === "yes"}
+                                            <label class="xz-daily-project-note"><span>会后个人事务补充说明</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder="可补充会议结束后准备如何安排个人事务"></textarea></label>
+                                        {:else if draft.fields.hasPersonalProjectNote === "no"}
+                                            <p class="xz-daily-closure-note">已选择“否”，不写补充说明；会议结束后的安排仍以上方“今日个人安排”为准。</p>
+                                        {:else}
+                                            <p class="xz-daily-closure-note">先确认是否需要补充说明，再决定是否填写。</p>
+                                        {/if}
                                     </div>
+                                    <DailyWorkItemPicker data={workItems} date={currentDate} loading={workItemsLoading} error={workItemsError} {saveWorkItem} {openWorkItem} on:change={applyWorkItemChange} />
                                     <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
                                 </div>
                             {:else if draft.fields.personalAffairsPlanned === "no"}
@@ -774,10 +804,17 @@
                             {/if}
                         {:else}
                             <div class="xz-daily-fields two">
-                                <div class="xz-daily-personal-project-row">
-                                    <DailyWorkItemPicker data={workItems} date={currentDate} loading={workItemsLoading} error={workItemsError} {saveWorkItem} {openWorkItem} on:change={applyWorkItemChange} />
-                                    <label class="xz-daily-project-note"><span>{isSaturdayReset ? "今日个人事务补充说明（可选）" : "今晚个人事务补充说明（可选）"}</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder={isSaturdayReset ? "可补充今天准备如何休息或推进兴趣事务" : "可补充今晚准备如何推进这些个人事务"}></textarea></label>
+                                <div class="xz-daily-personal-decision">
+                                    <label><span>{isSaturdayReset ? "今日是否有个人事务补充说明" : "今晚是否有个人事务补充说明"}</span><select value={draft.fields.hasPersonalProjectNote} on:change|stopPropagation={(event) => changeHasPersonalProjectNote(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
+                                    {#if draft.fields.hasPersonalProjectNote === "yes"}
+                                        <label class="xz-daily-project-note"><span>{isSaturdayReset ? "今日个人事务补充说明" : "今晚个人事务补充说明"}</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder={isSaturdayReset ? "可补充今天准备如何休息或推进兴趣事务" : "可补充今晚准备如何推进这些个人事务"}></textarea></label>
+                                    {:else if draft.fields.hasPersonalProjectNote === "no"}
+                                        <p class="xz-daily-closure-note">已选择“否”，不写补充说明；{isSaturdayReset ? "今天" : "今晚"}的安排仍以上方“今日个人安排”为准。</p>
+                                    {:else}
+                                        <p class="xz-daily-closure-note">先确认是否需要补充说明，再决定是否填写。</p>
+                                    {/if}
                                 </div>
+                                <DailyWorkItemPicker data={workItems} date={currentDate} loading={workItemsLoading} error={workItemsError} {saveWorkItem} {openWorkItem} on:change={applyWorkItemChange} />
                                 <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
                             </div>
                         {/if}
@@ -788,18 +825,25 @@
                     <section class="xz-daily-form-section">
                         <h3>恢复与生活</h3>
                         <div class="xz-daily-fields two">
-                            <div class="xz-daily-personal-project-row">
-                                <DailyWorkItemPicker
-                                    data={workItems}
-                                    date={currentDate}
-                                    loading={workItemsLoading}
-                                    error={workItemsError}
-                                    {saveWorkItem}
-                                    {openWorkItem}
-                                    on:change={applyWorkItemChange}
-                                />
-                                <label class="xz-daily-project-note"><span>今日个人事务补充说明（可选）</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder="可补充今天准备如何推进这些个人事务"></textarea></label>
+                            <div class="xz-daily-personal-decision">
+                                <label><span>今日是否有个人事务补充说明</span><select value={draft.fields.hasPersonalProjectNote} on:change|stopPropagation={(event) => changeHasPersonalProjectNote(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
+                                {#if draft.fields.hasPersonalProjectNote === "yes"}
+                                    <label class="xz-daily-project-note"><span>今日个人事务补充说明</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder="可补充今天准备如何推进这些个人事务"></textarea></label>
+                                {:else if draft.fields.hasPersonalProjectNote === "no"}
+                                    <p class="xz-daily-closure-note">已选择“否”，不写补充说明；今天的安排仍以上方“今日个人安排”为准。</p>
+                                {:else}
+                                    <p class="xz-daily-closure-note">先确认是否需要补充说明，再决定是否填写。</p>
+                                {/if}
                             </div>
+                            <DailyWorkItemPicker
+                                data={workItems}
+                                date={currentDate}
+                                loading={workItemsLoading}
+                                error={workItemsError}
+                                {saveWorkItem}
+                                {openWorkItem}
+                                on:change={applyWorkItemChange}
+                            />
                             <ScoreInput bind:value={draft.fields.daytimeEnergy} rubric={rubricById.daytimeEnergy} on:inspect={inspectRubric} on:change={markDirty} />
                             <label><span>今天的个人生活或兴趣项目结果</span><textarea bind:value={draft.fields.personalLifeResult}></textarea></label>
                             <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>

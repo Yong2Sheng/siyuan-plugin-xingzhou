@@ -324,9 +324,59 @@ describe("行舟一级模块外壳", () => {
         clickButton("下班后");
         await vi.waitFor(() => expect(document.body.textContent).toContain("下班后工作闭环（按需）"));
         expect(document.querySelector(".xz-daily-project-picker")).not.toBeNull();
-        expect(document.body.textContent).toContain("今晚个人事务补充说明（可选）");
+        expect([...document.querySelectorAll("label")].some((label) => label.textContent?.includes("今晚是否有个人事务补充说明"))).toBe(true);
         expect(document.querySelector('[aria-label="个人项目实际时长小时"]')).not.toBeNull();
         expect([...document.querySelectorAll("label")].some((label) => label.textContent?.includes("完成训练"))).toBe(false);
+    });
+
+    it("个人事务补充说明先判断是／否，选“否”收起输入框但改回“是”能恢复文字", async () => {
+        let store = researchDailyStore();
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
+        clickButton("下班后");
+        await vi.waitFor(() => expect(document.body.textContent).toContain("下班后个人安排"));
+
+        const decision = [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("今晚是否有个人事务补充说明"))
+            ?.querySelector("select") as HTMLSelectElement | undefined;
+        if (!decision) throw new Error("没有找到个人事务补充说明判断选择框");
+        const noteTextarea = () => [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("今晚个人事务补充说明"))
+            ?.querySelector("textarea") as HTMLTextAreaElement | undefined;
+        expect(noteTextarea()).toBeUndefined();
+        expect(decision.closest(".xz-daily-personal-decision")?.nextElementSibling?.classList.contains("xz-daily-project-picker")).toBe(true);
+
+        decision.value = "yes";
+        decision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        const note = noteTextarea();
+        if (!note) throw new Error("选择是后没有显示补充说明输入框");
+        note.value = "先散步 30 分钟，再整理家庭账目。";
+        note.dispatchEvent(new Event("input", { bubbles: true }));
+
+        decision.value = "no";
+        decision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(noteTextarea()).toBeUndefined();
+        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalledTimes(1), { timeout: 2000 });
+        expect(saveDaily.mock.calls[0][0].fields).toMatchObject({
+            hasPersonalProjectNote: "no",
+            personalProjectPlan: "",
+            personalProjectNoteDraft: "先散步 30 分钟，再整理家庭账目。",
+        });
+
+        decision.value = "yes";
+        decision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(noteTextarea()?.value).toBe("先散步 30 分钟，再整理家庭账目。");
+        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalledTimes(2), { timeout: 2000 });
+        expect(saveDaily.mock.calls[1][0].fields).toMatchObject({
+            hasPersonalProjectNote: "yes",
+            personalProjectPlan: "先散步 30 分钟，再整理家庭账目。",
+            personalProjectNoteDraft: "",
+        });
     });
 
     it("先确认午饭后是否安排专业学习，再按需显示输入框", async () => {
