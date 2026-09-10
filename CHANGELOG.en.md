@@ -6,6 +6,7 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 
 ### Added
 
+- Reopening Xingzhou now restores the previous Projects & Tasks view state (page, filters, hierarchy expansion, selected transaction, and scroll position). If the previously selected item is completed or hidden, the selection falls back deterministically to the transaction with the most unfinished slices today (ties by tree order), otherwise to the first visible transaction in tree order.
 - Life Rhythm's morning Today Plan now shows a read-only hint: the “first action when work starts tomorrow” written in the previous evening's 21:00 review appears automatically the next morning for reference. The hint is not editable and stays hidden when the previous day's note is missing or empty.
 
 ### Changed

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import AppShell from "../src/AppShell.svelte";
 import DailyRhythm from "../src/DailyRhythm.svelte";
 import { createDailyRecord, createEmptyDailyStore, upsertDailyRecord, type DailyRecord } from "../src/daily-records";
-import type { WorkItem, WorkItemData } from "../src/work-items";
+import type { WorkItem, WorkItemData, WorkItemViewState } from "../src/work-items";
 
 function researchDailyStore() {
     const now = new Date();
@@ -62,6 +62,115 @@ describe("行舟一级模块外壳", () => {
         await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="action-1"] > .xz-tree-row')?.classList.contains("selected")).toBe(true));
         expect(document.querySelector('[data-work-item-id="domain-1"]')).not.toBeNull();
         expect(document.querySelector(".xz-scope-button.active")).toBeNull();
+    });
+
+    it("打开时恢复上次保存的视图状态（选中事务与展开）", async () => {
+        const workData = sampleWorkItemData(sampleWorkItems());
+        const properties = {
+            ...props(),
+            load: vi.fn().mockResolvedValue(workData),
+            loadProjectViewState: vi.fn().mockResolvedValue({
+                page: "all",
+                filter: "all",
+                includeClosed: false,
+                scope: "all",
+                selectedId: "action-1",
+                expandedIds: ["domain-1", "project-1"],
+                weekStart: Date.now(),
+                sidebarScrollTop: 0,
+                treeScrollTop: 0,
+                detailScrollTop: 0,
+            }),
+            saveProjectViewState: vi.fn().mockResolvedValue(undefined),
+        };
+        component = new AppShell({ target: document.body, props: properties });
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="action-1"] > .xz-tree-row')?.classList.contains("selected")).toBe(true));
+        expect(document.querySelector('[data-work-item-id="project-1"]')).not.toBeNull();
+
+        clickButton("生活节律");
+        await vi.waitFor(() => expect(properties.saveProjectViewState).toHaveBeenCalled());
+    });
+
+    it("上次选中的事务已完成时，回落到当前可见事务", async () => {
+        const workData = sampleWorkItemData(sampleWorkItems());
+        const properties = {
+            ...props(),
+            load: vi.fn().mockResolvedValue(workData),
+            loadProjectViewState: vi.fn().mockResolvedValue({
+                page: "all",
+                filter: "all",
+                includeClosed: false,
+                scope: "all",
+                selectedId: "closed-1",
+                expandedIds: ["domain-1", "project-1"],
+                weekStart: Date.now(),
+                sidebarScrollTop: 0,
+                treeScrollTop: 0,
+                detailScrollTop: 0,
+            }),
+            saveProjectViewState: vi.fn().mockResolvedValue(undefined),
+        };
+        component = new AppShell({ target: document.body, props: properties });
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="action-1"] > .xz-tree-row')?.classList.contains("selected")).toBe(true));
+        expect(document.querySelector('[data-work-item-id="closed-1"] > .xz-tree-row')?.classList.contains("selected") ?? false).toBe(false);
+    });
+
+    it("无历史状态的新会话也会保存视图状态（供下次打开恢复）", async () => {
+        const workData = sampleWorkItemData(sampleWorkItems());
+        const saveProjectViewState = vi.fn().mockResolvedValue(undefined);
+        const properties = {
+            ...props(),
+            load: vi.fn().mockResolvedValue(workData),
+            loadProjectViewState: vi.fn().mockResolvedValue(null),
+            saveProjectViewState,
+        };
+        component = new AppShell({ target: document.body, props: properties });
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="action-1"] > .xz-tree-row')).not.toBeNull());
+
+        (document.querySelector('[data-work-item-id="action-1"] .xz-tree-main') as HTMLButtonElement).click();
+        await vi.waitFor(() => expect(saveProjectViewState.mock.calls.map((call) => call[0]?.selectedId)).toContain("action-1"));
+    });
+
+    it("点选事务后立即销毁（关闭页签），重开恢复到刚选中的事务", async () => {
+        const workData = sampleWorkItemData(sampleWorkItems());
+        let saved: WorkItemViewState | null = null;
+        const loadProjectViewState = vi.fn(async () => saved);
+        const saveProjectViewState = vi.fn(async (state: WorkItemViewState) => {
+            saved = state;
+        });
+        const makeProps = () => ({
+            ...props(),
+            load: vi.fn().mockResolvedValue(workData),
+            loadProjectViewState,
+            saveProjectViewState,
+        });
+
+        component = new AppShell({ target: document.body, props: makeProps() });
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="action-1"] > .xz-tree-row')).not.toBeNull());
+        (document.querySelector('[data-work-item-id="action-1"] .xz-tree-main') as HTMLButtonElement).click();
+        component.$destroy();
+        await vi.waitFor(() => expect(saved?.selectedId).toBe("action-1"));
+
+        document.body.replaceChildren();
+        component = new AppShell({ target: document.body, props: makeProps() });
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="action-1"] > .xz-tree-row')?.classList.contains("selected")).toBe(true));
+    });
+
+    it("组件销毁时立即保存当前视图状态（关闭页签路径）", async () => {
+        const workData = sampleWorkItemData(sampleWorkItems());
+        const saveProjectViewState = vi.fn().mockResolvedValue(undefined);
+        const properties = {
+            ...props(),
+            load: vi.fn().mockResolvedValue(workData),
+            loadProjectViewState: vi.fn().mockResolvedValue(null),
+            saveProjectViewState,
+        };
+        component = new AppShell({ target: document.body, props: properties });
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="action-1"] > .xz-tree-row')).not.toBeNull());
+
+        (document.querySelector('[data-work-item-id="action-1"] .xz-tree-main') as HTMLButtonElement).click();
+        component.$destroy();
+        expect(saveProjectViewState.mock.calls.map((call) => call[0]?.selectedId)).toContain("action-1");
     });
 
     it("休假模式隐藏科研字段，并保留生活与恢复输入", async () => {

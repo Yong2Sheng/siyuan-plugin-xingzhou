@@ -1,10 +1,11 @@
 <script lang="ts">
-    import { onMount, tick } from "svelte";
+    import { onDestroy, onMount, tick } from "svelte";
     import type { CaptureDialogMode, CaptureDialogRequest, CaptureDialogValues } from "./capture-dialog";
     import { prerequisiteIds, validateDependencyUpdate, type DependencyKind } from "./dependencies";
     import { continueMarkdownList, normalizeMarkdownOrderedLists } from "./markdown-editor";
     import { renderActionMarkdown } from "./markdown-renderer";
     import ExecutionSlicePlanner from "./ExecutionSlicePlanner.svelte";
+    import { pickFallbackTransaction } from "./ui-state";
     import {
         availableSliceCount,
         automaticStatusForSliceCompletion,
@@ -49,6 +50,8 @@
     export let embedded = false;
     export let initialWorkItemId: string | null = null;
     export let initialViewState: WorkItemViewState | null = null;
+    export let saveViewState: ((state: WorkItemViewState) => Promise<void> | void) | null = null;
+    export let loadSavedViewState: (() => Promise<WorkItemViewState | null>) | null = null;
 
     type MainPage = "week" | "all" | "review" | "graph";
     type ItemFilter = "all" | "active" | "future" | "closed";
@@ -143,6 +146,34 @@
             detailScrollTop: detailElement?.scrollTop ?? 0,
         };
     }
+
+    /** 数据就绪后即武装保存（与是否有历史状态无关）；状态一变立即写入，避免“点击后立刻关页签”丢失。 */
+    function scheduleViewStateSave() {
+        if (!data || !saveViewState) return;
+        saveViewState?.(getViewState());
+    }
+
+    function flushViewState() {
+        if (data) saveViewState?.(getViewState());
+    }
+
+    $: { data; page; filter; includeClosed; scope; selectedId; expandedIds; weekStart; scheduleViewStateSave(); }
+
+    onDestroy(() => flushViewState());
+
+    function revealRestoredItem(item: WorkItem | undefined) {
+        if (!item) return;
+        selectedId = item.id;
+        const next = new Set(expandedIds);
+        const seen = new Set<string>();
+        let parentId: string | undefined = item.parentIds[0];
+        while (parentId && !seen.has(parentId)) {
+            seen.add(parentId);
+            next.add(parentId);
+            parentId = tree.byId.get(parentId)?.parentIds[0];
+        }
+        expandedIds = next;
+    }
     $: todayFocusCounts = getTodayFocusCounts(data?.items ?? [], tree);
     $: selectedProfile = selected ? getWorkItemProfile(selected, tree) : null;
     $: deleteDescendantCount = deleteTarget ? Math.max(0, collectDescendantIds(deleteTarget.id, tree).size - 1) : 0;
@@ -178,7 +209,10 @@
         visibleRoots = getVisibleRoots();
     }
     $: if (page === "all" && data && selectedId && !visibleIds.has(selectedId)) {
-        selectedId = data.items.find((item) => visibleIds.has(item.id))?.id ?? null;
+        // 选中项不可见（已完成/删除/筛选）时的确定性回落：今日未完成切片最多 → 树显示顺序第一个
+        const fallbackId = pickFallbackTransaction(data.items, tree, visibleIds);
+        if (fallbackId) revealRestoredItem(tree.byId.get(fallbackId));
+        else selectedId = null;
     }
     $: parent = selected?.parentIds[0] ? tree.byId.get(selected.parentIds[0]) ?? null : null;
     $: derivedTopProjectId = selected ? deriveTopProjectId(selected.parentIds[0] ?? "", tree) : "";
@@ -233,6 +267,10 @@
         loading = true;
         error = "";
         try {
+            if (!appliedInitialViewState && !initialViewState && loadSavedViewState) {
+                const saved = await loadSavedViewState();
+                if (saved && !initialViewState) initialViewState = saved;
+            }
             const loaded = await load();
             applyData(loaded);
             try {

@@ -51,7 +51,8 @@ import {
     parseNutritionStore,
     type NutritionStore,
 } from "./nutrition";
-import { loadWorkItems, type InboxCaptureOptions, type WorkItem, type WorkItemChanges, type WorkItemData } from "./work-items";
+import { loadWorkItems, type InboxCaptureOptions, type WorkItem, type WorkItemChanges, type WorkItemData, type WorkItemViewState } from "./work-items";
+import { UI_STATE_FILE, parseViewStateFile, wrapViewStateFile } from "./ui-state";
 import "./index.scss";
 
 const SETTINGS_FILE = "settings.json";
@@ -83,6 +84,7 @@ export default class XingzhouPlugin extends Plugin {
     private stopped = false;
     private settingsReady: Promise<void> = Promise.resolve();
     private mutationQueue: Promise<void> = Promise.resolve();
+    private viewStateSaveQueue: Promise<void> = Promise.resolve();
 
     onload(): void {
         this.addIcons(ICON);
@@ -133,6 +135,8 @@ export default class XingzhouPlugin extends Plugin {
 
                 try {
                     mount.textContent = "";
+                    const previous = plugin.instances.get(this);
+                    if (previous) previous.component.$destroy();
                     const component = new AppShell({
                         target: mount,
                         props: {
@@ -188,6 +192,8 @@ export default class XingzhouPlugin extends Plugin {
                             saveChecklist: (store: ChecklistStore) => plugin.saveChecklistStore(store),
                             loadNutrition: () => plugin.getNutritionSnapshot(),
                             saveNutrition: (store: NutritionStore) => plugin.saveNutritionStore(store),
+                            loadProjectViewState: () => plugin.loadProjectViewState(),
+                            saveProjectViewState: (state: WorkItemViewState) => plugin.saveProjectViewState(state),
                         },
                     });
                     plugin.instances.set(this, { component, mount });
@@ -196,6 +202,11 @@ export default class XingzhouPlugin extends Plugin {
                     console.error("行舟界面挂载失败。", error);
                     renderMountError(mount, error);
                 }
+            },
+            beforeDestroy(this: Custom) {
+                plugin.instances.get(this)?.component.$destroy();
+                plugin.instances.delete(this);
+                if (plugin.currentTab === this.tab) plugin.currentTab = undefined;
             },
             destroy(this: Custom) {
                 plugin.instances.get(this)?.component.$destroy();
@@ -583,6 +594,29 @@ export default class XingzhouPlugin extends Plugin {
             console.warn("行舟设置读取失败，将使用默认的旧数据导入来源。", error);
             this.settings = { ...DEFAULT_SETTINGS };
         }
+    }
+
+    /** 项目视图状态（非关键 UI 数据）：损坏/缺失时返回 null，由界面回落默认。 */
+    private async loadProjectViewState(): Promise<WorkItemViewState | null> {
+        try {
+            // 等待挂起中的保存完成，避免“关闭页签→立即重开”时读到旧文件
+            await this.viewStateSaveQueue;
+            const raw: unknown = await this.loadData(UI_STATE_FILE);
+            return parseViewStateFile(raw);
+        } catch {
+            return null;
+        }
+    }
+
+    private async saveProjectViewState(state: WorkItemViewState): Promise<void> {
+        this.viewStateSaveQueue = this.viewStateSaveQueue.then(async () => {
+            try {
+                await this.saveData(UI_STATE_FILE, wrapViewStateFile(state));
+            } catch {
+                // UI 状态非关键数据，保存失败不影响其他功能
+            }
+        }).catch(() => undefined);
+        return this.viewStateSaveQueue;
     }
 }
 

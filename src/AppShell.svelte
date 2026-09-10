@@ -35,6 +35,8 @@
     let projectQuickCaptureNotice = "";
     let initialWorkItemId: string | null = null;
     let projectViewState: WorkItemViewState | null = null;
+    export let loadProjectViewState: () => Promise<WorkItemViewState | null> = async () => null;
+    export let saveProjectViewState: (state: WorkItemViewState) => Promise<void> = async () => undefined;
 
     async function changeModule(next: "projects" | "rhythm", workItemId: string | null = null) {
         if (next === module && !workItemId) return;
@@ -42,6 +44,7 @@
         if (module === "projects" && next === "rhythm") {
             projectViewState = projectApp?.getViewState() ?? projectViewState;
             initialWorkItemId = null;
+            if (projectViewState) void saveProjectViewState(projectViewState);
         }
         if (workItemId) initialWorkItemId = workItemId;
         module = next;
@@ -86,6 +89,8 @@
                 {openDocument}
                 {initialWorkItemId}
                 initialViewState={projectViewState}
+                loadSavedViewState={loadProjectViewState}
+                saveViewState={(state) => void saveProjectViewState(state)}
             />
         {:else}
             <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} {loadChecklist} {saveChecklist} {loadNutrition} {saveNutrition} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
