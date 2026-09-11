@@ -150,6 +150,119 @@ describe("执行切片配置", () => {
         ]));
     });
 
+    it("点已完成的格子就撤销：今天退回已安排，过去退回未完成", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const saveUndo = vi.fn().mockResolvedValue(undefined);
+        const todayKey = localDateKey();
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayKey = keyOf(yesterday);
+        const current = transaction({
+            sliceTargetCount: 2,
+            executionSlices: [
+                { id: "past-done", scheduledDate: yesterdayKey, status: "completed", completedAt: 1, updatedAt: 1 },
+                { id: "today-done", scheduledDate: todayKey, status: "completed", completedAt: 2, updatedAt: 2 },
+            ],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: current, save, saveUndo } });
+        await tick();
+
+        const past = dayCell(yesterdayKey);
+        const today = dayCell(todayKey);
+        expect(past.disabled).toBe(false);
+        expect(today.disabled).toBe(false);
+        expect(today.getAttribute("title")).toBe("点击撤销这次完成");
+
+        past.click();
+        await vi.waitFor(() => expect(saveUndo).toHaveBeenCalledOnce());
+        expect(saveUndo.mock.calls[0][0].executionSlices).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: "past-done", status: "missed", completedAt: null }),
+        ]));
+        expect(save).not.toHaveBeenCalled();
+
+        today.click();
+        await vi.waitFor(() => expect(saveUndo).toHaveBeenCalledTimes(2));
+        expect(saveUndo.mock.calls[1][0].executionSlices).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: "today-done", status: "scheduled", completedAt: null }),
+        ]));
+    });
+
+    it("右键已完成的切片给出撤销菜单，撤销同样走 saveUndo", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const saveUndo = vi.fn().mockResolvedValue(undefined);
+        const todayKey = localDateKey();
+        const current = transaction({
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "done", scheduledDate: todayKey, status: "completed", completedAt: 1, updatedAt: 1 }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: current, save, saveUndo } });
+        await tick();
+
+        dayCell(todayKey).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        const item = document.querySelector<HTMLButtonElement>(".xz-slice-context-menu button");
+        expect(item?.textContent).toBe("撤销完成此切片");
+        expect(item?.className).toContain("is-undo");
+        expect(document.querySelector(".xz-slice-context-menu small")?.textContent).toContain("退回「已安排」");
+
+        item?.click();
+        await vi.waitFor(() => expect(saveUndo).toHaveBeenCalledOnce());
+        expect(saveUndo.mock.calls[0][0].executionSlices).toEqual([
+            expect.objectContaining({ id: "done", status: "scheduled", completedAt: null }),
+        ]);
+    });
+
+    it("已放弃的切片保持只读：点不动、右键也没有菜单", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const saveUndo = vi.fn().mockResolvedValue(undefined);
+        const { past: pastKey } = await monthKeys();
+        const abandoned = transaction({
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "given-up", scheduledDate: pastKey, status: "abandoned", completedAt: null, updatedAt: 1 }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: abandoned, save, saveUndo } });
+        await tick();
+
+        const cell = dayCell(pastKey);
+        expect(cell.disabled).toBe(true);
+        cell.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        expect(document.querySelector(".xz-slice-context-menu")).toBeNull();
+        cell.click();
+        await tick();
+        expect(save).not.toHaveBeenCalled();
+        expect(saveUndo).not.toHaveBeenCalled();
+    });
+
+    it("今天格显示「今」角标，其它格子没有", async () => {
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: transaction({ sliceTargetCount: 1 }) } });
+        await tick();
+
+        const today = document.querySelector(".xz-slice-day.today");
+        expect(today?.querySelector(".xz-slice-day-today-chip")?.textContent).toBe("今");
+        expect(document.querySelectorAll(".xz-slice-day-today-chip")).toHaveLength(1);
+    });
+
+    it("切片做满目标后只提示确认事务，不自动改状态", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const complete = vi.fn().mockResolvedValue(undefined);
+        const todayKey = localDateKey();
+        const finished = transaction({
+            sliceTargetCount: 1,
+            status: "进行中",
+            executionSlices: [{ id: "only", scheduledDate: todayKey, status: "completed", completedAt: 1, updatedAt: 1 }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: finished, save, complete } });
+        await tick();
+
+        const prompt = document.querySelector(".xz-slice-completion-prompt");
+        expect(prompt?.textContent).toContain("目标切片已全部完成，事务是否也已完成？");
+        prompt?.querySelector("button")?.click();
+        await vi.waitFor(() => expect(complete).toHaveBeenCalledOnce());
+        /* 只有点了「完成事务」才改状态，切片动作本身不再提交 status */
+        expect(save).not.toHaveBeenCalled();
+    });
+
     it("同一天的全部切片做完后当天待做为 0，但总量保留", async () => {
         const key = localDateKey();
         const finished = transaction({
@@ -341,6 +454,11 @@ async function monthKeys(): Promise<{ future: string; past: string }> {
     const past = keys.filter((candidate) => candidate < today).sort().reverse()[0];
     if (!future || !past) throw new Error("月历里找不到可用的未来／过去日期");
     return { future, past };
+}
+
+/** 把 Date 转成本地日期键，避免每处都手写补齐。 */
+function keyOf(date: Date): string {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function localDateKey(): string {

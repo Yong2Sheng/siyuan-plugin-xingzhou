@@ -663,7 +663,7 @@ describe("XingzhouApp", () => {
         expect(achievement?.textContent).toContain("不计入当日安排");
     });
 
-    it("本周补记完成把目标切片做满时事务同步变成已完成，撤销完成后退回进行中", async () => {
+    it("本周补记完成把目标切片做满也不会自动结束事务，撤销完成只回退切片", async () => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const weekStart = new Date(today);
@@ -704,25 +704,25 @@ describe("XingzhouApp", () => {
 
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalledOnce());
         expect(saveItem.mock.calls[0][2].executionSlices).toEqual([expect.objectContaining({ id: "missed-slice", status: "completed" })]);
-        expect(saveItem.mock.calls[0][2].status).toBe("已完成");
-        /* 自动进入终态时和「标记为完成」一样登记待清理图片 */
-        expect(saveItem.mock.calls[0][2].imageCleanup).toMatchObject({ paths: ["assets/evidence.png"] });
-        await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="makeup"] .xz-week-item-meta`)?.textContent).toContain("已完成"));
+        /* 切片做满不再顺手结束事务：状态仍由用户点「完成事务」决定 */
+        expect(saveItem.mock.calls[0][2].status).toBeUndefined();
+        expect(saveItem.mock.calls[0][2].imageCleanup).toBeUndefined();
+        await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="makeup"] .xz-week-item-meta`)?.textContent).toContain("进行中"));
 
-        const undo = [...(document.querySelector<HTMLElement>(`[data-work-item-id="makeup"][data-week-date="${localDateKey(weekStart)}"]`)
-            ?.querySelectorAll<HTMLButtonElement>(".xz-week-item-actions button") ?? [])]
-            .find((button) => button.textContent?.trim() === "撤销完成");
-        expect(undo).toBeInstanceOf(HTMLButtonElement);
-        undo?.click();
+        /* 补记完成后卡片会翻成「撤销完成」，等它渲染出来再点 */
+        const weekActions = () => [...(document.querySelector<HTMLElement>(`[data-work-item-id="makeup"][data-week-date="${localDateKey(weekStart)}"]`)
+            ?.querySelectorAll<HTMLButtonElement>(".xz-week-item-actions button") ?? [])];
+        await vi.waitFor(() => expect(weekActions().some((button) => button.textContent?.trim() === "撤销完成")).toBe(true));
+        weekActions().find((button) => button.textContent?.trim() === "撤销完成")?.click();
 
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalledTimes(2));
         expect(saveItem.mock.calls[1][2].executionSlices).toEqual([expect.objectContaining({
             id: "missed-slice",
             status: localDateKey(weekStart) < localDateKey(today) ? "missed" : "scheduled",
         })]);
-        expect(saveItem.mock.calls[1][2].status).toBe("进行中");
-        /* 退回进行中时清除终态登记 */
-        expect(saveItem.mock.calls[1][2].imageCleanup).toBeNull();
+        /* 事务本来就没离开「进行中」，撤销只回退切片，不再产生状态写入 */
+        expect(saveItem.mock.calls[1][2].status).toBeUndefined();
+        expect(saveItem.mock.calls[1][2].imageCleanup).toBeUndefined();
         await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="makeup"] .xz-week-item-meta`)?.textContent).toContain("进行中"));
     });
 

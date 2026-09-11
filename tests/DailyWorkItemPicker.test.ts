@@ -87,7 +87,7 @@ describe("今日个人安排", () => {
         await vi.waitFor(() => expect(document.querySelector(".xz-daily-project-picker__empty")).not.toBeNull());
     });
 
-    it("完成最后一片时同步把事务改成已完成，并登记终态图片清理", async () => {
+    it("完成最后一片只完成切片，不自动结束事务、也不登记终态图片清理", async () => {
         const item = transaction({ currentAction: "看这张\n![](assets/evidence.png)" });
         const { saveWorkItem } = savingMock(dataOf([item]));
         component = new DailyWorkItemPicker({ target: document.body, props: { data: dataOf([item]), date: TODAY, saveWorkItem } });
@@ -97,11 +97,12 @@ describe("今日个人安排", () => {
             .find((button) => button.textContent?.trim() === "完成")?.click();
 
         await vi.waitFor(() => expect(saveWorkItem).toHaveBeenCalledOnce());
-        expect(saveWorkItem.mock.calls[0][2]).toMatchObject({
-            status: "已完成",
-            imageCleanup: { paths: ["assets/evidence.png"] },
+        /* 事务要不要结束由用户在详情页点「完成事务」决定，切片动作不再顺手改状态 */
+        expect(saveWorkItem.mock.calls[0][2]).toEqual({
+            executionSlices: [expect.objectContaining({ id: "today-slice", status: "completed" })],
         });
-        expect(saveWorkItem.mock.calls[0][2].executionSlices).toEqual([expect.objectContaining({ id: "today-slice", status: "completed" })]);
+        expect(saveWorkItem.mock.calls[0][2].status).toBeUndefined();
+        expect(saveWorkItem.mock.calls[0][2].imageCleanup).toBeUndefined();
     });
 
     it("目标切片还没做满时只完成切片，不动事务状态", async () => {

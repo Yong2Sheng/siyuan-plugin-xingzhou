@@ -115,17 +115,18 @@ describe("事务执行切片", () => {
         expect(automaticStatusForSliceCompletion(item({ status: "待开始", executionSlices: completed }), completed)).toBeNull();
     });
 
-    it("目标切片全部做满时把事务推进为已完成", () => {
+    it("首次完成切片推进为进行中；目标做满也不自动结束事务", () => {
         const first = scheduleSlice(item({ sliceTargetCount: 2 }), "2026-09-04", "first", TODAY);
         const both = scheduleSlice(item({ sliceTargetCount: 2, executionSlices: first }), "2026-09-05", "second", TODAY);
         const oneDone = setSliceOutcome(item({ sliceTargetCount: 2, executionSlices: both }), "first", "completed", TODAY);
         const allDone = setSliceOutcome(item({ sliceTargetCount: 2, executionSlices: oneDone }), "second", "completed", TODAY);
 
         expect(automaticStatusForSliceCompletion(item({ sliceTargetCount: 2, executionSlices: both }), oneDone)).toBeNull();
-        expect(automaticStatusForSliceCompletion(item({ sliceTargetCount: 2, executionSlices: oneDone }), allDone)).toBe("已完成");
+        /* 目标切片全部做满 → null：事务要不要结束由用户点「完成事务」决定 */
+        expect(automaticStatusForSliceCompletion(item({ sliceTargetCount: 2, executionSlices: oneDone }), allDone)).toBeNull();
         const singleScheduled = scheduleSlice(item({ status: "待开始", sliceTargetCount: 1 }), "2026-09-04", "only", TODAY);
         const singleBefore = item({ status: "待开始", sliceTargetCount: 1, executionSlices: singleScheduled });
-        expect(automaticStatusForSliceCompletion(singleBefore, completeSliceNow(singleBefore, "only", TODAY))).toBe("已完成");
+        expect(automaticStatusForSliceCompletion(singleBefore, completeSliceNow(singleBefore, "only", TODAY))).toBe("进行中");
     });
 
     it("已结束的事务不被切片动作改写状态", () => {
@@ -133,7 +134,8 @@ describe("事务执行切片", () => {
         for (const status of ["已完成", "已失败", "已取消", "已放弃"]) {
             expect(automaticStatusForSliceCompletion(item({ status, sliceTargetCount: 1 }), completed)).toBeNull();
         }
-        expect(automaticStatusForSliceCompletion(item({ status: "暂停", sliceTargetCount: 1 }), completed)).toBe("已完成");
+        /* 暂停、阻塞等状态也不越权推进：做满同样返回 null */
+        expect(automaticStatusForSliceCompletion(item({ status: "暂停", sliceTargetCount: 1 }), completed)).toBeNull();
     });
 
     it("撤销切片完成后把自动完成的事务退回进行中", () => {
@@ -154,8 +156,13 @@ describe("事务执行切片", () => {
         const scheduled = scheduleSlice(item({ status: "进行中", sliceTargetCount: 1 }), "2026-09-04", "only", TODAY);
         const before = item({ status: "进行中", sliceTargetCount: 1, executionSlices: scheduled });
         const completed = setSliceOutcome(before, "only", "completed", TODAY);
+        const startable = scheduleSlice(item({ status: "待开始", sliceTargetCount: 1 }), "2026-09-04", "only", TODAY);
+        const startableBefore = item({ status: "待开始", sliceTargetCount: 1, executionSlices: startable });
 
-        expect(automaticSliceStatusChanges(before, { executionSlices: completed })).toMatchObject({ status: "已完成" });
+        /* 事务已在「进行中」：做满目标也只改切片，不动事务状态 */
+        expect(automaticSliceStatusChanges(before, { executionSlices: completed })).toEqual({ executionSlices: completed });
+        /* 首次完成切片才推进状态：待开始 → 进行中 */
+        expect(automaticSliceStatusChanges(startableBefore, { executionSlices: setSliceOutcome(startableBefore, "only", "completed", TODAY) })).toMatchObject({ status: "进行中" });
         expect(automaticSliceStatusChanges(before, { executionSlices: completed, status: "暂停" })).toEqual({ executionSlices: completed, status: "暂停" });
         expect(automaticSliceStatusChanges(before, { title: "改名" })).toEqual({ title: "改名" });
         expect(automaticSliceUndoChanges(item({ status: "已完成", sliceTargetCount: 1, executionSlices: completed }), { executionSlices: scheduled })).toMatchObject({ status: "进行中" });

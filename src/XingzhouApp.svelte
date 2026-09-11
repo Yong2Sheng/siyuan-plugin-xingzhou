@@ -1010,13 +1010,20 @@
         await updateWeekItem(item, { completedDates: [...completedDates].sort() });
     }
 
-    async function saveSelectedSlices(changes: WorkItemChanges) {
+    /**
+     * 详情页日历里保存切片：默认走“完成”的自动规则；撤销时走 undo 规则
+     * （事务若已是「已完成」，撤销后不再满额就退回「进行中」）。
+     */
+    async function saveSelectedSlices(changes: WorkItemChanges, options: { sliceUndo?: boolean } = {}) {
         if (!data || !selected || savingInline || savingSlices) return;
         const selectedRowId = selected.rowId;
         savingSlices = true;
         inlineError = "";
         try {
-            applyData(await saveItem(data, selected, withAutomaticSliceStatus(selected, changes)));
+            const prepared = options.sliceUndo
+                ? withSliceUndoStatus(selected, changes)
+                : withAutomaticSliceStatus(selected, changes);
+            applyData(await saveItem(data, selected, prepared));
             const updated = data?.items.find((item) => item.rowId === selectedRowId);
             if (updated) {
                 selectedId = updated.id;
@@ -2507,7 +2514,7 @@
                     {#if inlineError}<p class="xz-save-error" role="alert">{inlineError}</p>{/if}
 
                     {#if selected.type === "事务"}
-                        <ExecutionSlicePlanner item={selected} items={data.items} disabled={Boolean(savingInline)} save={saveSelectedSlices} complete={() => markSelectedComplete()} />
+                        <ExecutionSlicePlanner item={selected} items={data.items} disabled={Boolean(savingInline)} save={saveSelectedSlices} saveUndo={(changes) => saveSelectedSlices(changes, { sliceUndo: true })} complete={() => markSelectedComplete()} />
                     {/if}
 
                     <section class="xz-dependency-card">

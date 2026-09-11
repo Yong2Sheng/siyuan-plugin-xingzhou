@@ -13,6 +13,7 @@
         sliceCompletionPercent,
         slicesOnDate,
         summarizeDayLoads,
+        undoCompletedSlice,
         validateSliceTarget,
         type DayLoadValue,
         type ExecutionSlice,
@@ -25,6 +26,8 @@
     export let disabled = false;
     export let save: (changes: WorkItemChanges) => Promise<void> = async () => undefined;
     export let complete: () => Promise<void> = async () => undefined;
+    /** 撤销切片完成走这条：事务该从「已完成」退回「进行中」，而不是再跑一遍“完成”的自动规则。 */
+    export let saveUndo: (changes: WorkItemChanges) => Promise<void> = async () => undefined;
 
     type CalendarDay = {
         key: string;
@@ -121,6 +124,23 @@
         }
     }
 
+    /** 撤销切片完成：走 saveUndo，事务若已是「已完成」就退回「进行中」，其余状态不动。 */
+    async function undoSlice(day: CalendarDay) {
+        if (!day.slice || day.slice.status !== "completed") return;
+        sliceContextMenu = null;
+        try {
+            await persist({ executionSlices: undoCompletedSlice(item, day.slice.id) }, saveUndo);
+        } catch (caught) {
+            error = caught instanceof Error ? caught.message : String(caught);
+        }
+    }
+
+    /** 点击格子的统一入口：已完成 → 撤销，其余交给 toggleDate。 */
+    function activateDate(day: CalendarDay) {
+        if (day.slice?.status === "completed") void undoSlice(day);
+        else void toggleDate(day);
+    }
+
     async function finishToday(status: "completed" | "abandoned") {
         if (!todaySlice || todaySlice.status !== "scheduled") return;
         try {
@@ -131,7 +151,7 @@
     }
 
     function openSliceContextMenu(event: MouseEvent, day: CalendarDay) {
-        if (!canFinishFromContextMenu(day)) return;
+        if (!canOpenContextMenu(day)) return;
         sliceContextMenu = {
             day,
             x: Math.min(event.clientX, window.innerWidth - 190),
@@ -141,14 +161,19 @@
 
     function openSliceContextMenuFromKeyboard(event: KeyboardEvent, day: CalendarDay) {
         if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
-        if (!canFinishFromContextMenu(day)) return;
+        if (!canOpenContextMenu(day)) return;
         event.preventDefault();
         const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
         sliceContextMenu = { day, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     }
 
-    async function finishSliceFromContextMenu(day: CalendarDay) {
-        if (!canFinishFromContextMenu(day) || !day.slice) return;
+    /** 菜单唯一的动作：已完成 → 撤销；已安排／未完成 → 完成（或补记完成）。 */
+    async function runContextAction(day: CalendarDay) {
+        if (!canOpenContextMenu(day) || !day.slice) return;
+        if (day.slice.status === "completed") {
+            await undoSlice(day);
+            return;
+        }
         sliceContextMenu = null;
         try {
             await persist({ executionSlices: completeSliceNow(item, day.slice.id) });
@@ -157,32 +182,42 @@
         }
     }
 
-    function finishContextSlice() {
-        if (sliceContextMenu) void finishSliceFromContextMenu(sliceContextMenu.day);
+    function runContextMenuAction() {
+        if (sliceContextMenu) void runContextAction(sliceContextMenu.day);
     }
 
-    function canFinishFromContextMenu(day: CalendarDay): boolean {
-        return !disabled && (day.slice?.status === "scheduled" || day.slice?.status === "missed");
+    /** 可打开菜单的格子：已安排、未完成、已完成（撤销）。已放弃保持只读，没有任何入口。 */
+    function canOpenContextMenu(day: CalendarDay): boolean {
+        const status = day.slice?.status;
+        return !disabled && (status === "scheduled" || status === "missed" || status === "completed");
     }
 
     function contextMenuActionLabel(day: CalendarDay): string {
+        if (day.slice?.status === "completed") {
+            return day.key < today ? "撤销这次补记完成" : "撤销完成此切片";
+        }
         if (day.slice?.status === "missed" || day.key < today) return "补记完成此切片";
         if (day.key > today) return "提前完成此切片";
         return "完成此切片";
     }
 
     function contextMenuHint(day: CalendarDay): string {
+        if (day.slice?.status === "completed") {
+            return day.key < today
+                ? "退回「未完成」；事务不再满额时退回进行中"
+                : "退回「已安排」，可重新安排日期";
+        }
         if (day.slice?.status === "missed" || day.key < today) return "保留原计划日期，并补记为已完成";
         if (day.key > today) return "保留原计划日期，并标记为已完成";
         return "将今天的切片标记为已完成";
     }
 
-    async function persist(changes: WorkItemChanges) {
+    async function persist(changes: WorkItemChanges, writer: (changes: WorkItemChanges) => Promise<void> = save) {
         if (saving || disabled) return;
         saving = true;
         error = "";
         try {
-            await save(changes);
+            await writer(changes);
         } catch (caught) {
             error = caught instanceof Error ? caught.message : String(caught);
         } finally {
@@ -359,16 +394,18 @@
                         class="xz-slice-day"
                         type="button"
                         data-date={day.key}
-                        aria-label={`${day.key}${dayLoadDescription(day) ? `，${dayLoadDescription(day)}` : ""}`}
+                        title={day.slice?.status === "completed" ? "点击撤销这次完成" : undefined}
+                        aria-label={`${day.key}${dayLoadDescription(day) ? `，${dayLoadDescription(day)}` : ""}${day.slice?.status === "completed" ? "；点击撤销这次完成" : ""}`}
                         aria-pressed={Boolean(day.slice)}
-                        disabled={disabled || (!day.slice?.status && !canSchedule(day)) || Boolean(day.slice && day.slice.status !== "scheduled" && day.slice.status !== "missed")}
-                        on:click={() => void toggleDate(day)}
+                        disabled={disabled || Boolean(day.slice && day.slice.status === "abandoned") || (!day.slice?.status && !canSchedule(day))}
+                        on:click={() => activateDate(day)}
                         on:contextmenu|preventDefault={(event) => openSliceContextMenu(event, day)}
                         on:keydown={(event) => openSliceContextMenuFromKeyboard(event, day)}
                     >
                         <span class="xz-slice-day-heading">
                             <span>{day.day}</span>
                             {#if day.slice}<i class:scheduled={day.slice.status === "scheduled"} class:completed={day.slice.status === "completed"} class:missed={day.slice.status === "missed"} class:abandoned={day.slice.status === "abandoned"} class="xz-slice-day-status" aria-hidden="true"></i>{/if}
+                            {#if day.isToday}<span class="xz-slice-day-today-chip" aria-hidden="true">今</span>{/if}
                         </span>
                         {#if day.load.count}
                             <small class="xz-slice-day-load xz-slice-day-load--stack">
@@ -392,7 +429,7 @@
     </div>
     {#if sliceContextMenu}
         <div class="xz-slice-context-menu" style={`left:${sliceContextMenu.x}px;top:${sliceContextMenu.y}px`} role="menu">
-            <button type="button" role="menuitem" disabled={saving || disabled} on:click={finishContextSlice}>{contextMenuActionLabel(sliceContextMenu.day)}</button>
+            <button class:is-undo={sliceContextMenu.day.slice?.status === "completed"} type="button" role="menuitem" disabled={saving || disabled} on:click={runContextMenuAction}>{contextMenuActionLabel(sliceContextMenu.day)}</button>
             <small>{contextMenuHint(sliceContextMenu.day)}</small>
         </div>
     {/if}
