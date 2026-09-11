@@ -2,6 +2,14 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## Unreleased
+
+<!-- Unreleased: turn this into a version heading at the next release -->
+
+- Slice completion is again yours to confirm: filling every target slice no longer ends the transaction by itself. The slice calendar only asks "Target slices are all done — is the transaction done too?", and the state changes when you press Complete transaction.
+- The detail slice calendar gained an undo entry: click a completed cell, or use its context menu (Undo this completion / Undo this backfilled completion). Today returns to Scheduled, a past date to Missed, and a transaction you had already marked Done falls back to In Progress; abandoned slices stay read-only.
+- Today's cell is marked with the character 今 on the same line as the date, replacing that cell's status dot: it costs no extra height and never collides with the date number in wide or narrow cards.
+
 ## 2.1.0 - 2026-09-11
 
 ### Added
