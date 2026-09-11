@@ -1,7 +1,10 @@
 <script lang="ts">
     import { createEventDispatcher } from "svelte";
+    import { cleanupForStatusChange } from "./action-image-cleanup";
     import {
         availableSliceCount,
+        automaticSliceStatusChanges,
+        cancelScheduledSlice,
         completedSliceCount,
         localDateKey,
         scheduleSlice,
@@ -9,7 +12,7 @@
         slicesOnDate,
         type ExecutionSlice,
     } from "./execution-slices";
-    import { buildWorkItemTree, flattenWorkItemTree } from "./tree";
+    import { buildWorkItemTree, flattenWorkItemTree, isClosed } from "./tree";
     import type { DailyWorkItemLink } from "./daily-records";
     import type { WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
 
@@ -22,7 +25,7 @@
 
     type Choice = { item: WorkItem; path: string; group: string; searchText: string };
     type ChoiceGroup = { label: string; choices: Choice[] };
-    type TodayEntry = { item: WorkItem; slice: ExecutionSlice; path: string };
+    type TodayEntry = { item: WorkItem; slice: ExecutionSlice; path: string; closed: boolean };
 
     const dispatch = createEventDispatcher<{ change: { data: WorkItemData; links: DailyWorkItemLink[] } }>();
     let open = false;
@@ -31,7 +34,7 @@
     let actionError = "";
 
     $: tree = buildWorkItemTree(data?.items ?? []);
-    $: todayEntries = flattenWorkItemTree(tree).flatMap((item) => slicesOnDate(item, date).map((slice) => ({ item, slice, path: itemPath(item) })));
+    $: todayEntries = flattenWorkItemTree(tree).flatMap((item) => slicesOnDate(item, date).map((slice) => ({ item, slice, path: itemPath(item), closed: isClosed(item) })));
     $: choices = flattenWorkItemTree(tree)
         .filter((item) => item.type === "事务" && item.status === "进行中" && availableSliceCount(item) > 0 && Boolean(item.deadline) && date <= dateKey(item.deadline))
         .filter((item) => slicesOnDate(item, date).length === 0)
@@ -57,11 +60,29 @@
     }
 
     async function finish(entry: TodayEntry, status: "completed" | "abandoned") {
-        if (!data || !saveWorkItem || savingId || entry.slice.status !== "scheduled") return;
+        if (savingId || entry.closed || entry.slice.status !== "scheduled") return;
+        await persistEntry(entry, setSliceOutcome(entry.item, entry.slice.id, status));
+    }
+
+    /** 取消今天这条切片安排：只撤掉安排，不改事务本身的状态。 */
+    async function cancelToday(entry: TodayEntry) {
+        if (savingId || entry.closed || entry.slice.status !== "scheduled") return;
+        await persistEntry(entry, cancelScheduledSlice(entry.item, entry.slice.id));
+    }
+
+    /**
+     * 切片变化统一从这里写入：补上领域层给出的「事务状态自动结果」，
+     * 并在事务因此进入终态时按既有规则登记待清理图片，与项目与事务视图保持一致。
+     */
+    async function persistEntry(entry: TodayEntry, executionSlices: ExecutionSlice[]) {
+        if (!data || !saveWorkItem) return;
         savingId = entry.item.id;
         actionError = "";
         try {
-            const next = await saveWorkItem(data, entry.item, { executionSlices: setSliceOutcome(entry.item, entry.slice.id, status) });
+            const changes = automaticSliceStatusChanges(entry.item, { executionSlices });
+            const status = typeof changes.status === "string" ? changes.status : "";
+            const cleanup = status ? cleanupForStatusChange(entry.item, status, data.items) : null;
+            const next = await saveWorkItem(data, entry.item, cleanup ? { ...changes, imageCleanup: cleanup } : changes);
             data = next;
             dispatchChange(next);
         } catch (caught) {
@@ -125,6 +146,11 @@
         return "待执行";
     }
 
+    /** 事务已结束时，行上标出结束状态；已完成用成功色，其余结束状态用警示色。 */
+    function closedStateClass(status: string): string {
+        return status === "已完成" ? "done" : "stopped";
+    }
+
     function dateKey(timestamp: number | null): string {
         return timestamp ? localDateKey(timestamp) : "";
     }
@@ -143,13 +169,16 @@
     {:else if todayEntries.length}
         <div class="xz-daily-project-links" aria-label="今日个人安排">
             {#each todayEntries as entry (`${entry.item.id}-${entry.slice.id}`)}
-                <div class={`xz-daily-project-link ${entry.slice.status}`}>
+                <div class={`xz-daily-project-link ${entry.slice.status}${entry.closed ? " closed" : ""}`}>
                     <button type="button" class="xz-daily-project-link__main" on:click={() => openWorkItem(entry.item.id)}>
-                        <strong>{entry.item.title}</strong>
+                        <span class="xz-daily-project-link__title">
+                            <strong>{entry.item.title}</strong>
+                            {#if entry.closed}<em class={`xz-daily-project-link__state xz-daily-project-link__state--${closedStateClass(entry.item.status)}`}>事务{entry.item.status}</em>{/if}
+                        </span>
                         <small>{entry.path || "独立事务"} · {statusLabel(entry.slice.status)} · {completedSliceCount(entry.item)}／{entry.item.sliceTargetCount ?? "—"}</small>
                     </button>
-                    {#if entry.slice.status === "scheduled" && canAddToday}
-                        <span class="xz-daily-slice-actions"><button type="button" disabled={Boolean(savingId)} on:click={() => void finish(entry, "completed")}>完成</button><button type="button" disabled={Boolean(savingId)} on:click={() => void finish(entry, "abandoned")}>放弃</button></span>
+                    {#if !entry.closed && entry.slice.status === "scheduled" && canAddToday}
+                        <span class="xz-daily-slice-actions"><button type="button" disabled={Boolean(savingId)} on:click={() => void finish(entry, "completed")}>完成</button><button type="button" disabled={Boolean(savingId)} on:click={() => void finish(entry, "abandoned")}>放弃</button><button class="cancel" type="button" title="取消今天的这条安排，不影响事务本身" aria-label={`取消“${entry.item.title}”今天的执行切片安排`} disabled={Boolean(savingId)} on:click={() => void cancelToday(entry)}>取消安排</button></span>
                     {/if}
                 </div>
             {/each}

@@ -48,7 +48,8 @@
     import { pickFallbackTransaction } from "./ui-state";
     import {
         availableSliceCount,
-        automaticStatusForSliceCompletion,
+        automaticSliceStatusChanges,
+        automaticSliceUndoChanges,
         cancelScheduledSlice,
         completeSliceNow,
         completedSliceCount,
@@ -985,12 +986,15 @@
         }
     }
 
-    async function updateWeekItem(item: WorkItem, changes: WorkItemChanges) {
+    async function updateWeekItem(item: WorkItem, changes: WorkItemChanges, options: { sliceUndo?: boolean } = {}) {
         if (!data || weekSavingIds.has(item.id)) return;
         weekSavingIds = new Set(weekSavingIds).add(item.id);
         weekError = "";
         try {
-            applyData(await reconcileAutomaticStatuses(await saveItem(data, item, withAutomaticSliceStatus(item, changes))));
+            const prepared = options.sliceUndo
+                ? withSliceUndoStatus(item, changes)
+                : withAutomaticSliceStatus(item, changes);
+            applyData(await reconcileAutomaticStatuses(await saveItem(data, item, prepared)));
         } catch (caught) {
             weekError = caught instanceof Error ? caught.message : String(caught);
         } finally {
@@ -1027,9 +1031,24 @@
     }
 
     function withAutomaticSliceStatus(item: WorkItem, changes: WorkItemChanges): WorkItemChanges {
-        if (!changes.executionSlices || changes.status !== undefined) return changes;
-        const status = automaticStatusForSliceCompletion(item, changes.executionSlices);
-        return status ? { ...changes, status } : changes;
+        return withSliceCleanup(item, automaticSliceStatusChanges(item, changes));
+    }
+
+    function withSliceUndoStatus(item: WorkItem, changes: WorkItemChanges): WorkItemChanges {
+        return withSliceCleanup(item, automaticSliceUndoChanges(item, changes));
+    }
+
+    /**
+     * 切片动作把事务自动推进到终态时，图片登记要和「标记为完成」保持一致：
+     * 进入终态就登记待清理，退回进行中则清除登记。
+     */
+    function withSliceCleanup(item: WorkItem, changes: WorkItemChanges): WorkItemChanges {
+        const status = typeof changes.status === "string" ? changes.status : "";
+        if (!status || status === item.status) return changes;
+        const cleanup = cleanupForStatusChange(item, status, data?.items ?? []);
+        if (cleanup) return { ...changes, imageCleanup: cleanup };
+        if (item.imageCleanup && !isClosed({ ...item, status })) return { ...changes, imageCleanup: null };
+        return changes;
     }
 
     async function updateWeekSlice(item: WorkItem, slice: ExecutionSlice, action: "complete" | "miss" | "abandon" | "undo") {
@@ -1039,7 +1058,7 @@
                 : action === "complete"
                     ? completeSliceNow(item, slice.id)
                     : setSliceOutcome(item, slice.id, action === "miss" ? "missed" : "abandoned");
-            await updateWeekItem(item, { executionSlices });
+            await updateWeekItem(item, { executionSlices }, { sliceUndo: action === "undo" });
         } catch (caught) {
             weekError = caught instanceof Error ? caught.message : String(caught);
         }

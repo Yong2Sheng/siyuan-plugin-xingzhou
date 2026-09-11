@@ -1170,6 +1170,8 @@
 .xz-daily-night-owl { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-size: 11px; font-style: normal; font-weight: 600; vertical-align: 1px; }
 @media (any-pointer: coarse) {
     .xz-daily-label-with-note > select.xz-daily-sleep-band { min-height: 36px; }
+    /* 触屏上「今日个人安排」的完成／放弃／取消安排都按可点区域加高。 */
+    .xz-daily-slice-actions button { min-height: 32px; }
 }
 .xz-daily-bedtime-note { box-sizing: border-box; min-height: 42px; display: flex; align-items: center; margin: 22px 0 0; padding: 8px 10px; border-left: 3px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; }
 .xz-daily-personal-project-row { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -1184,22 +1186,33 @@
 .xz-daily-project-note > span { display: flex; min-height: 22px; align-items: baseline; }
 .xz-daily-fields .xz-daily-project-note > textarea { height: 76px; min-height: 76px; }
 .xz-daily-project-picker__heading > button { padding: 0; border: 0; color: var(--xingzhou-primary); background: transparent; cursor: pointer; font-size: 12px; }
-.xz-daily-project-picker__empty { box-sizing: border-box; min-height: 76px; margin: 0; padding: 11px 12px; border: 1px dashed var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); font-size: 12px; line-height: 1.55; }
-.xz-daily-project-links { box-sizing: border-box; height: 76px; min-height: 76px; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; overflow: auto; padding: 7px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-bg); }
+.xz-daily-project-picker__empty { box-sizing: border-box; min-height: 152px; display: flex; align-items: center; justify-content: center; margin: 0; padding: 11px 12px; border: 1px dashed var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); font-size: 12px; line-height: 1.55; text-align: center; }
+/* 今日个人安排：高度随条目自适应，最少约三行、最多五行的位置，再多就在框内滚动。 */
+.xz-daily-project-links { box-sizing: border-box; height: auto; min-height: 152px; max-height: 232px; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; overflow: auto; padding: 7px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-bg); }
 .xz-daily-project-link { max-width: 100%; display: flex; overflow: hidden; border: 1px solid color-mix(in srgb, var(--xingzhou-primary) 35%, var(--xingzhou-border)); border-radius: var(--xingzhou-radius); background: var(--xingzhou-primary-light); }
 .xz-daily-project-link.missing { border-style: dashed; opacity: .76; }
 .xz-daily-project-link.completed { border-color: color-mix(in srgb, var(--b3-theme-success) 42%, var(--xingzhou-border)); background: color-mix(in srgb, var(--b3-theme-success) 10%, var(--xingzhou-bg)); }
 .xz-daily-project-link.missed { border-color: color-mix(in srgb, var(--xingzhou-danger) 42%, var(--xingzhou-border)); background: color-mix(in srgb, var(--xingzhou-danger) 8%, var(--xingzhou-bg)); }
 .xz-daily-project-link.abandoned { border-style: dashed; opacity: .76; }
+/* 事务本身已结束：行保留以备回看，但置灰并停用操作。 */
+.xz-daily-project-link.closed { border-style: dashed; border-color: color-mix(in srgb, var(--xingzhou-muted) 42%, var(--xingzhou-border)); background: var(--xingzhou-panel-subtle); opacity: .86; }
+.xz-daily-project-link.closed .xz-daily-project-link__main strong { color: var(--xingzhou-muted); }
 .xz-daily-project-link__main { min-width: 0; display: grid; gap: 1px; padding: 6px 9px; border: 0; color: var(--xingzhou-text); background: transparent; text-align: left; cursor: pointer; }
 .xz-daily-project-link__main:disabled { cursor: default; }
+.xz-daily-project-link__title { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.xz-daily-project-link__title strong { min-width: 0; }
 .xz-daily-project-link__main strong, .xz-daily-project-link__main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .xz-daily-project-link__main strong { font-size: 12px; }
 .xz-daily-project-link__main small { color: var(--xingzhou-muted); font-size: 10px; font-weight: 400; }
+.xz-daily-project-link__state { flex: 0 0 auto; padding: 1px 6px; border-radius: 999px; font-size: 10px; font-style: normal; font-weight: 600; }
+.xz-daily-project-link__state--done { color: var(--b3-theme-success, var(--xingzhou-primary)); background: color-mix(in srgb, var(--b3-theme-success, var(--xingzhou-primary)) 14%, var(--xingzhou-bg)); }
+.xz-daily-project-link__state--stopped { color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 12%, var(--xingzhou-bg)); }
 .xz-daily-project-link__remove { flex: 0 0 auto; padding: 4px 8px; border: 0; border-left: 1px solid color-mix(in srgb, var(--xingzhou-primary) 25%, var(--xingzhou-border)); color: var(--xingzhou-muted); background: transparent; cursor: pointer; font-size: 15px; }
 .xz-daily-slice-actions { display: flex; flex: 0 0 auto; border-left: 1px solid color-mix(in srgb, var(--xingzhou-primary) 25%, var(--xingzhou-border)); }
 .xz-daily-slice-actions button { padding: 4px 7px; border: 0; color: var(--xingzhou-primary); background: transparent; cursor: pointer; font-size: 10px; }
 .xz-daily-slice-actions button + button { border-left: 1px solid color-mix(in srgb, var(--xingzhou-primary) 18%, var(--xingzhou-border)); color: var(--xingzhou-danger); }
+/* 「取消安排」只是撤掉今天的安排，不是放弃这次切片，用中性色与其他两个操作区分。 */
+.xz-daily-slice-actions button.cancel { color: var(--xingzhou-muted); }
 .xz-daily-project-picker__panel { grid-column: 1 / -1; display: grid; gap: 8px; max-height: 430px; overflow: hidden; padding: 10px; border: 1px solid var(--xingzhou-strong-border); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-panel); box-shadow: var(--xingzhou-panel-shadow); }
 .xz-daily-project-picker__panel > input { box-sizing: border-box; width: 100%; min-height: 38px; padding: 7px 10px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-bg); font-size: 13px; }
 .xz-daily-project-picker__hint, .xz-daily-project-picker__state { margin: 0; color: var(--xingzhou-muted); font-size: 11px; line-height: 1.5; }

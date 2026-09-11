@@ -663,6 +663,156 @@ describe("XingzhouApp", () => {
         expect(achievement?.textContent).toContain("不计入当日安排");
     });
 
+    it("本周补记完成把目标切片做满时事务同步变成已完成，撤销完成后退回进行中", async () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const weekStart = new Date(today);
+        weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+        const item: WorkItem = {
+            id: "makeup", rowId: "makeup", title: "补记完成的事务", documentId: null, detached: true,
+            type: "事务", status: "进行中", currentAction: "看这张\n![](assets/evidence.png)", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: null, noDeadline: true, durationMinutes: 20, energy: "中", updatedAt: Date.now(),
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "missed-slice", scheduledDate: localDateKey(weekStart), status: "missed", completedAt: null, updatedAt: Date.now() }],
+        };
+        const workItemData: WorkItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [item], missingFields: [], fields: {},
+        };
+        const saveItem = vi.fn(async (currentData: WorkItemData, currentItem: WorkItem, changes: WorkItemChanges): Promise<WorkItemData> => ({
+            ...currentData,
+            items: currentData.items.map((candidate) => candidate.id === currentItem.id ? {
+                ...candidate,
+                ...(changes.executionSlices !== undefined ? { executionSlices: changes.executionSlices } : {}),
+                ...(typeof changes.status === "string" ? { status: changes.status } : {}),
+                ...(changes.imageCleanup !== undefined ? { imageCleanup: changes.imageCleanup } : {}),
+            } : candidate),
+        }));
+        component = new XingzhouApp({
+            target: document.body,
+            props: { load: vi.fn().mockResolvedValue(workItemData), captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(), openDocument: vi.fn() },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "本周")?.click();
+        await tick();
+
+        const card = document.querySelector<HTMLElement>(`[data-work-item-id="makeup"][data-week-date="${localDateKey(weekStart)}"]`);
+        const makeup = [...(card?.querySelectorAll<HTMLButtonElement>(".xz-week-item-actions button") ?? [])]
+            .find((button) => button.textContent?.trim() === "补记完成");
+        expect(makeup).toBeInstanceOf(HTMLButtonElement);
+        makeup?.click();
+
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalledOnce());
+        expect(saveItem.mock.calls[0][2].executionSlices).toEqual([expect.objectContaining({ id: "missed-slice", status: "completed" })]);
+        expect(saveItem.mock.calls[0][2].status).toBe("已完成");
+        /* 自动进入终态时和「标记为完成」一样登记待清理图片 */
+        expect(saveItem.mock.calls[0][2].imageCleanup).toMatchObject({ paths: ["assets/evidence.png"] });
+        await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="makeup"] .xz-week-item-meta`)?.textContent).toContain("已完成"));
+
+        const undo = [...(document.querySelector<HTMLElement>(`[data-work-item-id="makeup"][data-week-date="${localDateKey(weekStart)}"]`)
+            ?.querySelectorAll<HTMLButtonElement>(".xz-week-item-actions button") ?? [])]
+            .find((button) => button.textContent?.trim() === "撤销完成");
+        expect(undo).toBeInstanceOf(HTMLButtonElement);
+        undo?.click();
+
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalledTimes(2));
+        expect(saveItem.mock.calls[1][2].executionSlices).toEqual([expect.objectContaining({
+            id: "missed-slice",
+            status: localDateKey(weekStart) < localDateKey(today) ? "missed" : "scheduled",
+        })]);
+        expect(saveItem.mock.calls[1][2].status).toBe("进行中");
+        /* 退回进行中时清除终态登记 */
+        expect(saveItem.mock.calls[1][2].imageCleanup).toBeNull();
+        await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="makeup"] .xz-week-item-meta`)?.textContent).toContain("进行中"));
+    });
+
+    it("事务先前已是已完成的存量数据，撤销切片完成后也会退回进行中", async () => {
+        /* 用户实测的存量状态：事务早已手工标记为已完成，切片停在“未完成” */
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const item: WorkItem = {
+            id: "legacy", rowId: "legacy", title: "存量已完成的事务", documentId: null, detached: true,
+            type: "事务", status: "已完成", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: null, noDeadline: true, durationMinutes: 20, energy: "低", updatedAt: Date.now(),
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "legacy-slice", scheduledDate: localDateKey(yesterday), status: "missed", completedAt: null, updatedAt: Date.now() }],
+        };
+        const workItemData: WorkItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [item], missingFields: [], fields: {},
+        };
+        const saveItem = vi.fn(async (currentData: WorkItemData, currentItem: WorkItem, changes: WorkItemChanges): Promise<WorkItemData> => ({
+            ...currentData,
+            items: currentData.items.map((candidate) => candidate.id === currentItem.id ? {
+                ...candidate,
+                ...(changes.executionSlices !== undefined ? { executionSlices: changes.executionSlices } : {}),
+                ...(typeof changes.status === "string" ? { status: changes.status } : {}),
+                ...(changes.imageCleanup !== undefined ? { imageCleanup: changes.imageCleanup } : {}),
+            } : candidate),
+        }));
+        component = new XingzhouApp({
+            target: document.body,
+            props: { load: vi.fn().mockResolvedValue(workItemData), captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(), openDocument: vi.fn() },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "本周")?.click();
+        await tick();
+
+        const actions = () => [...(document.querySelector<HTMLElement>(`[data-work-item-id="legacy"][data-week-date="${localDateKey(yesterday)}"]`)
+            ?.querySelectorAll<HTMLButtonElement>(".xz-week-item-actions button") ?? [])];
+        actions().find((button) => button.textContent?.trim() === "补记完成")?.click();
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalledOnce());
+        /* 已结束的事务不被切片动作改写状态 */
+        expect(saveItem.mock.calls[0][2].status).toBeUndefined();
+
+        await vi.waitFor(() => expect(actions().some((button) => button.textContent?.trim() === "撤销完成")).toBe(true));
+        actions().find((button) => button.textContent?.trim() === "撤销完成")?.click();
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalledTimes(2));
+        expect(saveItem.mock.calls[1][2].status).toBe("进行中");
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="legacy"] .xz-week-item-meta')?.textContent).toContain("进行中"));
+    });
+
+    it("已取消的事务在本周补记切片时不被改写成已完成", async () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const item: WorkItem = {
+            id: "cancelled", rowId: "cancelled", title: "已取消的事务", documentId: null, detached: true,
+            type: "事务", status: "已取消", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: null, noDeadline: true, durationMinutes: 20, energy: "", updatedAt: Date.now(),
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "missed-slice", scheduledDate: localDateKey(today), status: "missed", completedAt: null, updatedAt: Date.now() }],
+        };
+        const workItemData: WorkItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [item], missingFields: [], fields: {},
+        };
+        const saveItem = vi.fn(async (currentData: WorkItemData, currentItem: WorkItem, changes: WorkItemChanges): Promise<WorkItemData> => ({
+            ...currentData,
+            items: currentData.items.map((candidate) => candidate.id === currentItem.id ? {
+                ...candidate,
+                ...(changes.executionSlices !== undefined ? { executionSlices: changes.executionSlices } : {}),
+                ...(typeof changes.status === "string" ? { status: changes.status } : {}),
+            } : candidate),
+        }));
+        component = new XingzhouApp({
+            target: document.body,
+            props: { load: vi.fn().mockResolvedValue(workItemData), captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(), openDocument: vi.fn() },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "本周")?.click();
+        await tick();
+
+        const card = document.querySelector<HTMLElement>(`[data-work-item-id="cancelled"][data-week-date="${localDateKey(today)}"]`);
+        [...(card?.querySelectorAll<HTMLButtonElement>(".xz-week-item-actions button") ?? [])]
+            .find((button) => button.textContent?.trim() === "补记完成")?.click();
+
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalledOnce());
+        expect(saveItem.mock.calls[0][2].status).toBeUndefined();
+        expect(saveItem.mock.calls[0][2].imageCleanup).toBeUndefined();
+    });
+
     it("在任意工作项入口右键可安全删除内部工作项，并提示保留下级与关联文档", async () => {
         const domain = {
             id: "domain", rowId: "row-domain", title: "写小说", documentId: "domain-doc", detached: false,

@@ -1,4 +1,4 @@
-import type { WorkItem } from "./work-items";
+import type { WorkItem, WorkItemChanges } from "./work-items";
 
 export type ExecutionSliceStatus = "scheduled" | "completed" | "missed" | "abandoned";
 
@@ -67,12 +67,53 @@ export function completedSliceCount(item: WorkItem): number {
 }
 
 const SLICE_STARTABLE_STATUSES = new Set(["收件箱", "待开始", "已计划"]);
+/** 已经结束的事务不再被切片动作改写状态。 */
+const SLICE_TERMINAL_STATUSES = new Set(["已完成", "已失败", "已取消", "已放弃"]);
 
-/** 首次实际完成切片时推进准备状态；后续手动选择的状态保持优先。 */
+/**
+ * 切片变化后事务状态应自动落到哪里；null 表示保持用户当前状态。
+ *
+ * 1）目标切片全部做满 → 已完成：与事务详情页「完成事务」按钮同一口径，
+ *    因此从本周补记、详情页日历还是生活节律完成最后一片，结果一致；
+ * 2）首次实际完成切片时，把「收件箱／待开始／已计划」推进为进行中；
+ * 3）暂停、阻塞、将来与已结束（已完成／已失败／已取消／已放弃）状态一律不覆盖。
+ */
 export function automaticStatusForSliceCompletion(item: WorkItem, nextSlices: ExecutionSlice[]): string | null {
+    if (SLICE_TERMINAL_STATUSES.has(item.status)) return null;
+    const target = normalizedTarget(item.sliceTargetCount);
+    if (target > 0 && completedSliceCountOf(nextSlices) >= target) return "已完成";
     if (!SLICE_STARTABLE_STATUSES.has(item.status)) return null;
     if (completedSliceCount(item) > 0) return null;
     return nextSlices.some((slice) => slice.status === "completed") ? "进行中" : null;
+}
+
+/** 撤销切片完成后不再满额时，事务不应继续停留在已完成；其余状态由用户自己决定。 */
+export function automaticStatusForSliceUndo(item: WorkItem, nextSlices: ExecutionSlice[]): string | null {
+    if (item.status !== "已完成") return null;
+    const target = normalizedTarget(item.sliceTargetCount);
+    if (!target || completedSliceCountOf(nextSlices) >= target) return null;
+    return "进行中";
+}
+
+/**
+ * 切片类保存参数的统一入口：组件只负责传入新的切片列表，
+ * 「事务状态该不该跟着变」的规则留在领域层，避免各视图各写一套。
+ */
+export function automaticSliceStatusChanges(item: WorkItem, changes: WorkItemChanges): WorkItemChanges {
+    if (!changes.executionSlices || changes.status !== undefined) return changes;
+    const status = automaticStatusForSliceCompletion(item, changes.executionSlices);
+    return status ? { ...changes, status } : changes;
+}
+
+/** 撤销切片完成时使用：不再满额就退回进行中。 */
+export function automaticSliceUndoChanges(item: WorkItem, changes: WorkItemChanges): WorkItemChanges {
+    if (!changes.executionSlices || changes.status !== undefined) return changes;
+    const status = automaticStatusForSliceUndo(item, changes.executionSlices);
+    return status ? { ...changes, status } : changes;
+}
+
+function completedSliceCountOf(slices: ExecutionSlice[]): number {
+    return slices.filter((slice) => slice.status === "completed").length;
 }
 
 export function scheduledSliceCount(item: WorkItem): number {
