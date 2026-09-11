@@ -178,6 +178,12 @@
 }
 .xz-segmented button { padding: 6px 10px; }
 .xz-segmented button.active { color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 600; }
+/* 「今日」是聚焦入口：置首、加一道分隔线；选中时用主色实心，与其余筛选的浅底区分 */
+.xz-segmented button.xz-segmented__today { position: relative; gap: 5px; }
+.xz-segmented button.xz-segmented__today::after { position: absolute; top: 50%; right: -3px; width: 1px; height: 14px; transform: translateY(-50%); background: var(--xingzhou-border); content: ""; }
+.xz-segmented button.xz-segmented__primary { padding-inline: 12px; }
+.xz-segmented button.xz-segmented__primary.active { color: var(--b3-theme-on-primary, #fff); background: var(--xingzhou-primary); }
+.xz-segmented__count { padding: 0 5px; border-radius: 999px; background: color-mix(in srgb, currentColor 16%, transparent); font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .xz-filter-controls { display: flex; align-items: center; gap: 8px; }
 .xz-include-closed-toggle { padding: 5px 9px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: transparent; font-size: 11px; white-space: nowrap; cursor: pointer; }
 .xz-include-closed-toggle:hover:not(:disabled) { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
@@ -417,7 +423,7 @@
     font-size: 11px;
     white-space: nowrap;
 }
-.xz-tag[data-status], .xz-slice-plan-indicator, .xz-today-focus {
+.xz-tag[data-status], .xz-slice-plan-indicator, .xz-today-focus, .xz-tag--pinned-out {
     --chip: var(--xingzhou-muted);
     display: inline-flex;
     flex: 0 0 auto;
@@ -442,6 +448,8 @@
 .xz-slice-plan-indicator.needs-planning { --chip: #e8a02e; }
 .xz-slice-plan-indicator.arranged { --chip: #3d7ce0; }
 .xz-today-focus { --chip: #3d7ce0; font-size: 10px; font-weight: 650; }
+/* 「已移出今日」：选中项被保留显示时的显式标记，用琥珀色与正常的今日蓝区分 */
+.xz-tag--pinned-out { --chip: #e8a02e; font-size: 10px; font-weight: 650; }
 .xz-slice-plan-indicator { font-size: 10px; font-weight: 650; }
 .xz-tag--today { --chip: var(--b3-theme-success); }
 .xz-tag--overdue { --chip: var(--xingzhou-danger); }
@@ -515,14 +523,27 @@
 .xz-slice-header-meta { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 5px 12px; }
 .xz-slice-arranged { color: var(--xingzhou-muted); font-size: 12px; white-space: nowrap; }
 .xz-slice-available { padding: 2px 6px; border-radius: 999px; color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-size: 9px; white-space: nowrap; }
-.xz-slice-progress-row { display: grid; grid-template-columns: auto minmax(110px, 1fr) minmax(220px, auto); align-items: center; gap: 9px; margin-top: 6px; }
+.xz-slice-progress-row { display: grid; grid-template-columns: auto minmax(70px, 1fr); align-items: center; gap: 4px 9px; margin-top: 6px; }
 .xz-slice-progress-row > div:first-child { display: flex; align-items: baseline; gap: 4px; }
 .xz-slice-progress-row > div:first-child strong { color: var(--xingzhou-primary); font-size: 15px; }
 .xz-slice-progress-row > div:first-child span { color: var(--xingzhou-muted); font-size: 10px; }
 .xz-slice-info { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; padding: 0; border: 1px solid var(--xingzhou-muted); border-radius: 50%; color: var(--xingzhou-muted); background: transparent; font-size: 9px; line-height: 1; cursor: help; }
-.xz-slice-progress-summary { display: grid; justify-items: end; gap: 1px; color: var(--xingzhou-muted); text-align: right; font-size: 10px; }
-.xz-slice-progress-summary small { color: var(--xingzhou-muted); font-size: 9px; }
-.xz-slice-progress-summary .xz-slice-actions { justify-content: flex-end; margin-top: 3px; }
+/*
+ * 进度条独占一行，说明与操作另起一行占满整宽：
+ * 说明拿到整宽后就不再折行，下面不会留下一大片空白；第三行固定 min-height（说明 + 按钮行），
+ * 今天有无待做切片只切换按钮行的内容，卡片高度与日历位置都不变。
+ */
+/*
+ * 说明与按钮永远同一行：宽度不够时压缩说明（省略号）而不是把按钮挤到下一行，
+ * 也不再按容器宽度切换布局——那正是按钮“跳来跳去”的原因。
+ * 行高固定 24px，按钮只在今天有切片时出现，出现时与说明同行，不额外占用纵向空间。
+ */
+.xz-slice-progress-summary { grid-column: 1 / -1; display: flex; flex-direction: row; align-items: center; gap: 10px; height: 24px; color: var(--xingzhou-muted); text-align: left; font-size: 10px; }
+/* 说明按内容占宽：够宽时不拉满整行，宽度不够时先省略文字，绝不让按钮换行 */
+.xz-slice-progress-summary small { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--xingzhou-muted); text-overflow: ellipsis; white-space: nowrap; font-size: 9px; line-height: 14px; }
+.xz-slice-progress-summary .xz-slice-actions { flex: 0 0 auto; flex-wrap: nowrap; justify-content: flex-end; margin-top: 0; }
+/* 紧凑按钮：3px 内边距 + 14px 行高 ≈ 22px 高，够点但不占纵向空间 */
+.xz-slice-progress-summary .xz-slice-actions button { box-sizing: border-box; min-height: 22px; padding: 3px 10px; line-height: 14px; }
 .xz-slice-completion-prompt { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 7px; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--b3-theme-success) 30%, var(--xingzhou-border)); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: color-mix(in srgb, var(--b3-theme-success) 8%, var(--xingzhou-panel)); font-size: 10px; }
 .xz-slice-completion-prompt button { flex: 0 0 auto; min-height: 30px; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--b3-theme-success) 38%, var(--xingzhou-border)); border-radius: var(--xingzhou-radius); color: var(--b3-theme-success); background: var(--xingzhou-panel); cursor: pointer; font: inherit; font-weight: 650; }
 .xz-slice-completion-prompt button:hover:not(:disabled) { background: color-mix(in srgb, var(--b3-theme-success) 13%, var(--xingzhou-panel)); }
@@ -608,10 +629,18 @@
 .xz-slice-legend i.completed { background: var(--b3-theme-success); }
 .xz-slice-legend i.missed { background: var(--xingzhou-danger); }
 .xz-slice-legend i.abandoned { border: 1px dashed var(--xingzhou-muted); background: transparent; }
-@container (max-width: 620px) {
-    .xz-slice-progress-row { grid-template-columns: auto minmax(90px, 1fr); }
-    .xz-slice-progress-summary { grid-column: 1 / -1; justify-items: start; text-align: left; }
-    .xz-slice-progress-summary .xz-slice-actions { justify-content: flex-start; }
+@container (min-width: 620px) {
+    /*
+     * 卡片够宽时，说明与按钮升到「0% 事务完成度 + 进度条」那一行：
+     * 纵向因此少一整行（24px）。两组元素都靠右，中间留白由进度条的 1fr 吸收。
+     */
+    .xz-slice-progress-row { grid-template-columns: auto minmax(70px, 1fr) minmax(0, auto); }
+    .xz-slice-progress-summary { grid-column: auto; width: auto; justify-content: flex-end; }
+}
+@container (max-width: 420px) {
+    .xz-slice-progress-summary { gap: 6px; }
+    .xz-slice-progress-summary .xz-slice-actions { gap: 4px; }
+    .xz-slice-progress-summary .xz-slice-actions button { padding: 3px 7px; }
 }
 .xz-dependency-card { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--xingzhou-border); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-surface); }
 .xz-dependency-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
@@ -1405,6 +1434,10 @@
 .xz-state p, .xz-coming-soon p { max-width: 520px; margin: 0; color: var(--xingzhou-muted); line-height: 1.7; }
 .xz-error h2 { color: var(--xingzhou-danger); }
 .xz-empty { display: grid; min-height: 150px; place-items: center; color: var(--xingzhou-muted); text-align: center; }
+.xz-empty-hint { display: grid; gap: 10px; place-items: center; padding: 0 16px; }
+.xz-empty-hint p { margin: 0; line-height: 1.7; }
+.xz-empty-hint .xz-link-button { border: 1px solid var(--xingzhou-border); }
+/* 「今日」下选中项被保留时的说明条：只在真的发生保留时出现，避免造成筛选失效的错觉 */
 .xz-empty-icon { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 50%; color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-size: 22px; }
 .xz-spinner { width: 24px; height: 24px; border: 2px solid var(--xingzhou-border); border-top-color: var(--xingzhou-primary); border-radius: 50%; animation: xz-spin .8s linear infinite; }
 @keyframes xz-spin { to { transform: rotate(360deg); } }
@@ -1467,7 +1500,7 @@
     .xz-daily-fields.two:has(> .xz-daily-personal-decision) > .xz-daily-project-note > textarea { height: 88px; min-height: 88px; }
     .xz-daily-bedtime-note { margin-top: 0; }
     .xz-daily-history-row, .xz-daily-rubric-row, .xz-daily-timeline-row { grid-template-columns: 1fr 1fr; }
-    .xz-slice-config, .xz-slice-progress-row { grid-template-columns: 1fr; }
+    .xz-slice-config { grid-template-columns: 1fr; }
     .xz-week-page { padding-inline: 12px; }
     .xz-week-header { align-items: stretch; flex-direction: column; }
     .xz-week-navigation { display: grid; grid-template-columns: repeat(3, 1fr); }

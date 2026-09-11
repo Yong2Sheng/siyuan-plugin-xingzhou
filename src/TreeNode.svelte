@@ -12,6 +12,8 @@
     export let expandedIds: Set<string>;
     export let visibleIds: Set<string>;
     export let todayFocusCounts: Map<string, number>;
+    /** 今日视图下被钉住的选中项：已不匹配筛选，但因为正选中它而保留显示。 */
+    export let pinnedFocusId: string | null = null;
     export let draggingId: string | null = null;
     export let reorderDisabled = false;
     export let depth = 0;
@@ -33,6 +35,7 @@
     $: role = getWorkItemRole(item, tree);
     $: dependencyCount = (item.hardPrerequisiteIds?.length ?? 0) + (item.softPrerequisiteIds?.length ?? 0);
     $: todayFocusCount = todayFocusCounts.get(item.id) ?? 0;
+    $: pinnedOutOfToday = pinnedFocusId === item.id;
     $: slicePlan = executionSlicePlanSummary(item);
     $: sameParentDrag = Boolean(draggingId)
         && (tree.byId.get(draggingId ?? "")?.parentIds[0] ?? "") === (item.parentIds[0] ?? "");
@@ -113,7 +116,15 @@
             <RoleBadge {role} />
             <span class="xz-tree-title">{item.title}</span>
             {#if dependencyCount > 0}<span class="xz-dependency-indicator" title={`${dependencyCount} 项跨项目依赖`}>⇠ {dependencyCount}</span>{/if}
-            {#if todayFocusCount > 0}<span class="xz-today-focus" title={`今日有 ${todayFocusCount} 个尚未完成的执行切片`}>今日{todayFocusCount > 1 ? ` ${todayFocusCount}` : ""}</span>{/if}
+            {#if pinnedOutOfToday}
+                <span
+                    class="xz-tag xz-tag--pinned-out"
+                    data-pinned-out="true"
+                    title="今天已没有未完成的执行切片，因为你正选中它才保留显示；把切片重新安排回今天即可恢复，选中别的条目后它就会移出「今日」。"
+                >已移出今日</span>
+            {:else if todayFocusCount > 0}
+                <span class="xz-today-focus" title={`今日有 ${todayFocusCount} 个尚未完成的执行切片`}>今日{todayFocusCount > 1 ? ` ${todayFocusCount}` : ""}</span>
+            {/if}
             {#if slicePlan}<span class={`xz-slice-plan-indicator ${slicePlan.kind}`} title={slicePlan.title}>{slicePlan.label}</span>{/if}
             {#if item.status}<span class="xz-tag" data-status={item.status}>{item.status}</span>{/if}
         </button>
@@ -152,6 +163,7 @@
                     {expandedIds}
                     {visibleIds}
                     {todayFocusCounts}
+                    {pinnedFocusId}
                     {draggingId}
                     {reorderDisabled}
                     depth={depth + 1}

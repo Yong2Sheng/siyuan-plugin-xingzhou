@@ -67,7 +67,7 @@
     import { getAutomaticHierarchyStatusChanges } from "./status-hierarchy";
     import { automaticStatusForPlanDate } from "./status-schedule";
     import { autoResizeTextarea } from "./textarea-autosize";
-    import { getTodayFocusCounts } from "./today-focus";
+    import { getTodayFocusCounts, isTodayFocusItem } from "./today-focus";
     import TreeNode from "./TreeNode.svelte";
     import { buildWorkItemTree, collectDescendantIds, compareWorkItemOrder, hasActiveDescendant, hasOngoingDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
     import { dayLoadValue } from "./execution-slices";
@@ -96,7 +96,7 @@
     export let loadSavedViewState: (() => Promise<WorkItemViewState | null>) | null = null;
 
     type MainPage = "week" | "all" | "review" | "graph" | "cleanup";
-    type ItemFilter = "all" | "active" | "future" | "closed";
+    type ItemFilter = "all" | "today" | "active" | "future" | "closed";
     type WeekDay = { timestamp: number; key: string; label: string; dateLabel: string; isToday: boolean };
     type ActionField = "currentAction" | "nextAction";
     type ActionImageUpload = {
@@ -128,6 +128,7 @@
         { id: "graph", label: "关系图" },
     ];
     const itemFilters: Array<{ id: ItemFilter; label: string }> = [
+        { id: "today", label: "今日" },
         { id: "all", label: "全部" },
         { id: "active", label: "活跃项目" },
         { id: "future", label: "将来" },
@@ -143,11 +144,21 @@
     let data: WorkItemData | null = null;
     let tree: WorkItemTree = buildWorkItemTree([]);
     let todayFocusCounts = new Map<string, number>();
+    /** 今日口径的时间基准：跨午夜刷新时随数据一起更新，保证「今日」筛选与行内标记同步换日。 */
+    let todayNow = Date.now();
+    let todayFocusCount = 0;
     let visibleIds = new Set<string>();
     let visibleRoots: WorkItem[] = [];
     export let loading = true;
     let error = "";
     let selectedId: string | null = null;
+    /**
+     * 「今日」下被钉住的选中项：它已不再匹配筛选（例如你刚取消了今天的切片），
+     * 但因为你正选中它，视图保留它、详情面板不换人，直到你主动切换到别处。
+     */
+    let pinnedFocusId: string | null = null;
+    /** 用户刚切过筛选：本次重算只结算可见性，不把上一个筛选的选中项钉进新筛选。 */
+    let focusPinRejected = false;
     let scope: "all" | string = "all";
     let scopeDrawerOpen = false;
     let compactDetailOpen = false;
@@ -254,6 +265,9 @@
     $: currentActionImageTotal = buildActionImageTotal(detailDraft.currentAction, actionImageUploads.currentAction);
     $: nextActionImageTotal = buildActionImageTotal(detailDraft.nextAction, actionImageUploads.nextAction);
     $: todayFocusCounts = getTodayFocusCounts(data?.items ?? [], tree);
+    // 数据换一轮（含跨午夜刷新）就推进今日锚点，使筛选与标记使用同一个「今天」
+    $: { data; todayNow = Date.now(); }
+    $: todayFocusCount = (data?.items ?? []).filter((item) => isTodayFocusItem(item, localDateKey(todayNow))).length;
     $: selectedProfile = selected ? getWorkItemProfile(selected, tree) : null;
     $: deleteDescendantCount = deleteTarget ? Math.max(0, collectDescendantIds(deleteTarget.id, tree).size - 1) : 0;
     $: {
@@ -273,25 +287,42 @@
     $: categorizedSidebarIds = new Set([...allAreaAndIdeaRoots, ...allTopLevelProjects, ...allIndependentTransactions].map((item) => item.id));
     $: allUncategorizedRoots = sortSidebarItems(tree.roots.filter((item) => !categorizedSidebarIds.has(item.id)));
     $: {
-        filter; includeClosed; tree;
+        filter; includeClosed; tree; todayNow; pinnedFocusId;
         areaAndIdeaRoots = allAreaAndIdeaRoots.filter(shouldShowSidebarRoot);
         topLevelProjects = allTopLevelProjects.filter(shouldShowSidebarRoot);
         independentTransactions = allIndependentTransactions.filter(shouldShowSidebarRoot);
         uncategorizedRoots = allUncategorizedRoots.filter(shouldShowSidebarRoot);
     }
+    /*
+     * 选中项归属与「钉住」：放在同一个响应式块里是有意的。
+     * 钉住状态一改，可见性必须在同一次更新里跟着重算；拆成两个块时 Svelte 按源码顺序
+     * 单趟执行，先算完可见性再改钉子，本轮就不会重算，钉住的行会缺席到下一次刷新。
+     */
     $: {
-        data; scope; filter; tree; includeClosed;
-        visibleIds = getVisibleIds();
-    }
-    $: {
-        scope; tree; visibleIds;
-        visibleRoots = getVisibleRoots();
-    }
-    $: if (page === "all" && data && selectedId && !visibleIds.has(selectedId)) {
-        // 选中项不可见（已完成/删除/筛选）时的确定性回落：今日未完成切片最多 → 树显示顺序第一个
-        const fallbackId = pickFallbackTransaction(data.items, tree, visibleIds);
-        if (fallbackId) revealRestoredItem(tree.byId.get(fallbackId));
-        else selectedId = null;
+        page; filter; selectedId; data; scope; tree; includeClosed; todayNow; focusPinRejected;
+        if (focusPinRejected) {
+            /*
+             * 刚由用户主动切了筛选：此刻的选中项是从上一个筛选带过来的，不是用户在本次筛选里选的。
+             * 所以既不钉住它（否则切到「今日」会被上一个视图的选中项接管，看不清今天的清单），
+             * 也不让它在详情面板里继续挂着——回落到本次筛选里第一个该看的事务。
+             */
+            const freshVisibleIds = getVisibleIds(null);
+            pinnedFocusId = null;
+            if (data && selectedId && !freshVisibleIds.has(selectedId)) {
+                selectedId = pickFallbackTransaction(data.items, tree, freshVisibleIds);
+            }
+            focusPinRejected = false;
+        } else {
+            pinnedFocusId = resolvePinnedFocusId(page, filter, selectedId, tree, todayNow);
+        }
+        visibleIds = getVisibleIds(pinnedFocusId);
+        visibleRoots = getVisibleRoots(pinnedFocusId);
+        if (page === "all" && data && selectedId && filter !== "today" && !visibleIds.has(selectedId)) {
+            // 其余筛选沿用原有回落：选中项不可见（已完成/删除）时挑今日未完成切片最多 → 树顺序第一个
+            const fallbackId = pickFallbackTransaction(data.items, tree, visibleIds);
+            if (fallbackId) revealRestoredItem(tree.byId.get(fallbackId));
+            else selectedId = null;
+        }
     }
     $: parent = selected?.parentIds[0] ? tree.byId.get(selected.parentIds[0]) ?? null : null;
     $: derivedTopProjectId = selected ? deriveTopProjectId(selected.parentIds[0] ?? "", tree) : "";
@@ -445,7 +476,38 @@
         return ids.map((id) => tree.byId.get(id)).filter((item): item is WorkItem => Boolean(item));
     }
 
+    function matchesFilter(item: WorkItem, todayKey: string): boolean {
+        if (filter === "today") return isTodayFocusItem(item, todayKey);
+        if (filter === "active") return isActive(item);
+        if (filter === "future") return item.status === "将来" || item.status === "将来／也许" || item.status === "暂停";
+        if (filter === "closed") return isClosed(item);
+        return includeClosed || !isClosed(item);
+    }
+
+    /**
+     * 计算「钉住」的选中项：在「今日」下，选中项一旦不再命中筛选（例如你刚取消了今天的切片），
+     * 就把它钉住——视图保留它、详情面板不换人，只在你主动切换时才放下。
+     */
+    function resolvePinnedFocusId(
+        currentPage: MainPage,
+        currentFilter: ItemFilter,
+        currentSelectedId: string | null,
+        currentTree: WorkItemTree,
+        now: number,
+    ): string | null {
+        if (currentPage !== "all" || currentFilter !== "today" || !currentSelectedId) return null;
+        const current = currentTree.byId.get(currentSelectedId);
+        if (!current) return null;
+        return matchesFilter(current, localDateKey(now)) ? null : current.id;
+    }
+
     function shouldShowSidebarRoot(item: WorkItem): boolean {
+        if (filter === "today") {
+            // 钉住的选中项所在路径同样留在左栏，避免选中项在范围列表里凭空消失
+            if (pinnedFocusId && hasDescendantOrSelf(item.id, pinnedFocusId)) return true;
+            const todayKey = localDateKey(todayNow);
+            return matchesFilter(item, todayKey) || hasDescendantMatching(item.id, (candidate) => matchesFilter(candidate, todayKey));
+        }
         if (filter === "closed") return isClosed(item) || hasDescendantMatching(item.id, isClosed);
         if (filter === "all" && includeClosed) return true;
         return !isClosed(item) || hasDescendantMatching(item.id, (candidate) => !isClosed(candidate));
@@ -459,6 +521,19 @@
             return (tree.children.get(id) ?? []).some((child) => predicate(child) || visit(child.id));
         };
         return visit(itemId);
+    }
+
+    /** 目标项是否位于该项自身或其下级路径上（用于判断选中项属于哪条侧栏根路径）。 */
+    function hasDescendantOrSelf(itemId: string, targetId: string): boolean {
+        const seen = new Set<string>();
+        let current: WorkItem | undefined = tree.byId.get(targetId);
+        while (current && !seen.has(current.id)) {
+            if (current.id === itemId) return true;
+            seen.add(current.id);
+            const parentId = current.parentIds[0];
+            current = parentId ? tree.byId.get(parentId) : undefined;
+        }
+        return false;
     }
 
     function toggleIncludeClosed() {
@@ -539,6 +614,7 @@
             scope = item.parentIds[0] || item.id;
         }
         selectedId = item.id;
+        pinnedFocusId = null;
         compactDetailOpen = true;
         const next = new Set(expandedIds);
         const seen = new Set<string>();
@@ -554,12 +630,15 @@
     function selectScopeItem(item: WorkItem) {
         scope = item.id;
         selectedId = item.id;
+        pinnedFocusId = null;
         scopeDrawerOpen = false;
         compactDetailOpen = true;
     }
 
     function selectTreeItem(id: string) {
         selectedId = id;
+        // 主动选中别的条目就放下钉子：只有这一步才允许视图把你从原事务上移开
+        pinnedFocusId = null;
         compactDetailOpen = true;
     }
 
@@ -625,6 +704,8 @@
             const refreshed = await deleteItem(data, target);
             if (scope === target.id) scope = "all";
             if (selectedId === target.id) selectedId = null;
+            // 条目已删除，钉子无处可钉：交回回落逻辑去挑下一个可见事务
+            if (pinnedFocusId === target.id) pinnedFocusId = null;
             applyData(refreshed);
             deleteTarget = null;
         } catch (caught) {
@@ -1237,7 +1318,7 @@
         return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日 — ${end.getMonth() + 1}月${end.getDate()}日`;
     }
 
-    function getVisibleIds(): Set<string> {
+    function getVisibleIds(pinnedFocusId: string | null): Set<string> {
         if (!data) return new Set();
         let candidates = data.items;
         if (scope !== "all") {
@@ -1245,12 +1326,11 @@
             candidates = data.items.filter((item) => ids.has(item.id));
         }
 
-        const matched = candidates.filter((item) => {
-            if (filter === "active") return isActive(item);
-            if (filter === "future") return item.status === "将来" || item.status === "将来／也许" || item.status === "暂停";
-            if (filter === "closed") return isClosed(item);
-            return includeClosed || !isClosed(item);
-        });
+        const todayKey = localDateKey(todayNow);
+        const matched = candidates.filter((item) => matchesFilter(item, todayKey));
+        const pinnedId = pinnedFocusId && tree.byId.has(pinnedFocusId) ? pinnedFocusId : null;
+        // 被钉住的选中项按“命中”参与可见性计算：即使它已不再匹配筛选，完整上层路径也会留在树里
+        if (pinnedId && !matched.some((item) => item.id === pinnedId)) matched.push(tree.byId.get(pinnedId)!);
         if (filter === "all" && includeClosed) return new Set(matched.map((item) => item.id));
 
         const result = new Set(matched.map((item) => item.id));
@@ -1266,12 +1346,30 @@
         return result;
     }
 
-    function getVisibleRoots(): WorkItem[] {
+    function getVisibleRoots(pinnedFocusId: string | null): WorkItem[] {
         if (scope !== "all") {
             const scoped = tree.byId.get(scope);
             return scoped && visibleIds.has(scoped.id) ? [scoped] : [];
         }
-        return tree.roots.filter((item) => visibleIds.has(item.id));
+        const roots = tree.roots.filter((item) => visibleIds.has(item.id));
+        // 钉住的选中项若落在常规根路径之外，单独作为一条根路径显示；已在常规根路径之内的不重复显示
+        const pinned = pinnedFocusId ? tree.byId.get(pinnedFocusId) : undefined;
+        if (pinned && visibleIds.has(pinned.id) && !roots.some((item) => item.id === pinned.id)) {
+            const visibleRootIds = new Set(roots.map((item) => item.id));
+            const seen = new Set<string>();
+            let parentId: string | undefined = pinned.parentIds[0];
+            let coveredByRoot = false;
+            while (parentId && !seen.has(parentId)) {
+                seen.add(parentId);
+                if (visibleRootIds.has(parentId)) {
+                    coveredByRoot = true;
+                    break;
+                }
+                parentId = tree.byId.get(parentId)?.parentIds[0];
+            }
+            if (!coveredByRoot) roots.push(pinned);
+        }
+        return roots;
     }
 
     function toggle(id: string) {
@@ -1334,12 +1432,17 @@
 
     function getDefaultExpandedIds(targetFilter: ItemFilter, items: WorkItem[]): Set<string> {
         if (targetFilter === "active") return new Set(items.filter((item) => hasActiveDescendant(item.id, tree)).map((item) => item.id));
+        // 今日与其余筛选一样默认完整展开：今日命中项本来就少，祖先收起等于看不见
         return new Set(items.filter((item) => (tree.children.get(item.id) ?? []).length > 0).map((item) => item.id));
     }
 
     function setFilter(nextFilter: ItemFilter) {
+        const previousFilter = filter;
         filter = nextFilter;
         scope = "all";
+        // 主动切筛选属于用户明确动作：放下钉子，让本轮筛选如实生效
+        pinnedFocusId = null;
+        focusPinRejected = nextFilter !== previousFilter;
         expandedIds = getDefaultExpandedIds(nextFilter, data?.items ?? []);
     }
 
@@ -1963,12 +2066,23 @@
                 <div class="xz-filter-controls">
                     <div class="xz-segmented">
                         {#each itemFilters as entry}
-                            <button class:active={filter === entry.id} type="button" on:click={() => setFilter(entry.id)}>{entry.label}</button>
+                            <button
+                                class:active={filter === entry.id}
+                                class:xz-segmented__today={entry.id === "today"}
+                                class:xz-segmented__primary={entry.id === "today"}
+                                type="button"
+                                title={entry.id === "today" ? "只看今天安排了未完成执行切片的事务" : ""}
+                                on:click={() => setFilter(entry.id)}
+                            >
+                                {entry.label}{#if entry.id === "today" && todayFocusCount > 0}<span class="xz-segmented__count" title={`${todayFocusCount} 个事务今天有未完成的执行切片`}>{todayFocusCount}</span>{/if}
+                            </button>
                         {/each}
                     </div>
-                    <button class:active={includeClosed && filter === "all"} class="xz-include-closed-toggle" type="button" aria-pressed={includeClosed && filter === "all"} disabled={filter !== "all"} title={filter === "all" ? "控制“全部”中是否包含已经结束的工作项" : "此开关仅作用于“全部”筛选"} on:click={toggleIncludeClosed}>
-                        {includeClosed && filter === "all" ? "✓ " : ""}包含已结束
-                    </button>
+                    {#if filter === "all"}
+                        <button class:active={includeClosed} class="xz-include-closed-toggle" type="button" aria-pressed={includeClosed} title="控制“全部”中是否包含已经结束的工作项" on:click={toggleIncludeClosed}>
+                            {includeClosed ? "✓ " : ""}包含已结束
+                        </button>
+                    {/if}
                 </div>
                 <div class="xz-secondary-actions">
                     {#if filter === "active"}
@@ -2427,7 +2541,7 @@
 
             <section class="xz-tree-panel">
                 <div class="xz-panel-heading">
-                    <div class="xz-panel-heading-main"><button class="xz-tablet-scope-button" type="button" aria-expanded={scopeDrawerOpen} on:click={() => scopeDrawerOpen = !scopeDrawerOpen}>范围</button><div><span>层级浏览</span><small>{filter === "active" ? "只展开活跃路径" : "当前筛选默认完整展开"}</small></div></div>
+                    <div class="xz-panel-heading-main"><button class="xz-tablet-scope-button" type="button" aria-expanded={scopeDrawerOpen} on:click={() => scopeDrawerOpen = !scopeDrawerOpen}>范围</button><div><span>层级浏览</span><small>{filter === "active" ? "只展开活跃路径" : filter === "today" ? "只看今天安排了未完成切片的事务" : "当前筛选默认完整展开"}</small></div></div>
                     <div class="xz-role-legend" aria-label="层级颜色含义">
                         {#each WORK_ITEM_ROLE_LEGEND as role}<RoleBadge {role} compact />{/each}
                     </div>
@@ -2435,7 +2549,16 @@
                 <div class="xz-tree-scroll" bind:this={treeScrollElement}>
                     {#if reorderError}<p class="xz-tree-order-error" role="alert">{reorderError}</p>{/if}
                     {#if visibleRoots.length === 0}
-                        <div class="xz-empty"><p>当前范围没有符合条件的工作项。</p></div>
+                        {#if filter === "today"}
+                            <div class="xz-empty">
+                                <div class="xz-empty-hint">
+                                    <p>今天还没有安排执行切片。</p>
+                                    <button class="xz-link-button" type="button" on:click={() => page = "week"}>去「本周」安排今天要做的事务</button>
+                                </div>
+                            </div>
+                        {:else}
+                            <div class="xz-empty"><p>当前范围没有符合条件的工作项。</p></div>
+                        {/if}
                     {:else}
                         {#each visibleRoots as root (root.id)}
                             <TreeNode
@@ -2445,6 +2568,7 @@
                                 {expandedIds}
                                 {visibleIds}
                                 {todayFocusCounts}
+                                {pinnedFocusId}
                                 {draggingId}
                                 reorderDisabled={reordering}
                                 on:select={(event) => selectTreeItem(event.detail.id)}

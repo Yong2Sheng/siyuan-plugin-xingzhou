@@ -407,6 +407,37 @@ describe("执行切片配置", () => {
         expect(first?.querySelector("span")?.textContent).toBe("事务完成度");
         expect(document.body.textContent).not.toContain("切片属于当前事务，不会成为上下层工作项。");
     });
+
+    it("「完成／放弃」与说明同处一行，且今天没有切片时不占额外高度", async () => {
+        const todayKey = localDateKey();
+        const withToday = transaction({
+            sliceTargetCount: 2,
+            executionSlices: [{ id: "today-slice", scheduledDate: todayKey, status: "scheduled", completedAt: null, updatedAt: 1 }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: withToday } });
+        await tick();
+
+        // 说明与按钮同在一行容器里，不再各占一行
+        const summaryWithButtons = document.querySelector(".xz-slice-progress-summary");
+        expect(summaryWithButtons?.children[0]?.tagName).toBe("SMALL");
+        expect(summaryWithButtons?.children[1]?.classList.contains("xz-slice-actions")).toBe(true);
+        // 文案只说事实：今天安排了几片，不再预告「会自动记为未完成」
+        expect(summaryWithButtons?.querySelector("small")?.textContent).toBe("今天已安排 1 片");
+        expect(summaryWithButtons?.querySelector("small")?.getAttribute("title")).toBe("今天已安排 1 片");
+        expect(document.body.textContent).not.toContain("自动记为");
+        expect([...summaryWithButtons?.querySelectorAll("button") ?? []].map((button) => button.textContent)).toEqual(["完成", "放弃"]);
+        expect(summaryWithButtons?.querySelector("button.abandon")?.getAttribute("title")).toBe("放弃本次切片");
+
+        component.$destroy();
+        // 今天没有待做切片：按钮行整体不渲染，说明行不会被撑高
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: transaction({ sliceTargetCount: 2 }) } });
+        await tick();
+
+        const summaryWithoutButtons = document.querySelector(".xz-slice-progress-summary");
+        expect(summaryWithoutButtons?.children).toHaveLength(1);
+        expect(summaryWithoutButtons?.querySelector(".xz-slice-actions")).toBeNull();
+        expect(summaryWithoutButtons?.querySelectorAll("button")).toHaveLength(0);
+    });
 });
 
 type LoadParts = {

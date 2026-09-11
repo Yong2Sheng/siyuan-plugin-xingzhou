@@ -6,7 +6,7 @@ export const UI_STATE_FILE = "ui-state.json";
 export const UI_STATE_VERSION = 1;
 
 const PAGES = new Set(["week", "all", "inbox", "review", "graph", "cleanup"]);
-const FILTERS = new Set(["all", "active", "future", "closed"]);
+const FILTERS = new Set(["all", "today", "active", "future", "closed"]);
 
 /**
  * 落盘文件结构：外层携带版本号便于演进，实际状态放在 projectViewState 下。

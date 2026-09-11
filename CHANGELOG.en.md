@@ -2,6 +2,24 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## Unreleased
+
+### Added
+
+- Hierarchy browsing (the All page) gained a **Today view** in the filter group (first position, with a badge counting today's slots, and with the count of transactions that still have unfinished slices today): only transactions that still have unfinished execution slices today stay visible, so nothing else competes for attention. A matching transaction keeps its full area → project → task → transaction path as context, while only the transaction itself carries the blue Today marker; the sidebar scope groups, the toolbar toggles, and expand/collapse all follow the filter. The list previously only had the inline Today marker with no matching filter entry; both now share one rule (`isTodayFocusItem`), so the marker and the filter can never disagree.
+- The Today view is remembered with the rest of the view state: reopening the plugin returns to the filter you left (the filter allow-list in `ui-state.json` was extended to match).
+
+### Changed
+
+- **Cancelling today's slice no longer jumps to another transaction.** Previously, clearing today's cell in the detail pane dropped the transaction out of the filter immediately, and the UI switched you to another transaction (most unfinished slices today, then tree order) — while the slice calendar reset to the current month when the transaction changed, so the view looked almost identical and inviting repeated clicks. The selection is now **pinned in place**: the transaction and its ancestor path stay visible with a "moved out of today" marker (hover explains why), the detail pane and calendar never switch items, and you can schedule the slice back onto today to restore it. The pin is released only when you actively select another item, switch filter or scope, or delete the item; after a deletion the original fallback still applies.
+- The slice card's **information block lost a full row**: when the card is wide enough (≥620px) the scheduling note and the Complete / Abandon this slice actions merge into the "0% transaction progress + progress bar" row; on narrower cards they sit on the row under the bar, but the buttons always stay on the same line as the note instead of wrapping or jumping with width or state changes. Buttons shrank from 30px to 22px (3px padding plus a 14px line height), and a long note is truncated with an ellipsis and shown in full on hover.
+- Slice-card copy now states facts: with a slice scheduled today it reads **"1 slice scheduled today"**, and the previous "unhandled by the end of today is automatically recorded as missed" is gone — that sentence never said whether it meant the transaction or the slice, and its timing was inaccurate (past-dated slices are settled on the next load, and only the slice status changes, never the transaction).
+- Keeping a selection in hierarchy browsing no longer inserts an explanation banner or rewrites the panel subtitle: the banner appearing and disappearing was itself shifting the tree, so the explanation now lives in the hover text of the "moved out of today" marker.
+
+### Fixed
+
+- Fixed the buttons jumping to the next line: the note and the buttons used to switch between side-by-side and stacked based on container width, so resizing the window moved the buttons. The layout no longer switches within a tier.
+
 ## 2.1.0 - 2026-09-11
 
 ### Added

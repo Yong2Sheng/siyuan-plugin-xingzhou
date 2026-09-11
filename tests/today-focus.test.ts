@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTodayFocusCounts } from "../src/today-focus";
+import { getTodayFocusCounts, isTodayFocusItem, localDateKey, todayFocusCount } from "../src/today-focus";
 import { buildWorkItemTree } from "../src/tree";
 import type { WorkItem } from "../src/work-items";
 
@@ -61,10 +61,46 @@ describe("层级浏览今日提示", () => {
 
         expect(getTodayFocusCounts(items, buildWorkItemTree(items), today).size).toBe(0);
     });
+
+    it("「今日」筛选判定与行内标记共用同一口径", () => {
+        const scheduled = item({ id: "scheduled", type: "事务", executionSlices: [slice("scheduled", "2026-09-03")] });
+        const twoToday = item({
+            id: "two-today",
+            type: "事务",
+            executionSlices: [slice("scheduled", "2026-09-03"), slice("scheduled", "2026-09-03", "second")],
+        });
+        const completedOnly = item({ id: "completed-only", type: "事务", executionSlices: [slice("completed", "2026-09-03")] });
+        const project = item({ id: "project", type: "项目", executionSlices: [slice("scheduled", "2026-09-03")] });
+        const closed = item({ id: "closed", type: "事务", status: "已完成", executionSlices: [slice("scheduled", "2026-09-03")] });
+        const future = item({ id: "future", type: "事务", executionSlices: [slice("scheduled", "2026-09-04")] });
+        const items = [scheduled, twoToday, completedOnly, project, closed, future];
+
+        // 计数与布尔判定必须一致：勾选「今日」看到的，正是树里带「今日」标记的那些事务
+        const counts = getTodayFocusCounts(items, buildWorkItemTree(items), today);
+        const todayKey = localDateKey(today);
+        const byPredicate = items.filter((candidate) => isTodayFocusItem(candidate, todayKey)).map((candidate) => candidate.id);
+        expect(byPredicate).toEqual([...counts.keys()]);
+        expect(byPredicate).toEqual(["scheduled", "two-today"]);
+        expect(todayFocusCount(twoToday, todayKey)).toBe(2);
+        expect(todayFocusCount(project, todayKey)).toBe(0);
+        expect(todayFocusCount(closed, todayKey)).toBe(0);
+    });
+
+    it("跨日边界跟随本地日期：换日前的安排到第二天不再是今日", () => {
+        const justBeforeMidnight = new Date(2026, 8, 2, 23, 59, 59).getTime();
+        const justAfterMidnight = new Date(2026, 8, 3, 0, 0, 1).getTime();
+        const yesterdaySlice = item({ id: "yesterday", type: "事务", executionSlices: [slice("scheduled", "2026-09-02")] });
+        const todaySlice = item({ id: "today", type: "事务", executionSlices: [slice("scheduled", "2026-09-03")] });
+
+        expect(isTodayFocusItem(yesterdaySlice, localDateKey(justBeforeMidnight))).toBe(true);
+        expect(isTodayFocusItem(yesterdaySlice, localDateKey(justAfterMidnight))).toBe(false);
+        expect(isTodayFocusItem(todaySlice, localDateKey(justBeforeMidnight))).toBe(false);
+        expect(isTodayFocusItem(todaySlice, localDateKey(justAfterMidnight))).toBe(true);
+    });
 });
 
-function slice(status: "scheduled" | "completed" | "missed" | "abandoned", scheduledDate: string) {
-    return { id: `${status}-${scheduledDate}`, scheduledDate, status, completedAt: status === "completed" ? 1 : null, updatedAt: 1 };
+function slice(status: "scheduled" | "completed" | "missed" | "abandoned", scheduledDate: string, id = `${status}-${scheduledDate}`) {
+    return { id, scheduledDate, status, completedAt: status === "completed" ? 1 : null, updatedAt: 1 };
 }
 
 function item(overrides: Partial<WorkItem> = {}): WorkItem {

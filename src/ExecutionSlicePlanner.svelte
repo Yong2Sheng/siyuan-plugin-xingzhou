@@ -77,7 +77,8 @@
         ? `预计总投入 ${target * item.durationMinutes} 分钟`
         : "总投入待计算";
     $: planningSummary = todaySlice?.status === "scheduled"
-        ? "今天已有执行切片；今天结束后未处理会自动记为“未完成”"
+        // 只说事实：今天安排了几片。原先的「未处理会自动记为未完成」既没说清是事务还是切片，语气也像警告
+        ? `今天已安排 ${todaySlices.filter((slice) => slice.status === "scheduled").length} 片`
         : !target
             ? "设置目标切片数后，即可点击日历安排执行日期"
             : !item.deadline
@@ -347,9 +348,9 @@
         <div><strong>{percent}%</strong><span>事务完成度</span></div>
         <div class="xz-slice-progress" role="progressbar" aria-label="事务完成度" aria-valuemin="0" aria-valuemax="100" aria-valuenow={percent}><i style={`width: ${percent}%`}></i></div>
         <div class="xz-slice-progress-summary">
-            <small>{planningSummary}</small>
+            <small title={planningSummary}>{planningSummary}</small>
             {#if todaySlice?.status === "scheduled"}
-                <span class="xz-slice-actions"><button type="button" disabled={saving || disabled} on:click={() => void finishToday("completed")}>完成</button><button class="abandon" type="button" disabled={saving || disabled} on:click={() => void finishToday("abandoned")}>放弃本次切片</button></span>
+                <span class="xz-slice-actions"><button type="button" disabled={saving || disabled} on:click={() => void finishToday("completed")}>完成</button><button class="abandon" type="button" disabled={saving || disabled} on:click={() => void finishToday("abandoned")} title="放弃本次切片">放弃</button></span>
             {/if}
         </div>
     </div>

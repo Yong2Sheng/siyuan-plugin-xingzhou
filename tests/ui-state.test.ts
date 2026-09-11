@@ -94,6 +94,15 @@ describe("ui-state 视图状态解析", () => {
         expect(parseViewState({ page: "all", filter: "all", selectedId: 123 })?.selectedId).toBeNull();
     });
 
+    it("「今日」筛选可落盘并恢复，未知筛选值仍整体拒绝", () => {
+        // 新增筛选值必须同步进白名单，否则重启插件会因一个字段非法丢掉整份视图状态
+        const state = parseViewState({ page: "all", filter: "today", scope: "all", selectedId: "t1" });
+        expect(state?.filter).toBe("today");
+        expect(state?.selectedId).toBe("t1");
+        expect(parseViewStateFile(wrapViewStateFile(state!))?.filter).toBe("today");
+        expect(parseViewState({ page: "all", filter: "tomorrow" })).toBeNull();
+    });
+
     it("expandedIds 去重并过滤非法项", () => {
         const state = parseViewState({ page: "all", filter: "all", expandedIds: ["a", "a", 5, "b", null] });
         expect(state?.expandedIds).toEqual(["a", "b"]);

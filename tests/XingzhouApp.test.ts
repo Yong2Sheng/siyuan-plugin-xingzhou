@@ -213,6 +213,226 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-tree-scroll")?.textContent).toContain("绘制贸易路线");
     });
 
+    it("「今日」筛选只留今天有未完成切片的事务，并保留其上层路径", async () => {
+        const now = Date.now();
+        const todayKey = localDateKey(new Date());
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const base = {
+            documentId: null, detached: true, currentAction: "", nextAction: "", topProjectIds: [],
+            hardPrerequisiteIds: [], softPrerequisiteIds: [], planDate: null, deadline: null, noDeadline: false,
+            durationMinutes: null, energy: "", updatedAt: now,
+        };
+        const domain = { ...base, id: "domain", rowId: "domain", title: "写小说", type: "长期领域", status: "重点投入", parentIds: [] };
+        const project = { ...base, id: "project", rowId: "project", title: "完成第一卷", type: "项目", status: "进行中", parentIds: [domain.id] };
+        const task = { ...base, id: "task", rowId: "task", title: "第三章初稿", type: "任务", status: "进行中", parentIds: [project.id] };
+        const todayTx = {
+            ...base, id: "today-tx", rowId: "today-tx", title: "写第三章 1200 字", type: "事务", status: "进行中", parentIds: [task.id],
+            sliceTargetCount: 6,
+            executionSlices: [{ id: "today-slice", scheduledDate: todayKey, status: "scheduled" as const, completedAt: null, updatedAt: now }],
+        };
+        const tomorrowTx = {
+            ...base, id: "tomorrow-tx", rowId: "tomorrow-tx", title: "明天才做的事", type: "事务", status: "待开始", parentIds: [task.id],
+            sliceTargetCount: 2,
+            executionSlices: [{ id: "tomorrow-slice", scheduledDate: localDateKey(tomorrow), status: "scheduled" as const, completedAt: null, updatedAt: now }],
+        };
+        const emptyProject = { ...base, id: "empty-project", rowId: "empty-project", title: "今天没有安排的项目", type: "项目", status: "进行中", parentIds: [] };
+        const workItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [domain, project, task, todayTx, tomorrowTx, emptyProject], missingFields: [], fields: {},
+        };
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn().mockResolvedValue(workItemData),
+                captureInbox: vi.fn(), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
+            },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+
+        const todayButton = [...document.querySelectorAll<HTMLButtonElement>(".xz-segmented button")]
+            .find((button) => button.textContent?.trim().startsWith("今日"));
+        expect(todayButton).toBeInstanceOf(HTMLButtonElement);
+        expect([...document.querySelectorAll(".xz-segmented button")].map((button) => button.childNodes[0]?.textContent))
+            .toEqual(["今日", "全部", "活跃项目", "将来", "已结束"]);
+        expect(todayButton?.querySelector(".xz-segmented__count")?.textContent).toBe("1");
+        expect(document.querySelector(".xz-include-closed-toggle")).not.toBeNull();
+
+        // 先选中一个今天不做的事务，切到「今日」后选中项必须回落到今天要做的事
+        (document.querySelector('[data-work-item-id="tomorrow-tx"] .xz-tree-main') as HTMLButtonElement | null)?.click();
+        await tick();
+        expect(document.querySelector('[data-work-item-id="tomorrow-tx"] .xz-tree-row')?.classList.contains("selected")).toBe(true);
+
+        todayButton?.click();
+        await tick();
+
+        const treeText = document.querySelector(".xz-tree-scroll")?.textContent ?? "";
+        expect(treeText).toContain("写第三章 1200 字");
+        expect(treeText).not.toContain("明天才做的事");
+        expect(treeText).not.toContain("今天没有安排的项目");
+        // 上层路径保留为上下文，但不被标成「今日」
+        expect(treeText).toContain("写小说");
+        expect(treeText).toContain("完成第一卷");
+        expect(treeText).toContain("第三章初稿");
+        expect(document.querySelector('[data-work-item-id="today-tx"] > .xz-tree-row .xz-today-focus')?.textContent).toBe("今日");
+        expect(document.querySelector('[data-work-item-id="task"] > .xz-tree-row .xz-today-focus')).toBeNull();
+        expect(document.querySelector('[data-work-item-id="project"] > .xz-tree-row .xz-today-focus')).toBeNull();
+        // 今日视图天然不含已结束内容，开关不再出现
+        expect(document.querySelector(".xz-include-closed-toggle")).toBeNull();
+        expect(document.querySelector(".xz-panel-heading small")?.textContent).toBe("只看今天安排了未完成切片的事务");
+
+        // 选中项在今日不可见时回落到今天要做的事，而不是停在明天的事务上
+        expect(document.querySelector('[data-work-item-id="today-tx"] .xz-tree-row')?.classList.contains("selected")).toBe(true);
+        expect(document.querySelector('[data-work-item-id="tomorrow-tx"] .xz-tree-row')).toBeNull();
+
+        [...document.querySelectorAll<HTMLButtonElement>(".xz-segmented button")].find((button) => button.textContent?.trim() === "全部")?.click();
+        await tick();
+        expect(document.querySelector(".xz-tree-scroll")?.textContent).toContain("明天才做的事");
+        expect(document.querySelector(".xz-include-closed-toggle")).not.toBeNull();
+    });
+
+    it("今天没有任何切片时，「今日」给出到本周安排的出口", async () => {
+        const now = Date.now();
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const futureTx = {
+            id: "future-tx", rowId: "future-tx", title: "下周再推进的事", documentId: null, detached: true,
+            type: "事务", status: "待开始", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            hardPrerequisiteIds: [], softPrerequisiteIds: [], planDate: null, deadline: null, noDeadline: false,
+            durationMinutes: null, energy: "", updatedAt: now, sliceTargetCount: 2,
+            executionSlices: [{ id: "future-slice", scheduledDate: localDateKey(tomorrow), status: "scheduled" as const, completedAt: null, updatedAt: now }],
+        };
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn().mockResolvedValue({
+                    attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+                    items: [futureTx], missingFields: [], fields: {},
+                }),
+                captureInbox: vi.fn(), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
+            },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll<HTMLButtonElement>(".xz-segmented button")].find((button) => button.textContent?.trim().startsWith("今日"))?.click();
+        await tick();
+
+        expect(document.querySelector(".xz-empty-hint")?.textContent).toContain("今天还没有安排执行切片");
+        expect(document.querySelector(".xz-tree-scroll")?.textContent).not.toContain("下周再推进的事");
+
+        const jump = document.querySelector<HTMLButtonElement>(".xz-empty-hint .xz-link-button");
+        expect(jump?.textContent).toBe("去「本周」安排今天要做的事务");
+        jump?.click();
+        await tick();
+        expect(document.querySelector(".xz-week-page")).not.toBeNull();
+    });
+
+    it("今日视图里取消当日切片后仍停在原事务，可直接再点一次恢复", async () => {
+        const { workItemData, saveItem } = todayFocusFixture();
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn().mockResolvedValue(workItemData),
+                captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(),
+            },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll<HTMLButtonElement>(".xz-segmented button")].find((button) => button.textContent?.trim().startsWith("今日"))?.click();
+        await tick();
+        selectTreeRow("today-tx");
+
+        // 详情面板日历里点掉今天那个格子：取消当日切片
+        const todayCell = document.querySelector<HTMLButtonElement>(`.xz-slice-day[data-date="${localDateKey(new Date())}"]`);
+        expect(todayCell?.classList.contains("scheduled")).toBe(true);
+        // 按钮与说明同一行（不换行、不另起一行），且文案紧凑
+        expect([...document.querySelectorAll(".xz-slice-progress-summary > .xz-slice-actions button")].map((button) => button.textContent))
+            .toEqual(["完成", "放弃"]);
+        expect(document.querySelector(".xz-slice-actions button.abandon")?.getAttribute("title")).toBe("放弃本次切片");
+        expect(document.querySelector(".xz-slice-progress-summary small")?.textContent).toBe("今天已安排 1 片");
+        todayCell?.click();
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
+        expect(saveItem.mock.calls[0][2].executionSlices).toEqual([]);
+        // 今天没有切片就不再有按钮行，说明行不额外占高度
+        await vi.waitFor(() => expect(document.querySelector(".xz-slice-progress-summary > .xz-slice-actions")).toBeNull());
+        expect(document.querySelectorAll(".xz-slice-progress-summary button")).toHaveLength(0);
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="today-tx"] .xz-tag--pinned-out')).not.toBeNull());
+
+        // 关键回归：详情面板不许自己跳到另一个今日事务上
+        expect((document.querySelector('.xz-detail input[aria-label="名称"]') as HTMLInputElement)?.value).toBe("写第三章 1200 字");
+        expect(document.querySelector('[data-work-item-id="today-tx"] .xz-tree-row')?.classList.contains("selected")).toBe(true);
+        // 不再命中筛选，但仍保留在树里，并给出明确标记与说明
+        expect(document.querySelector('[data-work-item-id="today-tx"] .xz-tag--pinned-out')?.textContent).toBe("已移出今日");
+        expect(document.querySelector('[data-work-item-id="today-tx"] > .xz-tree-row .xz-today-focus')).toBeNull();
+        // 不再额外插入说明条／改副标题：那种“提示”本身会让层级视图跳动
+        expect(document.querySelector(".xz-tree-pinned-note")).toBeNull();
+        expect(document.querySelector(".xz-panel-heading small")?.textContent).toBe("只看今天安排了未完成切片的事务");
+        expect(document.querySelector('[data-work-item-id="today-tx"] .xz-slice-plan-indicator.needs-planning')?.textContent).toBe("待安排 2");
+
+        // 误点可以立刻在同一位置点回来：切片恢复，标记消失，详情面板始终是同一个事务
+        document.querySelector<HTMLButtonElement>(`.xz-slice-day[data-date="${localDateKey(new Date())}"]`)?.click();
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalledTimes(2));
+        expect(saveItem.mock.calls[1][2].executionSlices?.[0]).toMatchObject({ scheduledDate: localDateKey(new Date()), status: "scheduled" });
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="today-tx"] .xz-today-focus')).not.toBeNull());
+        expect(document.querySelector('[data-work-item-id="today-tx"] .xz-tag--pinned-out')).toBeNull();
+        expect(document.querySelector(".xz-tree-pinned-note")).toBeNull();
+        expect(document.querySelector('[data-work-item-id="today-tx"] .xz-tree-row')?.classList.contains("selected")).toBe(true);
+        expect((document.querySelector('.xz-detail input[aria-label="名称"]') as HTMLInputElement)?.value).toBe("写第三章 1200 字");
+    });
+
+    it("取消当日切片后主动选中别的事务，被保留的条目才移出今日", async () => {
+        const { workItemData, saveItem } = todayFocusFixture();
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn().mockResolvedValue(workItemData),
+                captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(),
+            },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll<HTMLButtonElement>(".xz-segmented button")].find((button) => button.textContent?.trim().startsWith("今日"))?.click();
+        await tick();
+        selectTreeRow("today-tx");
+        document.querySelector<HTMLButtonElement>(`.xz-slice-day[data-date="${localDateKey(new Date())}"]`)?.click();
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="today-tx"] .xz-tag--pinned-out')).not.toBeNull());
+
+        selectTreeRow("other-tx");
+        await tick();
+        expect(document.querySelector('[data-work-item-id="today-tx"]')).toBeNull();
+        expect(document.querySelector('[data-work-item-id="other-tx"] .xz-tree-row')?.classList.contains("selected")).toBe(true);
+        expect((document.querySelector('.xz-detail input[aria-label="名称"]') as HTMLInputElement)?.value).toBe("另一件今天要做的事");
+
+        // 主动切筛选同样放下钉子：回到全部后取消切片的事务按常规可见性显示
+        [...document.querySelectorAll<HTMLButtonElement>(".xz-segmented button")].find((button) => button.textContent?.trim() === "今日")?.click();
+        await tick();
+        expect(document.querySelector('[data-work-item-id="today-tx"]')).toBeNull();
+        expect(document.querySelector('[data-work-item-id="other-tx"]')).not.toBeNull();
+    });
+
+    it("删除被保留的选中项后仍会回落到其他可见事务", async () => {
+        const { workItemData, buildData } = todayFocusFixture();
+        const deleteItem = vi.fn(async () => buildData(workItemData.items.filter((item) => item.id !== "today-tx")));
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn().mockResolvedValue(workItemData),
+                captureInbox: vi.fn(), saveItem: vi.fn(), deleteItem, openDocument: vi.fn(),
+                openItemMenu: (_event, onDelete) => onDelete(),
+            },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll<HTMLButtonElement>(".xz-segmented button")].find((button) => button.textContent?.trim().startsWith("今日"))?.click();
+        await tick();
+        selectTreeRow("today-tx");
+
+        document.querySelector<HTMLButtonElement>('[data-work-item-id="today-tx"] .xz-tree-menu-button')?.click();
+        await vi.waitFor(() => expect(document.querySelector(".xz-delete-dialog")).not.toBeNull());
+        [...document.querySelectorAll<HTMLButtonElement>(".xz-delete-dialog button")].find((button) => button.textContent?.includes("确认删除"))?.click();
+
+        await vi.waitFor(() => expect(deleteItem).toHaveBeenCalledTimes(1));
+        // 条目没了就不能再钉住：交回回落逻辑，落到另一个可见事务
+        await vi.waitFor(() => expect(document.querySelector('[data-work-item-id="other-tx"] .xz-tree-row')?.classList.contains("selected")).toBe(true));
+        expect(document.querySelector('[data-work-item-id="today-tx"]')).toBeNull();
+    });
+
     it("可用每行的上下按钮保存同级顺序", async () => {
         const parent: WorkItem = {
             id: "project", rowId: "project", title: "小说", documentId: null, detached: true,
@@ -1044,3 +1264,50 @@ describe("XingzhouApp", () => {
         await vi.waitFor(() => expect((document.querySelector('.xz-detail input[aria-label="名称"]') as HTMLInputElement)?.value).toBe("完成第二章"));
     });
 });
+
+/** 点树里某一行的主体按钮选中它（与用户点击行为一致）。 */
+function selectTreeRow(id: string) {
+    document.querySelector<HTMLButtonElement>(`[data-work-item-id="${id}"] > .xz-tree-row .xz-tree-main`)?.click();
+}
+
+/**
+ * 「今日」相关回归用例的共用数据：两条今天有未完成切片的事务，外加一条已结束的事务。
+ * buildData 让 saveItem / deleteItem 能按真实结构回写，从而覆盖“保存后视图如何反应”的真实链路。
+ */
+function todayFocusFixture() {
+    const now = Date.now();
+    const todayKey = localDateKey(new Date());
+    const base = {
+        documentId: null, detached: true, currentAction: "", nextAction: "", parentIds: [] as string[], topProjectIds: [] as string[],
+        hardPrerequisiteIds: [] as string[], softPrerequisiteIds: [] as string[], planDate: null, deadline: null, noDeadline: false,
+        durationMinutes: 30, energy: "", updatedAt: now, sliceTargetCount: 2,
+    };
+    const todayTx: WorkItem = {
+        ...base, id: "today-tx", rowId: "today-tx", title: "写第三章 1200 字", type: "事务", status: "进行中",
+        executionSlices: [{ id: "today-slice", scheduledDate: todayKey, status: "scheduled", completedAt: null, updatedAt: now }],
+    };
+    const otherTx: WorkItem = {
+        ...base, id: "other-tx", rowId: "other-tx", title: "另一件今天要做的事", type: "事务", status: "进行中",
+        executionSlices: [{ id: "other-slice", scheduledDate: todayKey, status: "scheduled", completedAt: null, updatedAt: now }],
+    };
+    const closedTx: WorkItem = {
+        ...base, id: "closed-tx", rowId: "closed-tx", title: "已经结束的事", type: "事务", status: "已完成", executionSlices: [],
+    };
+    const buildData = (items: WorkItem[]): WorkItemData => ({
+        attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view", items, missingFields: [], fields: {},
+    });
+    const items = [todayTx, otherTx, closedTx];
+
+    // 只回写本用例会改动的字段，避免把 WorkItemChanges 的宽类型混进 WorkItem
+    const saveItem = vi.fn(async (currentData: WorkItemData, currentItem: WorkItem, changes: WorkItemChanges): Promise<WorkItemData> => buildData(
+        currentData.items.map((candidate): WorkItem => candidate.id === currentItem.id
+            ? {
+                ...candidate,
+                ...(changes.executionSlices !== undefined ? { executionSlices: changes.executionSlices } : {}),
+                ...(typeof changes.status === "string" ? { status: changes.status } : {}),
+            }
+            : candidate),
+    ));
+
+    return { workItemData: buildData(items), buildData, saveItem };
+}
