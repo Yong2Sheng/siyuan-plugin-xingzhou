@@ -588,6 +588,69 @@ describe("行舟一级模块外壳", () => {
         expect(document.body.textContent).toContain("已自动保存并复核");
     });
 
+    it("只标记 12 点后熬夜也能保存，填了时间就按时间判定，清空后回到标记状态", async () => {
+        let store = researchDailyStore();
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await tick();
+        await vi.waitFor(() => expect(document.querySelector('[aria-label="昨晚熄灯时段"]')).not.toBeNull());
+
+        // 选「12 点后（熬夜）」：时间行收起为静态标记，不需要分钟也能算填好
+        choose("昨晚熄灯时段", "after-midnight");
+        await tick();
+        expect(document.querySelector(".xz-daily-lights-off-skip")?.textContent).toContain("不记具体时间");
+        expect(document.querySelector('[aria-label="昨晚熄灯小时"]')).toBeNull();
+        // 落盘以 upsert 后的记录为准：时段在保存时重新推导
+        await vi.waitFor(() => expect(store.records[0].fields).toMatchObject({
+            lightsOffTime: "", lightsOffAt: "", lightsOffBand: "after-midnight",
+        }), { timeout: 2000 });
+
+        // 展开并填具体时间：时段改由时间判定，同时出现「清空」
+        clickButton("填时间");
+        await tick();
+        choose("昨晚熄灯小时", "00");
+        choose("昨晚熄灯分钟", "30");
+        await tick();
+        expect((document.querySelector('[aria-label="昨晚熄灯时段"]') as HTMLSelectElement).value).toBe("after-midnight");
+        expect(document.querySelector(".xz-daily-time-clear")).not.toBeNull();
+        await vi.waitFor(() => expect(store.records[0].fields).toMatchObject({
+            lightsOffTime: "00:30", lightsOffBand: "after-midnight",
+        }), { timeout: 2000 });
+        expect(store.records[0].fields.lightsOffAt).toMatch(/T00:30$/);
+
+        // 只有自己点「清空」才会清掉时间，时段标记保持不变
+        clickButton("清空");
+        await tick();
+        expect(document.querySelector(".xz-daily-lights-off-skip")?.textContent).toContain("不记具体时间");
+        await vi.waitFor(() => expect(store.records[0].fields).toMatchObject({
+            lightsOffTime: "", lightsOffAt: "", lightsOffBand: "after-midnight",
+        }), { timeout: 2000 });
+    });
+
+    it("填了时间以后时段由时间决定，下拉里冲突的选项置灰", async () => {
+        let store = researchDailyStore();
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await tick();
+        await vi.waitFor(() => expect(document.querySelector('[aria-label="昨晚熄灯小时"]')).not.toBeNull());
+
+        choose("昨晚熄灯小时", "00");
+        choose("昨晚熄灯分钟", "30");
+        await tick();
+
+        const select = document.querySelector('[aria-label="昨晚熄灯时段"]') as HTMLSelectElement;
+        const optionStates = [...select.options].map((option) => ({ value: option.value, disabled: option.disabled }));
+        expect(select.value).toBe("after-midnight");
+        expect(optionStates).toEqual([
+            { value: "", disabled: true },
+            { value: "before-midnight", disabled: true },
+            { value: "after-midnight", disabled: false },
+        ]);
+        await vi.waitFor(() => expect(store.records[0].fields).toMatchObject({ lightsOffTime: "00:30", lightsOffBand: "after-midnight" }), { timeout: 2000 });
+    });
+
     it("再次点击已选评分即可清除，并且不增加会造成跳动的按钮", async () => {
         const properties = props();
         component = new DailyRhythm({ target: document.body, props: { loadDaily: properties.loadDaily, saveDaily: properties.saveDaily } });

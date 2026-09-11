@@ -2,6 +2,22 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## Unreleased
+
+### Added
+
+- Actual lights-off gained a **bedtime band** selector (before midnight / after midnight · stayed up), shown inside the label row and vertically centred with the label:
+  - After midnight can be recorded with one click and **without inventing an exact minute**: the time row turns into "no exact time", and "Add time" expands it when you do know;
+  - When a time is filled in, the band is derived from it (an after-midnight clock time means after midnight), and the conflicting band is disabled so contradictory values cannot be stored;
+  - Clearing a stored time only happens when you press "Clear" yourself; the band marker survives and the field returns to "no exact time";
+  - The history list shows a "stayed up" badge after sleep duration, and the missing-field check accepts the after-midnight marker instead of asking for a time forever.
+- The bedtime band is stored next to the exact time. Records written by earlier versions have no such field and get it derived from their existing time; revision numbers, rotating backups and read-after-write verification are unchanged.
+
+### Fixed
+
+- Fixed daily-record form controls being **22px wider than their own grid column**: they were sized as content-box, so `width:100%` was followed by another horizontal padding and border. At a 1440px window "the most important work today" overlapped the right column's "Adjustment details" by 12×94px, and at 1100px the watch sleep score input pushed into the neighbouring column. Inputs, selects and textareas now use `border-box`, so control edges line up with column edges.
+- Fixed the actual-lights-off label sitting 3px lower than the other labels in the same grid row because of the selector next to it.
+
 ## 2.0.0 - 2026-09-10
 
 ### Added

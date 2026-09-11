@@ -14,6 +14,7 @@
         type DailyRecord,
         type DailyRecordStore,
         type DailyRubric,
+        type LightsOffBand,
         type PlannedLightsOffDay,
         type PresenceState,
         type ResultState,
@@ -85,6 +86,8 @@
     let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
     let saveTask: Promise<boolean> | null = null;
     let missingOpen = false;
+    /** 「12 点后 + 不记具体时间」时是否已展开精确时间输入；纯界面状态，不持久化。 */
+    let sleepTimeExpanded = false;
 
     $: workApplicable = isWorkMetricApplicable(draft.dayType);
     $: isSaturdayReset = draft.dayType === "saturday-reset";
@@ -93,6 +96,13 @@
     $: dayGuidance = dayTypes.find((entry) => entry.value === draft.dayType)?.guidance ?? "";
     $: boundary = calculateBoundary(draft.fields.plannedWorkEndTime, draft.fields.actualWorkEndTime);
     $: resolvedSleep = resolveSleepDateTimes(draft);
+    $: sleepHasTime = /^\d{2}:\d{2}$/.test(draft.fields.lightsOffTime);
+    $: sleepBand = resolvedSleep.fields.lightsOffBand;
+    $: sleepBandTitle = [
+        sleepBand === "after-midnight" ? "12 点后（熬夜）：熄灯落在次日凌晨" : sleepBand === "before-midnight" ? "12 点前：熄灯落在当晚" : "尚未确认熄灯时段",
+        resolvedSleep.fields.lightsOffAt ? `记录为 ${shortDateFromLocalDateTime(resolvedSleep.fields.lightsOffAt)} ${draft.fields.lightsOffTime}` : "未记具体时间",
+        sleepHasTime ? "要改时段请先点「清空」" : "",
+    ].filter(Boolean).join(" · ");
     $: completion = calculateDailyCompletion(draft);
     $: morningCompletion = stagePresentation(completion, "morning");
     $: learningCompletion = stagePresentation(completion, "learning");
@@ -145,6 +155,7 @@
         store = next;
         currentDate = date;
         draft = cloneDailyRecord(next.records.find((record) => record.date === date) ?? createDailyRecord(date));
+        sleepTimeExpanded = false;
         dirty = false;
     }
 
@@ -153,6 +164,7 @@
         if (dirty && !(await flushAutoSave())) return false;
         currentDate = date;
         draft = cloneDailyRecord(store?.records.find((record) => record.date === date) ?? createDailyRecord(date));
+        sleepTimeExpanded = false;
         dirty = false;
         message = "";
         error = "";
@@ -374,6 +386,32 @@
         markDirty();
     }
 
+    /**
+     * 就寝时段：填了具体时间时时段由时间决定（下拉里其它项已置灰），
+     * 只有没填时间时才能显式选择；选「12 点后（熬夜）」即可只留标记、不记具体分钟。
+     */
+    function changeLightsOffBand(value: string) {
+        const allowed: LightsOffBand[] = ["", "before-midnight", "after-midnight"];
+        if (!allowed.includes(value as LightsOffBand)) return;
+        if (sleepHasTime) return;
+        draft.fields.lightsOffBand = value as LightsOffBand;
+        sleepTimeExpanded = false;
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    /** 只有用户自己点「清空」才会清掉熄灯时间；时段标记保持不变。 */
+    function clearLightsOffTime() {
+        draft.fields.lightsOffTime = "";
+        sleepTimeExpanded = false;
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    function expandLightsOffTime() {
+        sleepTimeExpanded = true;
+    }
+
     export async function flushAutoSave(): Promise<boolean> {
         clearAutoSaveTimer();
         return dirty ? saveNow() : true;
@@ -493,7 +531,8 @@
         if (!target) return;
         target.classList.add("xz-daily-field-focus");
         target.scrollIntoView?.({ block: "center", behavior: "smooth" });
-        target.querySelector<HTMLElement>("input, select, textarea, button")?.focus();
+        const focusTarget = target.querySelector<HTMLElement>("[data-missing-focus]") ?? target;
+        focusTarget.querySelector<HTMLElement>("input, select, textarea, button")?.focus();
         window.setTimeout(() => target.classList.remove("xz-daily-field-focus"), 1600);
     }
 
@@ -634,7 +673,25 @@
                     <section class="xz-daily-form-section">
                         <h3>睡眠与身体</h3>
                         <div class="xz-daily-fields three">
-                            <div class="xz-daily-field"><span class="xz-daily-label-with-note">昨晚熄灯 {#if resolvedSleep.fields.lightsOffAt}<small>{shortDateFromLocalDateTime(resolvedSleep.fields.lightsOffAt)}</small>{/if}</span><TimeSelect bind:value={draft.fields.lightsOffTime} ariaLabel="昨晚熄灯" /></div>
+                            <div class="xz-daily-field">
+                                <span class="xz-daily-label-with-note">昨晚熄灯
+                                    <select class="xz-daily-sleep-band" class:after-midnight={sleepBand === "after-midnight"} aria-label="昨晚熄灯时段" title={sleepBandTitle} value={sleepBand} on:change|stopPropagation={(event) => changeLightsOffBand(event.currentTarget.value)}>
+                                        <option value="" disabled={sleepHasTime}>尚未确认</option>
+                                        <option value="before-midnight" disabled={sleepHasTime && sleepBand !== "before-midnight"}>12 点前</option>
+                                        <option value="after-midnight" disabled={sleepHasTime && sleepBand !== "after-midnight"}>12 点后（熬夜）</option>
+                                    </select>
+                                </span>
+                                <div class="xz-daily-sleep-control" data-missing-focus>
+                                    {#if sleepBand === "after-midnight" && !sleepHasTime && !sleepTimeExpanded}
+                                        <div class="xz-daily-lights-off-skip"><span>不记具体时间</span><button type="button" on:click={expandLightsOffTime}>填时间</button></div>
+                                    {:else}
+                                        <div class="xz-daily-time-row">
+                                            <TimeSelect bind:value={draft.fields.lightsOffTime} ariaLabel="昨晚熄灯" />
+                                            {#if sleepHasTime}<button type="button" class="xz-daily-time-clear" on:click={clearLightsOffTime}>清空</button>{/if}
+                                        </div>
+                                    {/if}
+                                </div>
+                            </div>
                             <div class="xz-daily-field"><span class="xz-daily-label-with-note">今日起床 {#if resolvedSleep.fields.wakeAt}<small>{shortDateFromLocalDateTime(resolvedSleep.fields.wakeAt)}</small>{/if}</span><TimeSelect bind:value={draft.fields.wakeTime} ariaLabel="今日起床" /></div>
                             <div class="xz-daily-field"><span>睡眠时长</span><DurationSelect bind:value={draft.fields.sleepDurationMinutes} maxHours={16} ariaLabel="睡眠时长" /></div>
                             <div class="xz-daily-decision-column">
@@ -918,7 +975,7 @@
     {:else if view === "history"}
         <section class="xz-daily-list-view">
             <header><div><span class="xz-section-kicker">插件内部数据库</span><h2>历史数据</h2></div><span>{store?.records.length ?? 0} 天</span></header>
-            {#if !store?.records.length}<div class="xz-daily-empty"><h3>还没有每日记录</h3><p>从 9 月 3 日开始手动录入即可；这里不会迁移旧文档数据。</p></div>{:else}{#each [...store.records].reverse() as record (record.date)}<button class="xz-daily-history-row" type="button" on:click={() => void openHistoryRecord(record.date)}><strong>{record.date}</strong><span>{dayTypeLabel(record.dayType)}</span><span>睡眠 {record.fields.sleepDurationMinutes === null ? "—" : `${Math.floor(record.fields.sleepDurationMinutes / 60)} 小时 ${record.fields.sleepDurationMinutes % 60} 分`}</span><span>精力 {record.fields.daytimeEnergy ?? "—"}</span><span>{statusFor(record)}</span></button>{/each}{/if}
+            {#if !store?.records.length}<div class="xz-daily-empty"><h3>还没有每日记录</h3><p>从 9 月 3 日开始手动录入即可；这里不会迁移旧文档数据。</p></div>{:else}{#each [...store.records].reverse() as record (record.date)}<button class="xz-daily-history-row" type="button" on:click={() => void openHistoryRecord(record.date)}><strong>{record.date}</strong><span>{dayTypeLabel(record.dayType)}</span><span>睡眠 {record.fields.sleepDurationMinutes === null ? "—" : `${Math.floor(record.fields.sleepDurationMinutes / 60)} 小时 ${record.fields.sleepDurationMinutes % 60} 分`}{#if record.fields.lightsOffBand === "after-midnight"}<em class="xz-daily-night-owl">熬夜</em>{/if}</span><span>精力 {record.fields.daytimeEnergy ?? "—"}</span><span>{statusFor(record)}</span></button>{/each}{/if}
         </section>
     {:else if view === "rubrics"}
         <section class="xz-daily-list-view">

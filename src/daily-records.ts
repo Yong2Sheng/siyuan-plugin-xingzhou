@@ -8,6 +8,8 @@ export type TriState = "yes" | "no" | "not-applicable" | "";
 export type PresenceState = "yes" | "no" | "";
 export type BedtimePreparation = "yes" | "no" | "free" | "";
 export type PlannedLightsOffDay = "same-day" | "next-day" | "";
+/** 就寝时段：12 点前 / 12 点后（熬夜）。有时间时由时间推导，没有时间时可以作为单独的熬夜标记保存。 */
+export type LightsOffBand = "before-midnight" | "after-midnight" | "";
 export type ResultState = "met" | "exceeded" | "missed" | "not-applicable" | "";
 export type ClosureNeed = "needed" | "not-needed" | "";
 
@@ -22,6 +24,7 @@ export type DailyRecordFields = {
     lightsOffTime: string;
     wakeTime: string;
     lightsOffAt: string;
+    lightsOffBand: LightsOffBand;
     wakeAt: string;
     sleepDurationMinutes: number | null;
     hasWatchSleepScore: PresenceState;
@@ -223,6 +226,9 @@ export function cloneDailyRecord(record: DailyRecord): DailyRecord {
  * Attach explicit local date-times while keeping the UI's compact time-only inputs.
  * A clock time later than the wake time belongs to the previous calendar day;
  * an after-midnight time belongs to the record date.
+ *
+ * 就寝时段（lightsOffBand）跟着一起推导：有时间时以时间为准（凌晨时间算「12 点后」，即熬夜），
+ * 没有时间时保留用户显式选择的时段，因此「12 点后 + 不记具体时间」可以只存一个标记。
  */
 export function resolveSleepDateTimes(record: DailyRecord): DailyRecord {
     const next = cloneDailyRecord(record);
@@ -230,6 +236,7 @@ export function resolveSleepDateTimes(record: DailyRecord): DailyRecord {
     next.fields.wakeAt = validTime(wakeTime) ? `${next.date}T${wakeTime}` : "";
     if (!validTime(lightsOffTime)) {
         next.fields.lightsOffAt = "";
+        next.fields.lightsOffBand = lightsOffBand(next.fields.lightsOffBand);
         resolvePlannedLightsOff(next);
         return next;
     }
@@ -238,6 +245,7 @@ export function resolveSleepDateTimes(record: DailyRecord): DailyRecord {
     const belongsToPreviousDay = wakeMinutes === null ? lightsOffMinutes >= 12 * 60 : lightsOffMinutes > wakeMinutes;
     const date = belongsToPreviousDay ? shiftDateKey(next.date, -1) : next.date;
     next.fields.lightsOffAt = `${date}T${lightsOffTime}`;
+    next.fields.lightsOffBand = belongsToPreviousDay ? "before-midnight" : "after-midnight";
     resolvePlannedLightsOff(next);
     return next;
 }
@@ -263,7 +271,7 @@ function resolvePlannedLightsOff(record: DailyRecord): void {
 
 function emptyDailyFields(): DailyRecordFields {
     return {
-        lightsOffTime: "", wakeTime: "", lightsOffAt: "", wakeAt: "", sleepDurationMinutes: null,
+        lightsOffTime: "", wakeTime: "", lightsOffAt: "", lightsOffBand: "", wakeAt: "", sleepDurationMinutes: null,
         hasWatchSleepScore: "", watchSleepScore: null, subjectiveSleepQuality: null,
         hasMorningWeight: "", morningWeight: null, weightUnit: "kg", workStartTime: "",
         plannedWorkEndTime: "", importantWorkPlan: "", saturdayReviewOccurred: "", hasDayAdjustments: "", dayAdjustments: "", trainingPlan: "",
@@ -348,6 +356,7 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             hasAnomalyOrObservation: normalizedAnomaly,
             anomalyOrObservation: normalizedAnomaly === "yes" ? textValue(fields.anomalyOrObservation) : "",
             bedtimePreparation: bedtimePreparation(fields.bedtimePreparation),
+            lightsOffBand: lightsOffBand(fields.lightsOffBand),
             plannedLightsOffDay: plannedLightsOffDay(fields.plannedLightsOffDay, fields.plannedLightsOffTime),
         },
     });
@@ -402,6 +411,10 @@ function triState(value: unknown): TriState {
 
 function bedtimePreparation(value: unknown): BedtimePreparation {
     return value === "yes" || value === "no" || value === "free" ? value : "";
+}
+
+function lightsOffBand(value: unknown): LightsOffBand {
+    return value === "before-midnight" || value === "after-midnight" ? value : "";
 }
 
 function plannedLightsOffDay(value: unknown, time: unknown): PlannedLightsOffDay {

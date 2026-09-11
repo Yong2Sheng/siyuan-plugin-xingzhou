@@ -31,6 +31,21 @@ describe("生活节律完整度检查", () => {
         expect(skipped.stages.find((stage) => stage.stage === "after-work")?.state).toBe("incomplete");
     });
 
+    it("「12 点后」的熬夜标记满足昨晚熄灯，12 点前没有时间仍然算待补", () => {
+        const markerOnly = createDailyRecord("2026-09-04", "research-workday", 1000);
+        markerOnly.fields.lightsOffBand = "after-midnight";
+        expect(calculateDailyCompletion(markerOnly).missing.map((item) => item.label)).not.toContain("昨晚熄灯");
+
+        const timed = createDailyRecord("2026-09-04", "research-workday", 1000);
+        timed.fields.lightsOffTime = "23:05";
+        timed.fields.lightsOffBand = "before-midnight";
+        expect(calculateDailyCompletion(timed).missing.map((item) => item.label)).not.toContain("昨晚熄灯");
+
+        const beforeWithoutTime = createDailyRecord("2026-09-04", "research-workday", 1000);
+        beforeWithoutTime.fields.lightsOffBand = "before-midnight";
+        expect(calculateDailyCompletion(beforeWithoutTime).missing.map((item) => item.label)).toContain("昨晚熄灯");
+    });
+
     it("根据条件判断动态加入或移除待补字段", () => {
         const record = createDailyRecord("2026-09-04", "research-workday", 1000);
         record.fields.professionalStudyPlanned = "yes";

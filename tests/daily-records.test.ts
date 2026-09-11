@@ -170,6 +170,67 @@ describe("生活节律内部数据库", () => {
         expect(resolveSleepDateTimes(afterMidnight).fields.lightsOffAt).toBe("2026-09-03T00:30");
     });
 
+    it("把 12 点后的熄灯记为熬夜时段，没有具体时间时也可以只留标记", () => {
+        const evening = createDailyRecord("2026-09-03", "research-workday", 1000);
+        evening.fields.lightsOffTime = "22:07";
+        evening.fields.wakeTime = "06:10";
+        expect(resolveSleepDateTimes(evening).fields).toMatchObject({
+            lightsOffAt: "2026-09-02T22:07",
+            lightsOffBand: "before-midnight",
+        });
+
+        const afterMidnight = createDailyRecord("2026-09-03", "research-workday", 1000);
+        afterMidnight.fields.lightsOffTime = "00:30";
+        afterMidnight.fields.wakeTime = "06:10";
+        expect(resolveSleepDateTimes(afterMidnight).fields).toMatchObject({
+            lightsOffAt: "2026-09-03T00:30",
+            lightsOffBand: "after-midnight",
+        });
+
+        // 熬夜标记可以独立保存：没有时间就不写 lightsOffAt，也不伪造 00:00
+        const markerOnly = createDailyRecord("2026-09-03", "research-workday", 1000);
+        markerOnly.fields.lightsOffBand = "after-midnight";
+        const saved = upsertDailyRecord(createEmptyDailyStore(900), markerOnly, 1100).records[0];
+        expect(saved.fields).toMatchObject({ lightsOffTime: "", lightsOffAt: "", lightsOffBand: "after-midnight" });
+
+        // 12 点前是默认状态，没有时间时同样保留显式选择
+        const beforeOnly = createDailyRecord("2026-09-03", "research-workday", 1000);
+        beforeOnly.fields.lightsOffBand = "before-midnight";
+        expect(resolveSleepDateTimes(beforeOnly).fields.lightsOffBand).toBe("before-midnight");
+    });
+
+    it("时间与时段冲突时以时间为准，非法时段被丢弃", () => {
+        const conflicting = createDailyRecord("2026-09-03", "research-workday", 1000);
+        conflicting.fields.lightsOffBand = "before-midnight";
+        conflicting.fields.lightsOffTime = "00:30";
+        conflicting.fields.wakeTime = "06:10";
+        expect(resolveSleepDateTimes(conflicting).fields.lightsOffBand).toBe("after-midnight");
+
+        const invalid = createDailyRecord("2026-09-03", "research-workday", 1000);
+        invalid.fields.lightsOffBand = "afternoon" as never;
+        expect(resolveSleepDateTimes(invalid).fields.lightsOffBand).toBe("");
+    });
+
+    it("已发布版本的数据没有时段字段时按已有时间补出来", () => {
+        const withoutBand = (record: DailyRecord): DailyRecord => {
+            const { lightsOffBand: _dropped, ...fields } = record.fields;
+            return { ...record, fields: fields as DailyRecord["fields"] };
+        };
+        const legacy = createDailyRecord("2026-09-03", "research-workday", 1000);
+        legacy.fields.lightsOffTime = "23:40";
+        legacy.fields.wakeTime = "06:30";
+
+        const parsed = parseDailyStore({ version: 1, revision: 3, createdAt: 1000, updatedAt: 2000, records: [withoutBand(legacy)] });
+        expect(parsed?.records[0].fields.lightsOffBand).toBe("before-midnight");
+
+        const legacyAfterMidnight = createDailyRecord("2026-09-04", "research-workday", 1000);
+        legacyAfterMidnight.fields.lightsOffTime = "01:15";
+        legacyAfterMidnight.fields.wakeTime = "07:00";
+        const parsedAfterMidnight = parseDailyStore({ version: 1, revision: 4, createdAt: 1000, updatedAt: 2000, records: [withoutBand(legacyAfterMidnight)] });
+        expect(parsedAfterMidnight?.records[0].fields.lightsOffBand).toBe("after-midnight");
+        expect(parsedAfterMidnight?.records[0].fields.lightsOffAt).toBe("2026-09-04T01:15");
+    });
+
     it("不需要工作闭环时保存为不适用语义，而不是零分钟", () => {
         const record = createDailyRecord("2026-09-03", "research-workday", 1000);
         record.fields.closureNeed = "not-needed";

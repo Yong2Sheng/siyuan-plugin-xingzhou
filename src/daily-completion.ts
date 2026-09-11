@@ -75,7 +75,7 @@ export function calculateDailyCompletion(record: DailyRecord): DailyCompletion {
 function morningChecks(record: DailyRecord): Check[] {
     const fields = record.fields;
     const checks = [
-        check("lights-off", "昨晚熄灯", "昨晚熄灯", text(fields.lightsOffTime)),
+        check("lights-off", "昨晚熄灯", "昨晚熄灯", text(fields.lightsOffTime) || fields.lightsOffBand === "after-midnight"),
         check("wake-time", "今日起床", "今日起床", text(fields.wakeTime)),
         check("sleep-duration", "睡眠时长", "睡眠时长", number(fields.sleepDurationMinutes)),
         check("watch-sleep-score-decision", "是否有手表睡眠评分", "今天是否有手表睡眠评分", text(fields.hasWatchSleepScore)),
@@ -195,7 +195,7 @@ function eveningChecks(record: DailyRecord): Check[] {
 
 function morningTouched(fields: DailyRecordFields, holiday: boolean, saturday: boolean, conference: boolean): boolean {
     const keys: Array<keyof DailyRecordFields> = [
-        "lightsOffTime", "wakeTime", "sleepDurationMinutes", "hasWatchSleepScore", "watchSleepScore", "subjectiveSleepQuality",
+        "lightsOffTime", "lightsOffBand", "wakeTime", "sleepDurationMinutes", "hasWatchSleepScore", "watchSleepScore", "subjectiveSleepQuality",
         "hasMorningWeight", "morningWeight",
         "hasDayAdjustments", "dayAdjustments", "trainingCompleted", "trainingPlan",
     ];

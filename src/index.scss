@@ -1072,7 +1072,11 @@
 .xz-daily-score { width: min(100%, var(--xz-daily-structured-width)); }
 .xz-daily-label-with-note { display: flex; align-items: baseline; gap: 7px; }
 .xz-daily-label-with-note small { color: var(--xingzhou-primary); font-size: 11px; font-weight: 500; }
+/* 每日期表单控件统一 border-box：旧版按 content-box 计算，width:100% 之外还要再加 10px×2 padding + 1px×2 border，
+   任何控件都会比自己的栅格列宽出 22px（1440px 窗口下「今天最重要的工作内容」与右列「调整内容」会相交 12×94px，
+   1100px 窗口下「手表睡眠评分」会顶进邻列）。border-box 让控件老实待在自己的列内。 */
 .xz-daily-fields input, .xz-daily-fields select, .xz-daily-fields textarea, .xz-daily-fields output {
+    box-sizing: border-box;
     width: 100%;
     min-height: 42px;
     padding: 8px 10px;
@@ -1128,6 +1132,45 @@
 .xz-daily-field-note { margin: 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.5; }
 .xz-daily-lights-off-inline { min-width: 0; display: grid; grid-template-columns: minmax(150px, .9fr) minmax(210px, 1.1fr); align-items: center; gap: 8px; }
 .xz-daily-lights-off-inline > .xz-daily-time-select { width: 100%; }
+/* 昨晚熄灯：时段（12 点前 / 12 点后·熬夜）放在标签行，控制行保持原高度。
+   三条对齐约束（都由设计稿自检量化校验）：
+   1) 标签行是 flex，空间不足时中文会被压成一个字一行，因此 nowrap + flex-wrap：放不下时下拉整体换行；
+   2) 用 flex-start + 负 margin-top，而不是 baseline：baseline 会让 28px 高的下拉把本字段标签顶低 3px，
+      与同一栅格行的「今日起床」「睡眠时长」错位；负 margin 让下拉在文字两侧对称探出，文字仍在自然行位；
+   3) 下拉紧跟标签，不用 margin-left:auto：右对齐会让它贴到相邻字段标签旁边，看起来像别人的控件。 */
+.xz-daily-label-with-note:has(> select.xz-daily-sleep-band) { align-items: flex-start; flex-wrap: wrap; row-gap: 4px; white-space: nowrap; }
+.xz-daily-label-with-note > select.xz-daily-sleep-band {
+    width: auto; flex: 0 0 auto; min-height: 28px; margin: -4px 0 0 3px; padding: 0 4px;
+    border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius);
+    color: var(--xingzhou-muted); background: var(--xingzhou-bg); font-size: 13px;
+}
+.xz-daily-label-with-note > select.xz-daily-sleep-band.after-midnight {
+    border-color: color-mix(in srgb, var(--xingzhou-primary) 55%, transparent);
+    color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 600;
+}
+.xz-daily-label-with-note > select.xz-daily-sleep-band option:disabled { color: var(--xingzhou-muted); }
+.xz-daily-sleep-control { min-width: 0; display: grid; align-content: start; }
+/* 12 点后（熬夜）且不记具体时间：静态标记 + 可选入口，宽度与时间行一致 */
+.xz-daily-lights-off-skip { width: min(100%, var(--xz-daily-structured-width)); min-height: 42px; display: flex; align-items: center; gap: 8px; }
+.xz-daily-lights-off-skip > span {
+    flex: 1 1 auto; min-width: 0; overflow: hidden; padding: 0 10px;
+    border: 1px dashed var(--xingzhou-border); border-radius: var(--xingzhou-radius);
+    color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); font-size: 13px; line-height: 40px;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+.xz-daily-lights-off-skip > button, .xz-daily-time-clear {
+    flex: 0 0 auto; min-height: 42px; padding: 0 10px;
+    border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius);
+    color: var(--xingzhou-primary); background: var(--xingzhou-bg); cursor: pointer; font-size: 13px;
+}
+.xz-daily-lights-off-skip > button:hover, .xz-daily-time-clear:hover { border-color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
+.xz-daily-time-row { width: min(100%, var(--xz-daily-structured-width)); display: flex; align-items: center; gap: 8px; }
+.xz-daily-time-row > .xz-daily-time-select { width: auto; flex: 1 1 auto; min-width: 0; }
+/* 历史列表里的熬夜标记：与熄灯时段同源，不用红色告警 */
+.xz-daily-night-owl { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-size: 11px; font-style: normal; font-weight: 600; vertical-align: 1px; }
+@media (any-pointer: coarse) {
+    .xz-daily-label-with-note > select.xz-daily-sleep-band { min-height: 36px; }
+}
 .xz-daily-bedtime-note { box-sizing: border-box; min-height: 42px; display: flex; align-items: center; margin: 22px 0 0; padding: 8px 10px; border-left: 3px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; }
 .xz-daily-personal-project-row { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 /* 个人事务区：左列是「是否有补充说明」判断和它展开的输入框，右列是「今日个人安排」，避免触发控件与结果分离。 */
