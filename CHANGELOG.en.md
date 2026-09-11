@@ -2,10 +2,12 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
-## Unreleased
+## 2.1.0 - 2026-09-11
 
 ### Added
 
+- **A transaction is complete once its target slices are done**: finishing the last slice now completes the transaction itself — the This Week board's Complete / Backfill complete / Complete early buttons, the slice calendar and today actions in the transaction detail, and Complete in Life Rhythm's Today's personal schedule all share one rule, so you no longer have to reopen the detail and press Complete transaction; undoing a slice completion that drops the item below its target moves it back to In Progress. Transactions that already ended (Done / Failed / Cancelled / Abandoned) are never rewritten by slice actions.
+- Each row in Life Rhythm's Today's personal schedule gained **Cancel arrangement**: it removes only today's slice and leaves the transaction itself untouched; the row disappears immediately and the daily record's personal-schedule snapshot is updated with it.
 - Actual lights-off gained a **bedtime band** selector (before midnight / after midnight · stayed up), shown inside the label row and vertically centred with the label:
   - After midnight can be recorded with one click and **without inventing an exact minute**: the time row turns into "no exact time", and "Add time" expands it when you do know;
   - When a time is filled in, the band is derived from it (an after-midnight clock time means after midnight), and the conflicting band is disabled so contradictory values cannot be stored;
@@ -13,8 +15,14 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
   - The history list shows a "stayed up" badge after sleep duration, and the missing-field check accepts the after-midnight marker instead of asking for a time forever.
 - The bedtime band is stored next to the exact time. Records written by earlier versions have no such field and get it derived from their existing time; revision numbers, rotating backups and read-after-write verification are unchanged.
 
+### Changed
+
+- Rows in Today's personal schedule now show the transaction's own end state: when the transaction is Done / Failed / Cancelled / Abandoned the **row stays visible** with a "Transaction done / Transaction cancelled" badge and its Complete, Abandon and Cancel arrangement actions are disabled, so a cancelled transaction can no longer look pending and actionable.
+- The Today's personal schedule box switched from a fixed 76px height to an **adaptive** one: about three rows at minimum, then in-box scrolling past roughly five rows. The empty state matches the height of a filled one, so adding or cancelling an arrangement no longer makes the section jump.
+
 ### Fixed
 
+- Fixed slice actions bypassing image-cleanup registration: when a slice completes its transaction, the images are registered for cleanup exactly like Mark as complete; undoing the completion back to In Progress clears that registration.
 - Fixed daily-record form controls being **22px wider than their own grid column**: they were sized as content-box, so `width:100%` was followed by another horizontal padding and border. At a 1440px window "the most important work today" overlapped the right column's "Adjustment details" by 12×94px, and at 1100px the watch sleep score input pushed into the neighbouring column. Inputs, selects and textareas now use `border-box`, so control edges line up with column edges.
 - Fixed the actual-lights-off label sitting 3px lower than the other labels in the same grid row because of the selector next to it.
 
