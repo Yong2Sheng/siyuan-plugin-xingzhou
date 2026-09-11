@@ -2,14 +2,6 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
-## Unreleased
-
-<!-- Unreleased: turn this into a version heading at the next release -->
-
-- Slice completion is again yours to confirm: filling every target slice no longer ends the transaction by itself. The slice calendar only asks "Target slices are all done — is the transaction done too?", and the state changes when you press Complete transaction.
-- The detail slice calendar gained an undo entry: click a completed cell, or use its context menu (Undo this completion / Undo this backfilled completion). Today returns to Scheduled, a past date to Missed, and a transaction you had already marked Done falls back to In Progress; abandoned slices stay read-only.
-- Today's cell is marked with the character 今 on the same line as the date, replacing that cell's status dot: it costs no extra height and never collides with the date number in wide or narrow cards.
-
 ## 2.1.0 - 2026-09-11
 
 ### Added
@@ -33,6 +25,8 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - Fixed slice actions bypassing image-cleanup registration: when a slice completes its transaction, the images are registered for cleanup exactly like Mark as complete; undoing the completion back to In Progress clears that registration.
 - Fixed daily-record form controls being **22px wider than their own grid column**: they were sized as content-box, so `width:100%` was followed by another horizontal padding and border. At a 1440px window "the most important work today" overlapped the right column's "Adjustment details" by 12×94px, and at 1100px the watch sleep score input pushed into the neighbouring column. Inputs, selects and textareas now use `border-box`, so control edges line up with column edges.
 - Fixed the actual-lights-off label sitting 3px lower than the other labels in the same grid row because of the selector next to it.
+
+- **Correction (later version)**: the "a transaction is complete once its target slices are done" rule above was changed back to **your confirmation** — filling every target slice no longer ends the transaction by itself, the slice calendar only asks "Target slices are all done — is the transaction done too?", and the state changes when you press Complete transaction. The detail slice calendar also gained an **undo** entry (click a completed cell or use its context menu: today returns to Scheduled, a past date to Missed, and a transaction you had marked Done by hand falls back to In Progress). The undo side of the rule shipped here (falling back to In Progress when the item is no longer full) is still in place. See the Unreleased section at the top of this file.
 
 ## 2.0.0 - 2026-09-10
 
