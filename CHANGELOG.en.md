@@ -2,12 +2,18 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
-## Unreleased
+## 2.2.0 - 2026-09-12
 
 ### Added
 
+- Execution slices support **undoing a completion**, today is marked with **今**, and **filling every target slice no longer ends the transaction by itself** (correcting the 2.1.0 behaviour): clicking a completed cell or using its context menu undoes it — today returns to Scheduled, a past date to Missed, a transaction you marked Done by hand falls back to In Progress, and abandoned slices stay read-only. With every target slice done the calendar only asks "Target slices are all done — is the transaction done too?", and the state changes when you press Complete transaction. Today's cell shows 今 on the same line as the date, so the marker costs no extra height.
 - Hierarchy browsing (the All page) gained a **Today view** in the filter group (first position, with a badge counting today's slots, and with the count of transactions that still have unfinished slices today): only transactions that still have unfinished execution slices today stay visible, so nothing else competes for attention. A matching transaction keeps its full area → project → task → transaction path as context, while only the transaction itself carries the blue Today marker; the sidebar scope groups, the toolbar toggles, and expand/collapse all follow the filter. The list previously only had the inline Today marker with no matching filter entry; both now share one rule (`isTodayFocusItem`), so the marker and the filter can never disagree.
 - The Today view is remembered with the rest of the view state: reopening the plugin returns to the filter you left (the filter allow-list in `ui-state.json` was extended to match).
+- Images in Current Action Details gained a **context menu**: right-click a thumbnail, an image in the read-mode text, or the enlarged original in the preview dialog to **Copy original image** or **Copy asset path**.
+  - Copy original image writes the **original file bytes** from the SiYuan asset library: a PNG screenshot is never decoded or resampled, so size and pixels match the image you originally pasted. It can be pasted straight into an AI conversation for pixel-level comparison instead of taking a new screenshot (which loses resolution).
+  - Non-PNG images (jpg / webp / gif / svg) are transcoded to PNG at their original size first: only the container changes, never the pixels, and an animated GIF keeps its first frame.
+  - The confirmation carries size and pixel dimensions (for example "Copied original image · 1280×800 · 611 KB"), and an unavailable clipboard, an unreadable asset, or a failed transcode each report their own reason instead of failing silently.
+  - Copy asset path copies `assets/...` as text so the same image can be referenced in prose. Only the image itself is a hit target: the size badge and the "×" remove button do not open the menu.
 
 ### Changed
 
@@ -19,6 +25,7 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 ### Fixed
 
 - Fixed the buttons jumping to the next line: the note and the buttons used to switch between side-by-side and stacked based on container width, so resizing the window moved the buttons. The layout no longer switches within a tier.
+- Fixed detail thumbnails **always collapsing to one per row**: when the container content box is ≤620px wide the thumbnail width is `calc(50% - 4px)`, and adding the 1px border made the real outer box `50% - 2px`, so two thumbnails plus the 8px gap exceeded 100% and every image ended up on its own line. At a 1440px pane the detail content box is exactly 568px, which is inside that range, so this was the everyday path. Measuring against `border-box` now restores two per row (both the `132×96` and `calc(50% - 4px) × 88` tiers render at their declared size), guarded by a layout-invariant test.
 
 ## 2.1.0 - 2026-09-11
 
@@ -44,7 +51,7 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 - Fixed daily-record form controls being **22px wider than their own grid column**: they were sized as content-box, so `width:100%` was followed by another horizontal padding and border. At a 1440px window "the most important work today" overlapped the right column's "Adjustment details" by 12×94px, and at 1100px the watch sleep score input pushed into the neighbouring column. Inputs, selects and textareas now use `border-box`, so control edges line up with column edges.
 - Fixed the actual-lights-off label sitting 3px lower than the other labels in the same grid row because of the selector next to it.
 
-- **Correction (later version)**: the "a transaction is complete once its target slices are done" rule above was changed back to **your confirmation** — filling every target slice no longer ends the transaction by itself, the slice calendar only asks "Target slices are all done — is the transaction done too?", and the state changes when you press Complete transaction. The detail slice calendar also gained an **undo** entry (click a completed cell or use its context menu: today returns to Scheduled, a past date to Missed, and a transaction you had marked Done by hand falls back to In Progress). The undo side of the rule shipped here (falling back to In Progress when the item is no longer full) is still in place. See the Unreleased section at the top of this file.
+- **Correction (later version)**: the "a transaction is complete once its target slices are done" rule above was changed back to **your confirmation** — filling every target slice no longer ends the transaction by itself, the slice calendar only asks "Target slices are all done — is the transaction done too?", and the state changes when you press Complete transaction. The detail slice calendar also gained an **undo** entry (click a completed cell or use its context menu: today returns to Scheduled, a past date to Missed, and a transaction you had marked Done by hand falls back to In Progress). The undo side of the rule shipped here (falling back to In Progress when the item is no longer full) is still in place. See the 2.2.0 section.
 
 ## 2.0.0 - 2026-09-10
 
