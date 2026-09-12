@@ -26,6 +26,13 @@ import {
 } from "./daily-records";
 import { applyDependencyStorage, DEPENDENCIES_FILE, normalizeDependencyStorage } from "./dependency-storage";
 import {
+    copyImagePathToClipboard,
+    copyImageToClipboard,
+    imageCopyMessage,
+    imagePathCopyMessage,
+    type ActionImageCopyTarget,
+} from "./image-clipboard";
+import {
     addStoredWorkItem,
     backupFileForRevision,
     createEmptyInternalStore,
@@ -183,6 +190,22 @@ export default class XingzhouPlugin extends Plugin {
                                     label: "删除工作项…",
                                     warning: true,
                                     click: () => onDelete(),
+                                });
+                                menu.open({ x: event.clientX, y: event.clientY });
+                            },
+                            openImageMenu: (event: MouseEvent, image: ActionImageCopyTarget) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                const menu = new Menu("xingzhou-action-image-menu");
+                                menu.addItem({
+                                    icon: "iconCopy",
+                                    label: "复制原图",
+                                    click: () => void copyActionImage(image),
+                                });
+                                menu.addItem({
+                                    icon: "iconLink",
+                                    label: "复制资源路径",
+                                    click: () => void copyActionImagePath(image),
                                 });
                                 menu.open({ x: event.clientX, y: event.clientY });
                             },
@@ -640,6 +663,18 @@ function createInternalItemId(): string {
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+/** 右键菜单：复制原图，并按结果给出精确反馈（成功带尺寸与体积，失败说明原因）。 */
+async function copyActionImage(image: ActionImageCopyTarget): Promise<void> {
+    const result = await copyImageToClipboard(image);
+    showMessage(imageCopyMessage(result), result.ok ? 4000 : 6000);
+}
+
+/** 右键菜单：复制 assets/… 资源路径，便于在文字里引用同一张图。 */
+async function copyActionImagePath(image: ActionImageCopyTarget): Promise<void> {
+    const result = await copyImagePathToClipboard(image.src);
+    showMessage(imagePathCopyMessage(result), result.ok ? 4000 : 6000);
 }
 
 function renderMountError(target: HTMLElement, error: unknown): void {

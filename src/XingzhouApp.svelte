@@ -42,6 +42,7 @@
     import { listUnusedAssetPaths, readAssetLibrarySize, readAssetSizes, removeUnusedAsset, uploadActionImage, type AssetRemovalResult } from "./asset-upload";
     import type { CaptureDialogMode, CaptureDialogRequest, CaptureDialogValues } from "./capture-dialog";
     import { prerequisiteIds, validateDependencyUpdate, type DependencyKind } from "./dependencies";
+    import type { ActionImageCopyTarget } from "./image-clipboard";
     import { continueMarkdownList, normalizeMarkdownOrderedLists } from "./markdown-editor";
     import { renderActionMarkdown } from "./markdown-renderer";
     import ExecutionSlicePlanner from "./ExecutionSlicePlanner.svelte";
@@ -87,6 +88,8 @@
         addChild?: { label: string; onClick: () => void },
         actions?: Array<{ label: string; icon?: string; onClick: () => void }>,
     ) => void = (_event, onDelete) => onDelete();
+    /** 右键图片时的菜单；由 index.ts 用思源 Menu 打开，组件只负责命中判定与取真实地址。 */
+    export let openImageMenu: (event: MouseEvent, image: ActionImageCopyTarget) => void = () => undefined;
     export let openCaptureDialog: (request: CaptureDialogRequest) => void = () => undefined;
     export let openDocument: (blockId: string) => Promise<void>;
     export let embedded = false;
@@ -1877,6 +1880,25 @@
         openActionImagePreview(field, src);
     }
 
+    /**
+     * 图片右键：只有图片本身算命中区（体积角标与「×」按钮不弹菜单）。
+     * 监听挂在容器上而不是 window 上：既覆盖 Lute 渲染出来的正文图，
+     * 又不会和思源那个全局 contextmenu 监听抢时序。
+     */
+    function handleImageContextMenu(event: MouseEvent) {
+        const target = event.target;
+        if (!(target instanceof HTMLImageElement)) return;
+        const src = target.currentSrc || target.src;
+        if (!src) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openImageMenu(event, {
+            src,
+            width: target.naturalWidth || 0,
+            height: target.naturalHeight || 0,
+        });
+    }
+
     function openActionImagePreview(field: ActionField, src: string) {
         actionPreviewDialog?.destroy();
         const name = imageLabel(src);
@@ -1888,6 +1910,8 @@
             content: `<div class="xz-action-image-preview"><img src="${src}" alt="${name}"></div><p class="xz-action-image-preview__note">按原分辨率显示${size}</p>`,
         });
         actionPreviewDialog = dialog;
+        // 弹窗内容是思源 Dialog 生成的 HTML，挂不上 Svelte 事件：在同一处理函数上补一层监听。
+        dialog.element.querySelector<HTMLElement>(".xz-action-image-preview")?.addEventListener("contextmenu", handleImageContextMenu);
         window.setTimeout(() => {
             dialog.element.querySelector<HTMLButtonElement>(".b3-dialog__close")?.focus();
         }, 0);
@@ -2707,7 +2731,8 @@
                             {#if editingAction === "currentAction"}
                                 <textarea use:focusOnMount use:autoResizeTextarea={detailDraft.currentAction} class="b3-text-field xz-action-editor" rows="6" aria-label={fieldLabel(selected)} value={detailDraft.currentAction} disabled={savingAction === "currentAction"} on:input={(event) => handleActionInput(event, "currentAction")} on:click|stopPropagation on:keyup={(event) => updateActionCursor(event, "currentAction")} on:select={(event) => updateActionCursor(event, "currentAction")} on:paste={(event) => handleActionPaste(event, "currentAction")} on:blur={() => void saveAction("currentAction")} on:keydown={(event) => handleActionKeydown(event, "currentAction")}></textarea>
                                 {#if currentActionImageRows.length > 0}
-                                    <div class="xz-action-images">
+                                    <!-- svelte-ignore a11y-no-static-element-interactions -->
+                                    <div class="xz-action-images" on:contextmenu={handleImageContextMenu}>
                                         {#each currentActionImageRows as row (row.key)}
                                             <div class="xz-action-images__item" class:xz-action-images__item--pending={row.status !== "done"} class:xz-action-images__item--failed={row.status === "failed"} title={row.error || row.label}>
                                                 {#if row.status === "done" && row.src}
@@ -2730,7 +2755,7 @@
                                 {/if}
                             {:else if selected.currentAction}
                                 <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-                                <div class="xz-markdown-preview" on:click={(event) => handleActionImageClick(event, "currentAction")}>{@html renderActionMarkdown(selected.currentAction)}</div>
+                                <div class="xz-markdown-preview" on:click={(event) => handleActionImageClick(event, "currentAction")} on:contextmenu={handleImageContextMenu}>{@html renderActionMarkdown(selected.currentAction)}</div>
                             {:else}
                                 <p class="xz-action-empty">尚未填写。</p>
                             {/if}
@@ -2764,7 +2789,8 @@
                                 {/if}
                                 <textarea use:focusOnMount use:autoResizeTextarea={detailDraft.nextAction} class="b3-text-field xz-action-editor" rows="4" aria-label="下一步行动" value={detailDraft.nextAction} disabled={savingAction === "nextAction"} on:input={(event) => handleActionInput(event, "nextAction")} on:click|stopPropagation on:keyup={(event) => updateActionCursor(event, "nextAction")} on:select={(event) => updateActionCursor(event, "nextAction")} on:paste={(event) => handleActionPaste(event, "nextAction")} on:blur={() => void saveAction("nextAction")} on:keydown={(event) => handleActionKeydown(event, "nextAction")}></textarea>
                                 {#if nextActionImageRows.length > 0}
-                                    <div class="xz-action-images">
+                                    <!-- svelte-ignore a11y-no-static-element-interactions -->
+                                    <div class="xz-action-images" on:contextmenu={handleImageContextMenu}>
                                         {#each nextActionImageRows as row (row.key)}
                                             <div class="xz-action-images__item" class:xz-action-images__item--pending={row.status !== "done"} class:xz-action-images__item--failed={row.status === "failed"} title={row.error || row.label}>
                                                 {#if row.status === "done" && row.src}
@@ -2782,7 +2808,7 @@
                                 {/if}
                             {:else if selected.nextAction}
                                 <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-                                <div class="xz-markdown-preview" on:click={(event) => handleActionImageClick(event, "nextAction")}>{@html renderActionMarkdown(selected.nextAction)}</div>
+                                <div class="xz-markdown-preview" on:click={(event) => handleActionImageClick(event, "nextAction")} on:contextmenu={handleImageContextMenu}>{@html renderActionMarkdown(selected.nextAction)}</div>
                             {:else}
                                 <p class="xz-action-empty">尚未填写明确的下一步行动。</p>
                             {/if}

@@ -3,6 +3,7 @@
     import type { DailyRecord, DailyRecordStore } from "./daily-records";
     import { createDefaultChecklistStore, type ChecklistStore } from "./checklist";
     import DailyRhythm from "./DailyRhythm.svelte";
+    import type { ActionImageCopyTarget } from "./image-clipboard";
     import { createEmptyNutritionStore, type NutritionStore } from "./nutrition";
     import XingzhouApp from "./XingzhouApp.svelte";
     import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData, WorkItemViewState } from "./work-items";
@@ -19,6 +20,7 @@
         addChild?: { label: string; onClick: () => void },
         actions?: Array<{ label: string; icon?: string; onClick: () => void }>,
     ) => void;
+    export let openImageMenu: (event: MouseEvent, image: ActionImageCopyTarget) => void = () => undefined;
     export let openCaptureDialog: (request: CaptureDialogRequest) => void;
     export let openDocument: (blockId: string) => Promise<void>;
     export let loadDaily: () => Promise<DailyRecordStore>;
@@ -85,6 +87,7 @@
                 {deleteItem}
                 {reorderItems}
                 {openItemMenu}
+                {openImageMenu}
                 {openCaptureDialog}
                 {openDocument}
                 {initialWorkItemId}
