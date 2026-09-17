@@ -2,6 +2,21 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## 2.3.1 - 2026-09-17
+
+### Changed
+
+- **Performance work in the large editor window** (behaviour essentially unchanged, cost clearly lower):
+  - The window's textarea no longer auto-sizes its height. It already fills the window and scrolls once the content outgrows it, so every keystroke no longer reads `scrollHeight` (a forced synchronous layout), and the "collapse to `auto`, then measure" step is gone along with the width change, text reflow, and mis-measured height it could cause. Long notes now scroll inside the editor itself, with its own scrollbar on the right.
+  - Placing the caret no longer creates an invisible measuring textarea: the click point is converted against the real editor once the window is open, which removes a forced layout and stops disturbing the document. The fallback that estimates the line from line height is kept for environments that do not report a textarea caret position, so the caret can never fall back to the very end by accident.
+  - Typing no longer reassigns all seven window props unconditionally: they are synced only when they actually change, which removes a full scan and a child re-render on every keystroke.
+- Cleanup: the whole synchronisation mechanism left behind by the removed inline editor (editor node and last-synced value records, the mount action, the caret plan) is gone, shrinking `XingzhouApp.svelte` by roughly 150 lines.
+
+### Notes
+
+- This release only changes performance and implementation: saving, cancelling, "click outside saves", the draft fallback, pinyin input, and undo all behave exactly as before.
+- No manual migration: no data shape, read/write path, revision number, rotating backup, or write-then-verify flow changed.
+
 ## 2.3.0 - 2026-09-17
 
 ### Added

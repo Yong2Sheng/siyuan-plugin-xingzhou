@@ -53,8 +53,7 @@
 
     /**
      * 挂载即写入初始内容并把光标放到事先算好的落点。
-     * 放在挂载阶段而不是 requestAnimationFrame 里，是为了让"打开即可见正确内容与光标"，
-     * 也避免动画帧时序在测试/宿主环境里不可控。
+     * 高度由 CSS 决定（填满窗口、内部滚动），组件不做任何测量，因此没有强制重排。
      */
     function setupEditor(element: HTMLTextAreaElement) {
         node = element;

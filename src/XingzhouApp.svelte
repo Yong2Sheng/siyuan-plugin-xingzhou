@@ -190,20 +190,14 @@
     let actionErrors: Record<ActionField, string> = { currentAction: "", nextAction: "" };
     let actionCursor: Record<ActionField, number> = { currentAction: 0, nextAction: 0 };
     /**
-     * 正在编辑的 textarea 与其最后一次由程序写入的值。
-     * 输入期间 DOM 是唯一真源：只有图片插入这类外部变更才回写，避免每个按键重设 value
-     * 导致拼音输入抖动、光标被拉走、原生撤销栈被清空。
-     */
-    let actionEditorNodes: Record<ActionField, HTMLTextAreaElement | null> = { currentAction: null, nextAction: null };
-    let actionSyncedValues: Record<ActionField, string | null> = { currentAction: null, nextAction: null };
-    /**
      * 点卡片进入编辑态时记下的鼠标位置：编辑器挂载后用它在文本里定位光标。
      * 这样"点哪一行就在哪一行开始输入"对「点卡片进入」这条路径也成立，
      * 而不是像以前那样把光标放到全文末尾。
      */
     let pendingActionCaretPoint: { field: ActionField; x: number; y: number } | null = null;
     /** 进入编辑前锁定的「点击位置对应的字符位置」：挂载后版面会变，必须提前算好。 */
-    let pendingActionCaretOffset: { field: ActionField; offset: number | null } | null = null;
+    /** 上一次同步给窗口的 props：用于跳过没变化的重设。 */
+    let actionWindowProps: Record<string, unknown> = {};
     /** 大编辑窗口：内容组件实例与对话框。 */
     let actionWindow: ActionEditorWindow | null = null;
     let actionWindowDialog: Dialog | null = null;
@@ -397,51 +391,12 @@
     $: reviewCompletedThisWeek = getReviewCompletedThisWeek(data?.items ?? []);
     $: if (selected && selected.id !== draftSourceId) resetDetailDraft(selected);
     /**
-     * 只在「外部变更」时把内容写回 textarea：切换条目、插入图片、上传回填、保存后校正。
-     * 输入期间 detailDraft 跟着 DOM 走，这里的值必然相等，因此不会产生任何 DOM 写入，
-     * 拼音输入与原生撤销栈都不会被打断。
-     */
-    $: if (editingAction) {
-        const field = editingAction;
-        const node = actionEditorNodes[field];
-        if (!node) {
-            // 编辑器还没挂上：等挂载动作写入初始值
-        } else if (node.value === detailDraft[field]) {
-            if (actionSyncedValues[field] === null) actionSyncedValues = { ...actionSyncedValues, [field]: node.value };
-        } else if (node.value === actionSyncedValues[field]) {
-            /**
-             * DOM 里还是上一次同步写入的值，说明差异来自「用户输入」：
-             * 采纳 DOM，而不是把草稿写回去。回写会重置光标（浏览器按点击位置设的光标
-             * 会被抹掉，落到末尾），并清空原生撤销栈。
-             */
-            detailDraft = { ...detailDraft, [field]: node.value };
-        } else if (actionComposing[field]) {
-            /**
-             * 合成期间（含 compositionend 与最后一个 input 之间的间隙）绝不写 DOM。
-             * 这时 DOM 已经带着刚上屏的字，草稿还落后一步；写回去等于把用户刚打的字顶掉。
-             */
-        } else if (node.value === detailDraft[field] || node.value.length > detailDraft[field].length) {
-            /**
-             * 兜底：DOM 比草稿长（多出来的内容来自用户输入，例如事件顺序造成的草稿落后），
-             * 一律以 DOM 为准。宁可少同步一次，也不能用旧草稿覆盖用户正在写的内容。
-             */
-            detailDraft = { ...detailDraft, [field]: node.value };
-        } else {
-            // 真正的外部变更（插入图片、上传回填、切换条目）：写回并贴住光标
-            node.value = detailDraft[field];
-            const cursor = Math.min(actionCursor[field] ?? detailDraft[field].length, detailDraft[field].length);
-            node.setSelectionRange(cursor, cursor);
-            actionSyncedValues = { ...actionSyncedValues, [field]: node.value };
-        }
-    }
-
-    /**
      * 大编辑窗口是命令式创建的，这里把「与它相关的外部状态」持续同步进去：
      * 图片上传进度、错误信息、保存中、拖拽高亮、字数。
      */
     $: if (actionWindow && editingAction) {
         const field = editingAction;
-        actionWindow.$set({
+        const next = {
             saving: savingAction === field,
             error: actionErrors[field],
             restoredNotice: actionRestoredNotice[field],
@@ -449,7 +404,20 @@
             imageRows: field === "currentAction" ? currentActionImageRows : nextActionImageRows,
             imageTotal: field === "currentAction" ? currentActionImageTotal : nextActionImageTotal,
             pendingUploads: listPendingActionImages(detailDraft[field]).length,
-        });
+        };
+        // 只在真的变化时同步：这个块每次按键都会跑到，无条件 $set 会让窗口白重渲染一次
+        const changed: Partial<typeof next> = {};
+        let dirty = false;
+        for (const key of Object.keys(next) as Array<keyof typeof next>) {
+            if (actionWindowProps[key] !== next[key]) {
+                (changed as Record<string, unknown>)[key] = next[key];
+                dirty = true;
+            }
+        }
+        if (dirty) {
+            actionWindowProps = { ...actionWindowProps, ...changed };
+            actionWindow.$set(changed);
+        }
     }
 
     Promise.resolve().then(() => void refresh());
@@ -887,8 +855,6 @@
         savingAction = null;
         actionErrors = { currentAction: "", nextAction: "" };
         actionCursor = { currentAction: 0, nextAction: 0 };
-        actionEditorNodes = { currentAction: null, nextAction: null };
-        actionSyncedValues = { currentAction: null, nextAction: null };
         actionComposing = { currentAction: false, nextAction: false };
         actionRestoredNotice = { currentAction: "", nextAction: "" };
         savedActionValues = { currentAction: item.currentAction, nextAction: item.nextAction };
@@ -942,11 +908,10 @@
         actionRestoredNotice = { ...actionRestoredNotice, [field]: recovering ? "已恢复上次未保存的草稿（本地快照）" : "" };
         actionErrors = { ...actionErrors, [field]: "" };
         actionCursor = { ...actionCursor, [field]: value.length };
-        // 先用「窗口的排版宽度」把点击位置换算成字符位置：卡片内的版面变化不再影响落点
-        actionWindowCaret = point ? caretOffsetForWindow(field, value, point.x, point.y) : null;
-        recordActionEditorEvent("打开编辑窗口", `字段=${field} 恢复草稿=${recovering} 长度=${value.length}${point ? ` 点击坐标=(${Math.round(point.x)},${Math.round(point.y)})` : ""} 落点=${actionWindowCaret ?? "末尾"}`);
-        pendingActionCaretOffset = null;
-        pendingActionCaretPoint = null;
+        // 只记坐标；真正的落点在窗口打开后用它自己的编辑框换算（落点因此不再受卡片重排影响）
+        actionWindowCaret = null;
+        pendingActionCaretPoint = point ? { field, x: point.x, y: point.y } : null;
+        recordActionEditorEvent("打开编辑窗口", `字段=${field} 恢复草稿=${recovering} 长度=${value.length}${point ? ` 点击坐标=(${Math.round(point.x)},${Math.round(point.y)})` : ""}`);
         // 窗口是浮层：打开它不该让详情面板挪位置。浏览器偶尔会因内容重排改变滚动位置，
         // 这里在打开前后把面板位置按原样写回（浮层期间面板本就应当不动）。
         const panel = detailElement;
@@ -969,40 +934,37 @@
         }
     }
 
-    /** 窗口宽度下的落点换算：宽度与窗口内编辑框一致，且完全不影响卡片版面。 */
-    function caretOffsetForWindow(field: ActionField, value: string, x: number, y: number): number | null {
-        const reference = document.querySelector<HTMLElement>(".xz-action-card--primary .xz-markdown-preview")
-            ?? document.querySelector<HTMLElement>(".xz-action-card--primary");
-        const referenceRect = reference?.getBoundingClientRect() ?? null;
-        if (referenceRect && (y < referenceRect.top || y > referenceRect.bottom)) {
-            // 点在正文之外（标题/提示行）：按上下位置取开头或末尾，避免"点了上面却跑到末尾"
-            return y < referenceRect.top ? 0 : value.length;
+    /**
+     * 记住点击坐标，等窗口打开后用它把光标放到对应字符处。
+     * 之前会造一个不可见的量尺 textarea 来测量，那既多一次强制布局又会扰动文档；
+     * 现在直接用窗口里真实的编辑框做 caretPositionFromPoint，元素为零、布局读取一次。
+     */
+    function caretOffsetInWindow(node: HTMLTextAreaElement, x: number, y: number): number | null {
+        const rect = node.getBoundingClientRect();
+        if (rect.height <= 0) return null;
+        // 点在正文之外（卡片标题/提示行）：按上下位置取开头或末尾
+        if (x < rect.left - 40 || x > rect.right + 40) return null;
+        if (y < rect.top) return 0;
+        if (y > rect.bottom) return node.value.length;
+        const clampedX = Math.min(Math.max(x, rect.left + 4), rect.right - 4);
+        const clampedY = Math.min(Math.max(y, rect.top + 4), rect.bottom - 4);
+        if (typeof document.caretPositionFromPoint === "function") {
+            const position = document.caretPositionFromPoint(clampedX, clampedY);
+            if (position && position.offsetNode === node) return position.offset;
         }
-        const measure = document.createElement("textarea");
-        measure.className = "b3-text-field";
-        measure.value = value;
-        const width = Math.max(320, Math.round(window.innerWidth * 0.82) - 48);
-        measure.style.cssText = `position:fixed;left:-9999px;top:0;width:${width}px;visibility:hidden;pointer-events:none;`;
-        document.body.append(measure);
-        try {
-            measure.style.height = `${measure.scrollHeight}px`;
-            const rect = measure.getBoundingClientRect();
-            const relativeX = referenceRect ? x - referenceRect.left : 0;
-            const clampedX = rect.left + Math.min(Math.max(relativeX, 4), width - 4);
-            const clampedY = Math.min(Math.max(y, rect.top + 4), rect.bottom - 4);
-            const direct = readCaretOffset(measure, clampedX, clampedY);
-            if (direct !== null) return direct;
-            const styles = getComputedStyle(measure);
-            const lineHeight = Number.parseFloat(styles.lineHeight) || 21;
-            const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
-            const lineIndex = Math.max(0, Math.round((clampedY - rect.top - paddingTop - lineHeight / 2) / lineHeight));
-            const lines = value.split("\n");
-            let offset = 0;
-            for (let index = 0; index < Math.min(lineIndex, lines.length); index += 1) offset += lines[index].length + 1;
-            return Math.min(offset, value.length);
-        } finally {
-            measure.remove();
+        if (typeof document.caretRangeFromPoint === "function") {
+            const range = document.caretRangeFromPoint(clampedX, clampedY);
+            if (range && range.startContainer === node) return range.startOffset;
         }
+        // 少数环境对 textarea 不返回 caret 位置：按行高估算兜底，避免直接掉到末尾
+        const styles = getComputedStyle(node);
+        const lineHeight = Number.parseFloat(styles.lineHeight) || 21;
+        const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+        const lineIndex = Math.max(0, Math.round((clampedY - rect.top + node.scrollTop - paddingTop - lineHeight / 2) / lineHeight));
+        const lines = node.value.split("\n");
+        let offset = 0;
+        for (let index = 0; index < Math.min(lineIndex, lines.length); index += 1) offset += lines[index].length + 1;
+        return Math.min(offset, node.value.length);
     }
 
     /**
@@ -1047,6 +1009,7 @@
             },
         });
         actionWindow = component;
+        actionWindowProps = {};
         const dialog = new Dialog({
             title: field === "currentAction" ? fieldLabel(selected!) : "下一步行动",
             width: "82vw",
@@ -1069,8 +1032,18 @@
         if (slot) slot.append(host);
         actionWindowDialog = dialog;
         editingAction = field;
-        // 打开后聚焦并把光标放到预先算好的落点
-        requestAnimationFrame(() => actionWindow?.focusAt(actionWindowCaret));
+        // 打开后聚焦，并用记下的点击坐标在真实编辑框里定位光标（一次布局读取，不造额外节点）
+        requestAnimationFrame(() => {
+            const node = actionWindowNode(field);
+            let offset = actionWindowCaret;
+            const point = pendingActionCaretPoint;
+            if (point && point.field === field) {
+                pendingActionCaretPoint = null;
+                offset = caretOffsetInWindow(node, point.x, point.y);
+                recordActionEditorEvent("按点击位置定位光标", `字段=${field} 坐标=(${Math.round(point.x)},${Math.round(point.y)}) 光标=${offset ?? "末尾"}`);
+            }
+            actionWindow?.focusAt(offset);
+        });
     }
 
     /** 窗口里的实际编辑框节点（用于就地替换等 DOM 级操作）。 */
@@ -1094,6 +1067,7 @@
         actionWindowDialog = null;
         actionWindow = null;
         actionWindowField = null;
+        actionWindowProps = {};
         try {
             component?.$destroy();
         } catch {
@@ -1122,8 +1096,6 @@
         // 再走统一保存流程；保存失败会写明错误并保留草稿兜底，不会静默丢内容。
         actionErrors = { ...actionErrors, [field]: "" };
         editingAction = null;
-        actionEditorNodes = { ...actionEditorNodes, [field]: null };
-        actionSyncedValues = { ...actionSyncedValues, [field]: null };
         actionWindowCaret = null;
         void saveAction(field);
     }
@@ -1134,8 +1106,6 @@
         recordActionEditorEvent("退出编辑态", `字段=${field}`);
         closeActionEditorWindow();
         editingAction = null;
-        actionEditorNodes = { ...actionEditorNodes, [field]: null };
-        actionSyncedValues = { ...actionSyncedValues, [field]: null };
         actionWindowCaret = null;
     }
 
@@ -1168,17 +1138,13 @@
         rememberActionDraft(field, value);
     }
 
-    /** 保存前以 DOM 为准：输入法合成中的内容还没写回草稿，不能漏掉。 */
+    /** 保存前取值：窗口里的编辑框是唯一真源（输入法合成中的内容也在里面）。 */
     function actionValueForSave(field: ActionField): string {
         if (editingAction === field && actionWindow) return actionWindow.currentValue();
         return detailDraft[field];
     }
 
     /** 保存返回后草稿是否已被更新的编辑接管；接管后绝不能用旧快照覆盖。 */
-    function actionEditingOwner(field: ActionField): HTMLTextAreaElement | null {
-        return editingAction === field ? actionEditorNodes[field] : null;
-    }
-
     async function saveAction(field: ActionField) {
         if (!data || !selected || savingAction) return;
         // 草稿必须属于当前选中条目，否则条目切换中的失焦会把内容写进错误的条目
@@ -1283,102 +1249,6 @@
      * 之前用 `value={...}` 绑定会让每一帧都重设 textarea.value：
      * 拼音合成被打断、光标被拉回末尾、原生撤销栈被清空（⌘Z 无法恢复）。
      */
-    /** 编辑器挂载：写入一次草稿值并聚焦，之后输入期间不再有程序的 DOM 写入。 */
-    function prepareActionEditor(node: HTMLTextAreaElement, field: ActionField) {
-        recordActionEditorEvent("prepareActionEditor", `字段=${field} 草稿长度=${detailDraft[field].length}`);
-        node.value = detailDraft[field];
-        actionEditorNodes = { ...actionEditorNodes, [field]: node };
-        actionSyncedValues = { ...actionSyncedValues, [field]: node.value };
-        actionComposing = { ...actionComposing, [field]: false };
-        if (!node.isConnected) return;
-        // 只聚焦，不改选区、不滚动
-        node.focus({ preventScroll: true });
-        const planned = pendingActionCaretOffset;
-        pendingActionCaretPoint = null;
-        if (!planned || planned.field !== field || planned.offset === null) {
-            recordActionEditorEvent("光标定位失败", `字段=${field}`);
-            pendingActionCaretOffset = null;
-            return;
-        }
-        pendingActionCaretOffset = null;
-        const offset = planned.offset;
-        const panel = detailElement;
-        const restoreTop = panel?.scrollTop ?? 0;
-        // 先放好光标、再聚焦并禁止聚焦滚动；聚焦后把面板滚动位置原样写回。
-        // 少了这一步，浏览器会为了"显示新光标"把面板滚走，看起来就是进入编辑时跳一下。
-        node.setSelectionRange(offset, offset);
-        node.blur();
-        node.focus({ preventScroll: true });
-        keepPanelTop(panel, restoreTop);
-        actionCursor = { ...actionCursor, [field]: offset };
-        recordActionEditorEvent("按点击位置定位光标", `字段=${field} 光标=${offset} 面板=${Math.round(restoreTop)}`);
-    }
-
-    /** 进入／退出编辑态期间守住面板滚动位置（连续两帧，覆盖挂载引起的回流）。 */
-    function keepPanelTop(panel: HTMLElement | null, top: number) {
-        if (!panel) return;
-        const restore = () => {
-            if (panel.isConnected && Math.abs(panel.scrollTop - top) > 0.5) panel.scrollTop = top;
-        };
-        restore();
-        requestAnimationFrame(() => { restore(); requestAnimationFrame(restore); });
-    }
-
-    /**
-     * 在编辑框挂载之前，用一个「宽度与编辑框一致、不可见」的量尺节点把点击坐标换算成字符位置。
-     * 这样换算用的是点击那一刻的版面（此时预览还在原位），结果才对得上用户点的那一行；
-     * 挂载后再换算会因为提示行消失、编辑框变高而对到别的行。
-     */
-    function caretOffsetAtPoint(field: ActionField, x: number, y: number): number | null {
-        const anchor = document.querySelector<HTMLElement>(".xz-action-card--primary");
-        const reference = document.querySelector<HTMLElement>(".xz-action-card--primary .xz-action-editor")
-            ?? document.querySelector<HTMLElement>(".xz-action-card--primary .xz-markdown-preview");
-        const measure = document.createElement("textarea");
-        measure.className = "b3-text-field xz-action-editor";
-        measure.setAttribute("aria-hidden", "true");
-        measure.value = detailDraft[field];
-        const width = (reference ?? anchor)?.getBoundingClientRect().width ?? 0;
-        measure.style.cssText = `position:fixed;left:-9999px;top:0;width:${Math.max(80, Math.round(width))}px;visibility:hidden;pointer-events:none;`;
-        document.body.append(measure);
-        try {
-            measure.style.height = `${measure.scrollHeight}px`;
-            const rect = measure.getBoundingClientRect();
-            if (rect.height <= 0) return null;
-            // 量尺节点被放在屏幕外，所以横向要按「相对卡片左边缘」换算，
-            // 不能用点击坐标直接和量尺节点的 left 比较（那会把所有点击都判成界外）。
-            const referenceLeft = (reference ?? anchor)?.getBoundingClientRect().left ?? 0;
-            const relativeX = x - referenceLeft;
-            const clampedX = rect.left + Math.min(Math.max(relativeX, 4), Math.max(8, rect.width - 4));
-            const clampedY = Math.min(Math.max(y, rect.top + 4), rect.bottom - 4);
-            const direct = readCaretOffset(measure, clampedX, clampedY);
-            if (direct !== null) return direct;
-            const styles = getComputedStyle(measure);
-            const lineHeight = Number.parseFloat(styles.lineHeight) || 21;
-            const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
-            const lineIndex = Math.max(0, Math.round((clampedY - rect.top - paddingTop - lineHeight / 2) / lineHeight));
-            const lines = measure.value.split("\n");
-            let offset = 0;
-            for (let index = 0; index < Math.min(lineIndex, lines.length); index += 1) offset += lines[index].length + 1;
-            return Math.min(offset, measure.value.length);
-        } finally {
-            measure.remove();
-        }
-    }
-
-    function readCaretOffset(node: HTMLTextAreaElement, pointX: number, pointY: number): number | null {
-        if (typeof document.caretPositionFromPoint === "function") {
-            const position = document.caretPositionFromPoint(pointX, pointY);
-            if (position && position.offsetNode === node) return position.offset;
-        }
-        if (typeof document.caretRangeFromPoint === "function") {
-            const range = document.caretRangeFromPoint(pointX, pointY);
-            if (range && range.startContainer === node) return range.startOffset;
-        }
-        return null;
-    }
-
-
-
     async function saveInline(role: "title" | "type" | "status" | "parent" | "topProject" | "planDate" | "deadline" | "duration" | "energy", value: string) {
         if (!data || !selected || savingInline || savingSlices) return;
         if (role === "title" && !value.trim()) {

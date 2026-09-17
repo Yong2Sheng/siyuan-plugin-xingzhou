@@ -728,7 +728,12 @@
 .xz-action-editor-window__head span { color: var(--xingzhou-muted); font-size: 11px; }
 .xz-action-editor-window__dropzone { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; border: 1px dashed transparent; border-radius: var(--xingzhou-radius); }
 .xz-action-editor-window__dropzone--active { border-color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
-.xz-action-editor-window__input { box-sizing: border-box; width: 100%; min-height: 100%; flex: 1 1 auto; overflow: auto; resize: none; line-height: 1.7; font-size: 14px; }
+/*
+ * 窗口内的编辑框：填满剩余高度、自己滚动，不再做"自动高度"。
+ * 这样每个按键都不需要读 scrollHeight（省掉一次强制重排），也不会再有
+ * 「先塌成 auto 量高度」带来的宽度变化、文本重排与高度算错。
+ */
+.xz-action-editor-window__input { box-sizing: border-box; width: 100%; height: 100%; min-height: 0; flex: 1 1 auto; overflow-y: auto; resize: none; line-height: 1.7; font-size: 14px; }
 .xz-action-editor-window__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--xingzhou-muted); font-size: 11px; }
 .xz-action-editor-window__actions { display: flex; gap: 8px; }
 /* 卡片内：正在窗口里编辑时的提示 */

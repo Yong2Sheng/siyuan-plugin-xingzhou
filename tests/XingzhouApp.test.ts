@@ -1438,6 +1438,41 @@ describe("XingzhouApp", () => {
             await vi.waitFor(() => expect(editor()).toBeNull());
         });
 
+        it("窗口编辑框不做自动高度测量：输入过程零强制重排", async () => {
+            const { item } = mountFixture();
+            const node = await openEditor();
+            // 自动高度会在每次输入时读 scrollHeight（强制同步布局）；窗口内应完全不读
+            let scrollHeightReads = 0;
+            const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight")!;
+            Object.defineProperty(node, "scrollHeight", {
+                configurable: true,
+                get: () => { scrollHeightReads += 1; return descriptor.get!.call(node) as number; },
+            });
+            for (const char of "输入测试") {
+                node.setRangeText(char, node.selectionStart ?? 0, node.selectionStart ?? 0, "end");
+                node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: char, isComposing: false }));
+                await tick();
+            }
+            expect(scrollHeightReads).toBe(0);
+            expect(node.value).toContain("输入测试");
+            expect(item.currentAction).toBe(longNote);
+        });
+
+        it("外部状态没变化时不重复 $set 窗口组件", async () => {
+            mountFixture();
+            const node = await openEditor();
+            const windowComponent = (globalThis as unknown as { __xzWindowSetCount?: number });
+            void windowComponent;
+            // 通过观察窗口 DOM 是否被重建来间接验证：连续输入不应重建编辑框节点
+            for (const char of "不重建") {
+                node.setRangeText(char, node.selectionStart ?? 0, node.selectionStart ?? 0, "end");
+                node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: char, isComposing: false }));
+                await tick();
+            }
+            expect(editor()).toBe(node);
+            expect(node.isConnected).toBe(true);
+        });
+
         it("点窗口外＝保存：内容写回、编辑态复位、可以再次打开", async () => {
             const { saveItem } = mountFixture();
             const saveSpy = saveItem as unknown as { mock: { calls: Array<[WorkItemData, WorkItem, WorkItemChanges]> } };

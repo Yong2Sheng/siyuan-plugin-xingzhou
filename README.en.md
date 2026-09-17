@@ -2,7 +2,7 @@
 
 Xingzhou is a self-contained SiYuan system for personal action and daily rhythm. Projects and tasks live in one top-level module; research-life balance, wellbeing, recovery, and nutrition intake live in another. All use plugin-managed private data without requiring extra SiYuan databases or documents.
 
-> Current version: `2.3.0` (Current Action Details now opens a **large editor window**: click an action card to write long text in a roomy overlay, which also fixes the long-standing problems — the view jumping on entry, clicks landing on a different line, and every keystroke rewriting the textarea (which made pinyin input jump and broke ⌘Z). Silent text loss and the stuck editing state after an externally closed window are fixed too, and an **action editor diagnostics** entry can export the editor's events with their call sites)
+> Current version: `2.3.1` (performance work in the large editor window: no per-keystroke height measurement, no temporary node for caret mapping, and no unconditional prop reassignment while typing; usage is unchanged from 2.3.0. Previously in 2.3.0: Current Action Details now opens a **large editor window**: click an action card to write long text in a roomy overlay, which also fixes the long-standing problems — the view jumping on entry, clicks landing on a different line, and every keystroke rewriting the textarea (which made pinyin input jump and broke ⌘Z). Silent text loss and the stuck editing state after an externally closed window are fixed too, and an **action editor diagnostics** entry can export the editor's events with their call sites)
 
 [中文说明](README.md) · [中文更新日志](CHANGELOG.md) · [English Changelog](CHANGELOG.en.md)
 
