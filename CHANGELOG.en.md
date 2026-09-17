@@ -2,6 +2,12 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## 2.3.2 - 2026-09-17
+
+### Removed
+
+- **Removed the "Action editor diagnostics" entry and its recording module.** It was a temporary evidence-gathering tool added in 2.3.0 to pin down the large editor window's problems (it logged editor mount/unmount, `value` writes, selection changes, scroll positions, and their call sites in time order). It could only see the places that had been instrumented in advance, and its maintenance cost no longer matched its value; a broader general-purpose logging utility will replace it. The module, its styles, its menu entry, and its tests are all gone, and the built package no longer contains that code. Editing behaves exactly as in 2.3.1.
+
 ## 2.3.1 - 2026-09-17
 
 ### Changed

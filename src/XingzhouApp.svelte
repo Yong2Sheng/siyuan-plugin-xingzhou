@@ -43,13 +43,6 @@
     import type { CaptureDialogMode, CaptureDialogRequest, CaptureDialogValues } from "./capture-dialog";
     import { prerequisiteIds, validateDependencyUpdate, type DependencyKind } from "./dependencies";
     import type { ActionImageCopyTarget } from "./image-clipboard";
-    import {
-        actionEditorDiagnostics,
-        clearActionEditorDiagnostics,
-        formatActionEditorDiagnostics,
-        installActionEditorDiagnostics,
-        recordActionEditorEvent,
-    } from "./action-editor-diagnostics";
     import ActionEditorWindow from "./ActionEditorWindow.svelte";
     import { applyOrderedListNormalization, continueMarkdownList } from "./markdown-editor";
     import { renderActionMarkdown } from "./markdown-renderer";
@@ -429,8 +422,6 @@
             includeClosed = false;
         }
         scheduleTemporalRefresh();
-        // 行动编辑器的现场记录：只写内存环形缓冲，供「编辑诊断」入口导出
-        installActionEditorDiagnostics();
         return () => {
             clearCompletionUndo();
             if (temporalRefreshTimer) clearTimeout(temporalRefreshTimer);
@@ -742,7 +733,6 @@
         const actions: Array<{ label: string; icon?: string; onClick: () => void }> = [];
         if (!reordering && index > 0) actions.push({ label: "上移", icon: "iconUp", onClick: () => moveSibling(item.id, -1) });
         if (!reordering && index >= 0 && index < siblings.length - 1) actions.push({ label: "下移", icon: "iconDown", onClick: () => moveSibling(item.id, 1) });
-        actions.push({ label: "行动编辑诊断…", icon: "iconInfo", onClick: () => openActionEditorDiagnostics() });
         openItemMenu(event, () => requestDelete(item), addChild, actions);
     }
 
@@ -752,58 +742,6 @@
             deleteTarget = null;
             deleteError = "";
         }
-    }
-
-    /**
-     * 「行动编辑诊断」：把编辑框最近的事件序列（含调用来源）显示出来，可一键复制。
-     * 这是给「点击后光标跳到末尾、视图回顶」这类只在用户机器上出现的问题取证用的。
-     */
-    function openActionEditorDiagnostics() {
-        recordActionEditorEvent("打开诊断面板", `已记录 ${actionEditorDiagnostics().length} 条`);
-        // 面板滚动是「视图跳到顶部」的直接证据：打开诊断时补挂记录（只在变化 ≥ 4px 时记一条，避免刷屏）
-        if (detailElement && detailElement.dataset.scrollProbed !== "1") {
-            detailElement.dataset.scrollProbed = "1";
-            let lastTop = detailElement.scrollTop;
-            detailElement.addEventListener("scroll", () => {
-                const top = detailElement?.scrollTop ?? 0;
-                if (Math.abs(top - lastTop) < 4) return;
-                const max = detailElement ? detailElement.scrollHeight - detailElement.clientHeight : 0;
-                recordActionEditorEvent("详情面板滚动", `${Math.round(lastTop)} → ${Math.round(top)}（可滚动上限 ${Math.round(max)}）`);
-                lastTop = top;
-            }, true);
-        }
-        const dialog = new Dialog({
-            title: "行动编辑诊断",
-            width: "760px",
-            content: `<div class="xz-editor-diagnostics">
-                <p class="xz-editor-diagnostics__hint">先关掉这个窗口，在「本次行动细则」里复现一次问题（点击中间某行 → 打字），再回来点「刷新」。</p>
-                <div class="xz-editor-diagnostics__actions">
-                    <button class="b3-button" data-role="refresh" type="button">刷新</button>
-                    <button class="b3-button" data-role="copy" type="button">复制全部</button>
-                    <button class="b3-button b3-button--outline" data-role="clear" type="button">清空</button>
-                </div>
-                <pre class="xz-editor-diagnostics__log" data-role="log"></pre>
-            </div>`,
-        });
-        const log = dialog.element.querySelector<HTMLElement>('[data-role="log"]');
-        const render = () => {
-            if (!log) return;
-            const text = formatActionEditorDiagnostics();
-            log.textContent = text;
-            log.scrollTop = log.scrollHeight;
-        };
-        render();
-        dialog.element.querySelector<HTMLButtonElement>('[data-role="refresh"]')?.addEventListener("click", render);
-        dialog.element.querySelector<HTMLButtonElement>('[data-role="clear"]')?.addEventListener("click", () => { clearActionEditorDiagnostics(); render(); });
-        dialog.element.querySelector<HTMLButtonElement>('[data-role="copy"]')?.addEventListener("click", () => {
-            const text = formatActionEditorDiagnostics();
-            const done = () => showMessage("诊断日志已复制到剪贴板", 3000);
-            try {
-                void navigator.clipboard?.writeText(text).then(done, () => showMessage("复制失败：请手动选中日志内容复制", 4000));
-            } catch {
-                showMessage("复制失败：请手动选中日志内容复制", 4000);
-            }
-        });
     }
 
     function requestDelete(item: WorkItem) {
@@ -911,7 +849,6 @@
         // 只记坐标；真正的落点在窗口打开后用它自己的编辑框换算（落点因此不再受卡片重排影响）
         actionWindowCaret = null;
         pendingActionCaretPoint = point ? { field, x: point.x, y: point.y } : null;
-        recordActionEditorEvent("打开编辑窗口", `字段=${field} 恢复草稿=${recovering} 长度=${value.length}${point ? ` 点击坐标=(${Math.round(point.x)},${Math.round(point.y)})` : ""}`);
         // 窗口是浮层：打开它不该让详情面板挪位置。浏览器偶尔会因内容重排改变滚动位置，
         // 这里在打开前后把面板位置按原样写回（浮层期间面板本就应当不动）。
         const panel = detailElement;
@@ -1048,7 +985,6 @@
             if (point && point.field === field) {
                 pendingActionCaretPoint = null;
                 offset = caretOffsetInWindow(node, point.x, point.y);
-                recordActionEditorEvent("按点击位置定位光标", `字段=${field} 坐标=(${Math.round(point.x)},${Math.round(point.y)}) 光标=${offset ?? "末尾"}`);
             }
             actionWindow.focusAt(offset);
         });
@@ -1100,7 +1036,6 @@
     function handleActionWindowDismissed() {
         if (!editingAction) return;
         const field = editingAction;
-        recordActionEditorEvent("窗口被外部关闭", `字段=${field} 视为保存`);
         // 与卡片内联编辑时的规则保持一致：点到外面 = 保存。
         // 内容已经在 detailDraft 里（每次 input 都同步），所以先把编辑态收干净，
         // 再走统一保存流程；保存失败会写明错误并保留草稿兜底，不会静默丢内容。
@@ -1113,7 +1048,6 @@
     /** 编辑结束：先卸下编辑器，再让异步结果决定草稿与保存状态。 */
     function finishActionEditing(field: ActionField) {
         if (editingAction !== field) return;
-        recordActionEditorEvent("退出编辑态", `字段=${field}`);
         closeActionEditorWindow();
         editingAction = null;
         actionWindowCaret = null;
@@ -1226,7 +1160,6 @@
 
     function handleActionInput(event: Event, field: ActionField) {
         if (!(event.target instanceof HTMLTextAreaElement)) return;
-        recordActionEditorEvent("input", `字段=${field} 长度=${event.target.value.length} 光标=${event.target.selectionStart} 合成中=${(event as InputEvent).isComposing}`);
         if ((event as InputEvent).isComposing) {
             // 输入法合成期间不回写 DOM，也不在这里做规范化：那会把候选串打散
             detailDraft = { ...detailDraft, [field]: event.target.value };

@@ -739,12 +739,6 @@
 /* 卡片内：正在窗口里编辑时的提示 */
 .xz-action-hint--window { border-style: solid; border-color: color-mix(in srgb, var(--xingzhou-primary) 45%, var(--xingzhou-border)); color: var(--xingzhou-primary); background: color-mix(in srgb, var(--xingzhou-primary) 8%, transparent); }
 
-/* 行动编辑诊断面板：等宽日志 + 可复制 */
-.xz-editor-diagnostics { display: grid; gap: 10px; color: var(--xingzhou-text); }
-.xz-editor-diagnostics__hint { margin: 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.6; }
-.xz-editor-diagnostics__actions { display: flex; gap: 8px; }
-.xz-editor-diagnostics__log { max-height: min(62vh, 520px); overflow: auto; margin: 0; padding: 10px 12px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel-subtle); font-family: var(--b3-font-family-code, monospace); font-size: 11.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; user-select: text; }
-
 .xz-action-hint--drop { border-style: solid; border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); background: var(--xingzhou-panel); }
 /* 草稿兜底命中：用成功色提示，与普通操作提示区分 */
 .xz-action-hint--restored { border-style: solid; border-color: color-mix(in srgb, var(--b3-theme-success, var(--xingzhou-primary)) 45%, var(--xingzhou-border)); color: var(--b3-theme-success, var(--xingzhou-primary)); background: color-mix(in srgb, var(--b3-theme-success, var(--xingzhou-primary)) 8%, transparent); }
