@@ -12,6 +12,10 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
   - Typing no longer reassigns all seven window props unconditionally: they are synced only when they actually change, which removes a full scan and a child re-render on every keystroke.
 - Cleanup: the whole synchronisation mechanism left behind by the removed inline editor (editor node and last-synced value records, the mount action, the caret plan) is gone, shrinking `XingzhouApp.svelte` by roughly 150 lines.
 
+### Fixed
+
+- Fixed an error thrown on the frame after "open the editor window, then close it immediately": placing the caret is scheduled on an animation frame, and by then the window may already be gone (save, cancel, an outside click, or the host destroying the dialog), so reading the editor's layout failed with `Cannot read properties of null`. That frame now confirms the window is still there and skips a destroyed node. In a browser this showed up as a quiet console error; in automated tests it made the test process exit with a failure code.
+
 ### Notes
 
 - This release only changes performance and implementation: saving, cancelling, "click outside saves", the draft fallback, pinyin input, and undo all behave exactly as before.

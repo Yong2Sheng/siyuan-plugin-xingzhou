@@ -1438,6 +1438,20 @@ describe("XingzhouApp", () => {
             await vi.waitFor(() => expect(editor()).toBeNull());
         });
 
+        it("打开后立刻关闭（保存或点窗口外）不留悬挂回调", async () => {
+            mountFixture();
+            await vi.waitFor(() => expect(document.querySelector(".xz-action-card--primary")).not.toBeNull());
+            // 点卡片打开窗口，紧接着立刻关闭：定位光标安排在下一帧，那一帧窗口已经没了
+            document.querySelector<HTMLElement>(".xz-action-card--primary")!.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+            await tick();
+            (document.querySelector(".b3-dialog__close") as HTMLButtonElement).click();
+            await tick();
+            // 让被安排的那一帧真正执行：不得抛错（此前这里会读已销毁节点的布局）
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(null))));
+            expect(editor()).toBeNull();
+            expect(document.querySelector(".xz-action-card--primary")?.textContent ?? "").toContain("点击编辑");
+        });
+
         it("窗口编辑框不做自动高度测量：输入过程零强制重排", async () => {
             const { item } = mountFixture();
             const node = await openEditor();

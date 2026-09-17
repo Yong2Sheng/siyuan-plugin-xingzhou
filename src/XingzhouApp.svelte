@@ -939,7 +939,8 @@
      * 之前会造一个不可见的量尺 textarea 来测量，那既多一次强制布局又会扰动文档；
      * 现在直接用窗口里真实的编辑框做 caretPositionFromPoint，元素为零、布局读取一次。
      */
-    function caretOffsetInWindow(node: HTMLTextAreaElement, x: number, y: number): number | null {
+    function caretOffsetInWindow(node: HTMLTextAreaElement | null, x: number, y: number): number | null {
+        if (!node || !node.isConnected) return null;
         const rect = node.getBoundingClientRect();
         if (rect.height <= 0) return null;
         // 点在正文之外（卡片标题/提示行）：按上下位置取开头或末尾
@@ -991,7 +992,8 @@
                 pendingUploads: listPendingActionImages(detailDraft[field]).length,
                 onInput: (next: string, _selectionStart: number, composing: boolean) => {
                     // 列表编号只做最小就地替换；合成期间完全不碰 DOM
-                    const value = composing ? next : applyOrderedListNormalization(actionWindowNode(field));
+                    const editorNode = actionWindowNode();
+                    const value = composing || !editorNode ? next : applyOrderedListNormalization(editorNode);
                     detailDraft = { ...detailDraft, [field]: value };
                     actionCursor = { ...actionCursor, [field]: actionWindow?.currentCaret() ?? value.length };
                     if (!composing) rememberActionDraft(field, value);
@@ -1032,9 +1034,15 @@
         if (slot) slot.append(host);
         actionWindowDialog = dialog;
         editingAction = field;
-        // 打开后聚焦，并用记下的点击坐标在真实编辑框里定位光标（一次布局读取，不造额外节点）
+        // 打开后聚焦，并用记下的点击坐标在真实编辑框里定位光标（一次布局读取，不造额外节点）。
+        // 这一帧里窗口可能已经被关掉（例如打开后立刻保存/取消，或宿主销毁对话框），
+        // 所以每一步都要重新确认它还在，避免对已销毁的节点读布局。
         requestAnimationFrame(() => {
-            const node = actionWindowNode(field);
+            const node = actionWindowNode();
+            if (!node || !node.isConnected || !actionWindow) {
+                pendingActionCaretPoint = null;
+                return;
+            }
             let offset = actionWindowCaret;
             const point = pendingActionCaretPoint;
             if (point && point.field === field) {
@@ -1042,16 +1050,18 @@
                 offset = caretOffsetInWindow(node, point.x, point.y);
                 recordActionEditorEvent("按点击位置定位光标", `字段=${field} 坐标=(${Math.round(point.x)},${Math.round(point.y)}) 光标=${offset ?? "末尾"}`);
             }
-            actionWindow?.focusAt(offset);
+            actionWindow.focusAt(offset);
         });
     }
 
-    /** 窗口里的实际编辑框节点（用于就地替换等 DOM 级操作）。 */
-    function actionWindowNode(field: ActionField): HTMLTextAreaElement {
+    /**
+     * 窗口里的实际编辑框节点；窗口可能已经被关掉（保存、取消、点窗口外），因此返回可空。
+     * 不能在这里用 `as` 断言成非空：调用点如果发生在下一帧，窗口早已销毁。
+     */
+    function actionWindowNode(): HTMLTextAreaElement | null {
         const host = actionWindowDialog?.element.querySelector<HTMLTextAreaElement>(".xz-action-editor-window__input");
         if (host) return host;
-        // 兜底：拿文档里唯一的大编辑框
-        return document.querySelector<HTMLTextAreaElement>(".xz-action-editor-window__input") as HTMLTextAreaElement;
+        return document.querySelector<HTMLTextAreaElement>(".xz-action-editor-window__input");
     }
 
     /**
