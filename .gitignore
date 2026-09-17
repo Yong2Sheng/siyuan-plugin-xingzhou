@@ -7,3 +7,7 @@ package.zip
 *.log
 design/
 backups/
+
+# 一次性调试／排版导出脚本（用完即删，不入库）
+tests/zz-*.test.ts
+续接提示词.md
