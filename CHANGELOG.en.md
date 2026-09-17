@@ -2,6 +2,35 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## 2.3.0 - 2026-09-17
+
+### Added
+
+- **Current Action Details now edits in a large editor window.** Clicking an action card no longer expands an inline text box inside the card; it opens an editor window covering roughly 82% × 82% of the screen, with the whole note scrollable and room to write long text.
+  - This removes the two problems that plagued long-form editing: the view **jumping** on entry, and the caret landing somewhere other than the clicked line. The cause was structural — with inline editing, mounting the text box first changes the card layout, so the line you clicked has already moved. A window is an overlay: the card and the page never move, and the caret offset is computed against the window's own layout before it opens.
+  - Opening the window carries over any previous draft. **Save** with the button or ⌘/Ctrl+Enter, **cancel** with the button or Esc, and **clicking outside saves** (the rule the inline editor always used). A failed save keeps the window open, states the reason, and never loses the text.
+  - Image paste and drag-in, thumbnails, upload progress, and the remove button all live in the window and behave as before.
+- **Action editor diagnostics** (work item "⋯" menu → "Action editor diagnostics…"): keeps the editor's key events in memory (up to 600 entries) with one-click copy or clear. It records editor mount/unmount, `value` writes, selection changes, `focus/focusin/focusout`, scroll positions, and the **call site** behind each one — for tracking down editor problems that only appear on one machine. Nothing is written to disk or sent over the network.
+
+### Fixed
+
+- Fixed the input box **jumping up and down** while typing Chinese (pinyin), and every keystroke rewriting the textarea: input no longer triggers any programmatic write-back, and ordered-list numbering is rewritten in place, minimally.
+- Fixed **⌘Z not undoing**: every keystroke used to reassign the whole textarea value, which wiped the browser's native undo stack. The typing path no longer touches the DOM, so undo works again.
+- Fixed the **view jumping around** while editing long notes, and clicks landing on the wrong line:
+  - The editor no longer grows an inner scrollbar; it expands to the full content height like read mode, with an allowance for line-height rounding (the visible height used to fall 1–2px short of the content height, so the browser scrolled a little on every keystroke to follow the caret, which felt like being dragged to the bottom of the visible area).
+  - The auto-height measurement is now synchronous, so there is no collapsed frame for a click to land in, and the caret lands on the clicked line: clicking inside the text starts there, and clicking the upper part of a card starts at the beginning or the end depending on which half you hit.
+- Fixed **silent text loss**:
+  - The textarea is no longer disabled while saving (previously clicking away greyed it out and swallowed everything typed in that window), and a completed save never overwrites what you are writing with an older snapshot.
+  - Only genuine external changes (image insert, upload completion, item switch) write back into the textarea, and whenever the textarea is ahead of the draft, the textarea wins.
+  - Nothing is written back during IME composition — including the gap between `compositionend` and the final `input` — so just-committed candidates are never clobbered.
+  - Added a **local draft fallback**: what you type is snapshotted to session storage, and if it is newer than the saved value when you reopen, it is restored with a "restored your unsaved draft (local snapshot)" notice. A failed save falls back to the draft and reports the error instead of failing silently.
+- Fixed the **stuck editing state after the window is closed externally**: SiYuan dialogs can be dismissed by clicking outside, but that does not notify the plugin, so the card kept claiming it was being edited and could never be reopened. The dialog's destroy callback now resets the editing state (and treats an outside click as a save).
+
+### Changed
+
+- While editing, the action card now reads **"Editing in the large editor window · ⌘/Ctrl+Enter to save"** instead of the no-longer-true "click away to save · Esc to cancel".
+- The inline card textarea and its height cap are gone; long-form editing always goes through the large editor window.
+
 ## 2.2.0 - 2026-09-12
 
 ### Added

@@ -703,7 +703,15 @@
 .xz-action-card--editable:focus-visible { outline: 2px solid color-mix(in srgb, var(--xingzhou-primary) 55%, transparent); outline-offset: 2px; }
 .xz-action-card--editing { border-color: var(--xingzhou-primary); box-shadow: 0 0 0 1px color-mix(in srgb, var(--xingzhou-primary) 28%, transparent); }
 .xz-action-card--missing { cursor: default; }
-.xz-action-editor { box-sizing: border-box; width: 100%; min-height: 96px; overflow-y: hidden; resize: none; line-height: 1.65; }
+/*
+ * 编辑框与阅读态保持一致：完整展开，且禁止一切内部滚动。
+ * 曾经设过 max-height 上限，长文会让输入框自己滚动，于是「点击落点」与「视口位置」
+ * 变成两套坐标：光标跳末尾、打字时浏览器把编辑框内部滚到光标处（看起来像被拉到可见区底部）。
+ * 现在 overflow 彻底关掉，滚动只由详情面板一层负责；高度由 autoResizeTextarea 精确同步。
+ */
+.xz-action-editor { box-sizing: border-box; width: 100%; min-height: 96px; overflow: hidden; resize: none; line-height: 1.65; scrollbar-width: none; }
+.xz-action-editor:focus { overflow: hidden; }
+.xz-action-editor::-webkit-scrollbar { width: 0; height: 0; }
 
 /* 原分辨率图片：阅读态按容器宽度缩放，点击可看原图 */
 .xz-markdown-preview img { display: block; max-width: min(100%, 560px); max-height: 420px; width: auto; height: auto; margin: .65em 0; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel); cursor: zoom-in; object-fit: contain; }
@@ -712,7 +720,29 @@
 .xz-action-card--drop { border-color: var(--xingzhou-primary); border-style: dashed; background: var(--xingzhou-primary-light); }
 
 .xz-action-hint { display: flex; align-items: center; gap: 6px; margin: 0 0 9px; padding: 6px 9px; border: 1px dashed color-mix(in srgb, var(--xingzhou-primary) 42%, var(--xingzhou-border)); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: color-mix(in srgb, var(--xingzhou-primary) 6%, transparent); font-size: 11px; line-height: 1.5; }
+/* 大编辑窗口：卡片布局不受影响，编辑框位置稳定，落点精确 */
+.xz-action-editor-window { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 8px; box-sizing: border-box; height: 100%; padding: 14px 16px 12px; color: var(--xingzhou-text); }
+.xz-action-editor-window__host, .xz-action-editor-window__slot { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
+.xz-action-editor-window__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.xz-action-editor-window__head strong { font-size: 14px; }
+.xz-action-editor-window__head span { color: var(--xingzhou-muted); font-size: 11px; }
+.xz-action-editor-window__dropzone { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; border: 1px dashed transparent; border-radius: var(--xingzhou-radius); }
+.xz-action-editor-window__dropzone--active { border-color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
+.xz-action-editor-window__input { box-sizing: border-box; width: 100%; min-height: 100%; flex: 1 1 auto; overflow: auto; resize: none; line-height: 1.7; font-size: 14px; }
+.xz-action-editor-window__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--xingzhou-muted); font-size: 11px; }
+.xz-action-editor-window__actions { display: flex; gap: 8px; }
+/* 卡片内：正在窗口里编辑时的提示 */
+.xz-action-hint--window { border-style: solid; border-color: color-mix(in srgb, var(--xingzhou-primary) 45%, var(--xingzhou-border)); color: var(--xingzhou-primary); background: color-mix(in srgb, var(--xingzhou-primary) 8%, transparent); }
+
+/* 行动编辑诊断面板：等宽日志 + 可复制 */
+.xz-editor-diagnostics { display: grid; gap: 10px; color: var(--xingzhou-text); }
+.xz-editor-diagnostics__hint { margin: 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.6; }
+.xz-editor-diagnostics__actions { display: flex; gap: 8px; }
+.xz-editor-diagnostics__log { max-height: min(62vh, 520px); overflow: auto; margin: 0; padding: 10px 12px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel-subtle); font-family: var(--b3-font-family-code, monospace); font-size: 11.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; user-select: text; }
+
 .xz-action-hint--drop { border-style: solid; border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); background: var(--xingzhou-panel); }
+/* 草稿兜底命中：用成功色提示，与普通操作提示区分 */
+.xz-action-hint--restored { border-style: solid; border-color: color-mix(in srgb, var(--b3-theme-success, var(--xingzhou-primary)) 45%, var(--xingzhou-border)); color: var(--b3-theme-success, var(--xingzhou-primary)); background: color-mix(in srgb, var(--b3-theme-success, var(--xingzhou-primary)) 8%, transparent); }
 
 .xz-action-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .xz-action-images__item { position: relative; box-sizing: border-box; width: 132px; height: 96px; overflow: hidden; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel-subtle); }

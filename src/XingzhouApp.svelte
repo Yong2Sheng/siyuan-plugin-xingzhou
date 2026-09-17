@@ -43,7 +43,15 @@
     import type { CaptureDialogMode, CaptureDialogRequest, CaptureDialogValues } from "./capture-dialog";
     import { prerequisiteIds, validateDependencyUpdate, type DependencyKind } from "./dependencies";
     import type { ActionImageCopyTarget } from "./image-clipboard";
-    import { continueMarkdownList, normalizeMarkdownOrderedLists } from "./markdown-editor";
+    import {
+        actionEditorDiagnostics,
+        clearActionEditorDiagnostics,
+        formatActionEditorDiagnostics,
+        installActionEditorDiagnostics,
+        recordActionEditorEvent,
+    } from "./action-editor-diagnostics";
+    import ActionEditorWindow from "./ActionEditorWindow.svelte";
+    import { applyOrderedListNormalization, continueMarkdownList } from "./markdown-editor";
     import { renderActionMarkdown } from "./markdown-renderer";
     import ExecutionSlicePlanner from "./ExecutionSlicePlanner.svelte";
     import { pickFallbackTransaction } from "./ui-state";
@@ -181,6 +189,33 @@
     let undoingCompletion = false;
     let actionErrors: Record<ActionField, string> = { currentAction: "", nextAction: "" };
     let actionCursor: Record<ActionField, number> = { currentAction: 0, nextAction: 0 };
+    /**
+     * 正在编辑的 textarea 与其最后一次由程序写入的值。
+     * 输入期间 DOM 是唯一真源：只有图片插入这类外部变更才回写，避免每个按键重设 value
+     * 导致拼音输入抖动、光标被拉走、原生撤销栈被清空。
+     */
+    let actionEditorNodes: Record<ActionField, HTMLTextAreaElement | null> = { currentAction: null, nextAction: null };
+    let actionSyncedValues: Record<ActionField, string | null> = { currentAction: null, nextAction: null };
+    /**
+     * 点卡片进入编辑态时记下的鼠标位置：编辑器挂载后用它在文本里定位光标。
+     * 这样"点哪一行就在哪一行开始输入"对「点卡片进入」这条路径也成立，
+     * 而不是像以前那样把光标放到全文末尾。
+     */
+    let pendingActionCaretPoint: { field: ActionField; x: number; y: number } | null = null;
+    /** 进入编辑前锁定的「点击位置对应的字符位置」：挂载后版面会变，必须提前算好。 */
+    let pendingActionCaretOffset: { field: ActionField; offset: number | null } | null = null;
+    /** 大编辑窗口：内容组件实例与对话框。 */
+    let actionWindow: ActionEditorWindow | null = null;
+    let actionWindowDialog: Dialog | null = null;
+    let actionWindowField: ActionField | null = null;
+    /** 打开窗口前算好的光标落点（用窗口宽度排版量出来，不受卡片重排影响）。 */
+    let actionWindowCaret: number | null = null;
+    /** 正在按用户视角校正详情面板滚动时，不要再被自己的写入再次触发。 */
+    let restoringDetailScroll = false;
+    /** 输入法合成状态：合成期间任何程序化回写都会打散候选串，必须完全避开。 */
+    let actionComposing: Record<ActionField, boolean> = { currentAction: false, nextAction: false };
+    /** 草稿兜底：本地快照，用于系统级输入异常（输入法／系统升级）导致整段丢失后的恢复。 */
+    let actionRestoredNotice: Record<ActionField, string> = { currentAction: "", nextAction: "" };
     let actionImageUploads: Record<ActionField, ActionImageUpload[]> = { currentAction: [], nextAction: [] };
     let actionImageSizes: Record<ActionField, Record<string, number | null>> = { currentAction: {}, nextAction: {} };
     let savedActionValues: Record<ActionField, string> = { currentAction: "", nextAction: "" };
@@ -361,6 +396,61 @@
     $: reviewMissingActionItems = getReviewMissingActionItems(data?.items ?? [], new Set(reviewDateItems.map((item) => item.id)));
     $: reviewCompletedThisWeek = getReviewCompletedThisWeek(data?.items ?? []);
     $: if (selected && selected.id !== draftSourceId) resetDetailDraft(selected);
+    /**
+     * 只在「外部变更」时把内容写回 textarea：切换条目、插入图片、上传回填、保存后校正。
+     * 输入期间 detailDraft 跟着 DOM 走，这里的值必然相等，因此不会产生任何 DOM 写入，
+     * 拼音输入与原生撤销栈都不会被打断。
+     */
+    $: if (editingAction) {
+        const field = editingAction;
+        const node = actionEditorNodes[field];
+        if (!node) {
+            // 编辑器还没挂上：等挂载动作写入初始值
+        } else if (node.value === detailDraft[field]) {
+            if (actionSyncedValues[field] === null) actionSyncedValues = { ...actionSyncedValues, [field]: node.value };
+        } else if (node.value === actionSyncedValues[field]) {
+            /**
+             * DOM 里还是上一次同步写入的值，说明差异来自「用户输入」：
+             * 采纳 DOM，而不是把草稿写回去。回写会重置光标（浏览器按点击位置设的光标
+             * 会被抹掉，落到末尾），并清空原生撤销栈。
+             */
+            detailDraft = { ...detailDraft, [field]: node.value };
+        } else if (actionComposing[field]) {
+            /**
+             * 合成期间（含 compositionend 与最后一个 input 之间的间隙）绝不写 DOM。
+             * 这时 DOM 已经带着刚上屏的字，草稿还落后一步；写回去等于把用户刚打的字顶掉。
+             */
+        } else if (node.value === detailDraft[field] || node.value.length > detailDraft[field].length) {
+            /**
+             * 兜底：DOM 比草稿长（多出来的内容来自用户输入，例如事件顺序造成的草稿落后），
+             * 一律以 DOM 为准。宁可少同步一次，也不能用旧草稿覆盖用户正在写的内容。
+             */
+            detailDraft = { ...detailDraft, [field]: node.value };
+        } else {
+            // 真正的外部变更（插入图片、上传回填、切换条目）：写回并贴住光标
+            node.value = detailDraft[field];
+            const cursor = Math.min(actionCursor[field] ?? detailDraft[field].length, detailDraft[field].length);
+            node.setSelectionRange(cursor, cursor);
+            actionSyncedValues = { ...actionSyncedValues, [field]: node.value };
+        }
+    }
+
+    /**
+     * 大编辑窗口是命令式创建的，这里把「与它相关的外部状态」持续同步进去：
+     * 图片上传进度、错误信息、保存中、拖拽高亮、字数。
+     */
+    $: if (actionWindow && editingAction) {
+        const field = editingAction;
+        actionWindow.$set({
+            saving: savingAction === field,
+            error: actionErrors[field],
+            restoredNotice: actionRestoredNotice[field],
+            dragging: actionDragging === field,
+            imageRows: field === "currentAction" ? currentActionImageRows : nextActionImageRows,
+            imageTotal: field === "currentAction" ? currentActionImageTotal : nextActionImageTotal,
+            pendingUploads: listPendingActionImages(detailDraft[field]).length,
+        });
+    }
 
     Promise.resolve().then(() => void refresh());
 
@@ -371,6 +461,8 @@
             includeClosed = false;
         }
         scheduleTemporalRefresh();
+        // 行动编辑器的现场记录：只写内存环形缓冲，供「编辑诊断」入口导出
+        installActionEditorDiagnostics();
         return () => {
             clearCompletionUndo();
             if (temporalRefreshTimer) clearTimeout(temporalRefreshTimer);
@@ -682,6 +774,7 @@
         const actions: Array<{ label: string; icon?: string; onClick: () => void }> = [];
         if (!reordering && index > 0) actions.push({ label: "上移", icon: "iconUp", onClick: () => moveSibling(item.id, -1) });
         if (!reordering && index >= 0 && index < siblings.length - 1) actions.push({ label: "下移", icon: "iconDown", onClick: () => moveSibling(item.id, 1) });
+        actions.push({ label: "行动编辑诊断…", icon: "iconInfo", onClick: () => openActionEditorDiagnostics() });
         openItemMenu(event, () => requestDelete(item), addChild, actions);
     }
 
@@ -691,6 +784,58 @@
             deleteTarget = null;
             deleteError = "";
         }
+    }
+
+    /**
+     * 「行动编辑诊断」：把编辑框最近的事件序列（含调用来源）显示出来，可一键复制。
+     * 这是给「点击后光标跳到末尾、视图回顶」这类只在用户机器上出现的问题取证用的。
+     */
+    function openActionEditorDiagnostics() {
+        recordActionEditorEvent("打开诊断面板", `已记录 ${actionEditorDiagnostics().length} 条`);
+        // 面板滚动是「视图跳到顶部」的直接证据：打开诊断时补挂记录（只在变化 ≥ 4px 时记一条，避免刷屏）
+        if (detailElement && detailElement.dataset.scrollProbed !== "1") {
+            detailElement.dataset.scrollProbed = "1";
+            let lastTop = detailElement.scrollTop;
+            detailElement.addEventListener("scroll", () => {
+                const top = detailElement?.scrollTop ?? 0;
+                if (Math.abs(top - lastTop) < 4) return;
+                const max = detailElement ? detailElement.scrollHeight - detailElement.clientHeight : 0;
+                recordActionEditorEvent("详情面板滚动", `${Math.round(lastTop)} → ${Math.round(top)}（可滚动上限 ${Math.round(max)}）`);
+                lastTop = top;
+            }, true);
+        }
+        const dialog = new Dialog({
+            title: "行动编辑诊断",
+            width: "760px",
+            content: `<div class="xz-editor-diagnostics">
+                <p class="xz-editor-diagnostics__hint">先关掉这个窗口，在「本次行动细则」里复现一次问题（点击中间某行 → 打字），再回来点「刷新」。</p>
+                <div class="xz-editor-diagnostics__actions">
+                    <button class="b3-button" data-role="refresh" type="button">刷新</button>
+                    <button class="b3-button" data-role="copy" type="button">复制全部</button>
+                    <button class="b3-button b3-button--outline" data-role="clear" type="button">清空</button>
+                </div>
+                <pre class="xz-editor-diagnostics__log" data-role="log"></pre>
+            </div>`,
+        });
+        const log = dialog.element.querySelector<HTMLElement>('[data-role="log"]');
+        const render = () => {
+            if (!log) return;
+            const text = formatActionEditorDiagnostics();
+            log.textContent = text;
+            log.scrollTop = log.scrollHeight;
+        };
+        render();
+        dialog.element.querySelector<HTMLButtonElement>('[data-role="refresh"]')?.addEventListener("click", render);
+        dialog.element.querySelector<HTMLButtonElement>('[data-role="clear"]')?.addEventListener("click", () => { clearActionEditorDiagnostics(); render(); });
+        dialog.element.querySelector<HTMLButtonElement>('[data-role="copy"]')?.addEventListener("click", () => {
+            const text = formatActionEditorDiagnostics();
+            const done = () => showMessage("诊断日志已复制到剪贴板", 3000);
+            try {
+                void navigator.clipboard?.writeText(text).then(done, () => showMessage("复制失败：请手动选中日志内容复制", 4000));
+            } catch {
+                showMessage("复制失败：请手动选中日志内容复制", 4000);
+            }
+        });
     }
 
     function requestDelete(item: WorkItem) {
@@ -742,26 +887,296 @@
         savingAction = null;
         actionErrors = { currentAction: "", nextAction: "" };
         actionCursor = { currentAction: 0, nextAction: 0 };
+        actionEditorNodes = { currentAction: null, nextAction: null };
+        actionSyncedValues = { currentAction: null, nextAction: null };
+        actionComposing = { currentAction: false, nextAction: false };
+        actionRestoredNotice = { currentAction: "", nextAction: "" };
         savedActionValues = { currentAction: item.currentAction, nextAction: item.nextAction };
         resetActionImages();
         inlineError = "";
     }
 
-    function startActionEditing(field: ActionField) {
+    function actionDraftStorageKey(field: ActionField): string {
+        return `siyuan-plugin-xingzhou:action-draft:${draftSourceId ?? ""}:${field}`;
+    }
+
+    /**
+     * 草稿快照：输入内容先落到 sessionStorage。
+     * 这不是保存（正式内容仍在点击外部／⌘Enter 时写入插件数据），只用于
+     * 「刚打的字整段消失」这种系统级输入异常后的找回。
+     */
+    function rememberActionDraft(field: ActionField, value: string) {
+        try {
+            sessionStorage.setItem(actionDraftStorageKey(field), value);
+        } catch {
+            // 无痕模式或配额不足：草稿兜底不可用，不影响正常编辑
+        }
+    }
+
+    function clearActionDraft(field: ActionField) {
+        try {
+            sessionStorage.removeItem(actionDraftStorageKey(field));
+        } catch {
+            // 同上
+        }
+    }
+
+    function readActionDraft(field: ActionField): string {
+        try {
+            return sessionStorage.getItem(actionDraftStorageKey(field)) ?? "";
+        } catch {
+            return "";
+        }
+    }
+
+    function startActionEditing(field: ActionField, point?: { x: number; y: number }) {
         const fieldAvailable = field === "currentAction" ? data?.fields.currentAction : data?.fields.nextAction;
         if (!selected || !fieldAvailable) return;
-        detailDraft = { ...detailDraft, [field]: selected[field] };
+        // 窗口已经打开：不要用条目里的旧值重置草稿，否则点一下卡片就会吞掉刚输入的内容
+        if (editingAction === field) return;
+        const saved = selected[field];
+        const draft = readActionDraft(field);
+        const recovering = draft !== "" && draft !== saved;
+        const value = recovering ? draft : saved;
+        detailDraft = { ...detailDraft, [field]: value };
+        actionRestoredNotice = { ...actionRestoredNotice, [field]: recovering ? "已恢复上次未保存的草稿（本地快照）" : "" };
         actionErrors = { ...actionErrors, [field]: "" };
-        actionCursor = { ...actionCursor, [field]: selected[field].length };
+        actionCursor = { ...actionCursor, [field]: value.length };
+        // 先用「窗口的排版宽度」把点击位置换算成字符位置：卡片内的版面变化不再影响落点
+        actionWindowCaret = point ? caretOffsetForWindow(field, value, point.x, point.y) : null;
+        recordActionEditorEvent("打开编辑窗口", `字段=${field} 恢复草稿=${recovering} 长度=${value.length}${point ? ` 点击坐标=(${Math.round(point.x)},${Math.round(point.y)})` : ""} 落点=${actionWindowCaret ?? "末尾"}`);
+        pendingActionCaretOffset = null;
+        pendingActionCaretPoint = null;
+        // 窗口是浮层：打开它不该让详情面板挪位置。浏览器偶尔会因内容重排改变滚动位置，
+        // 这里在打开前后把面板位置按原样写回（浮层期间面板本就应当不动）。
+        const panel = detailElement;
+        const panelTop = panel?.scrollTop ?? null;
+        const panelMax = panel ? panel.scrollHeight - panel.clientHeight : null;
+        openActionEditorWindow(field, value);
+        if (panel && panelTop !== null) {
+            /**
+             * 浮层打开不应改变面板位置。只在「面板可滚动范围没变」时校正：
+             * 若可滚动范围本身变了（内容真的变短），把位置硬拉回去只会与浏览器对着干。
+             */
+            const restore = () => {
+                if (!panel.isConnected) return;
+                const max = panel.scrollHeight - panel.clientHeight;
+                if (panelMax !== null && Math.abs(max - panelMax) > 8) return;
+                if (Math.abs(panel.scrollTop - panelTop) > 0.5) panel.scrollTop = panelTop;
+            };
+            restore();
+            requestAnimationFrame(() => { restore(); requestAnimationFrame(restore); });
+        }
+    }
+
+    /** 窗口宽度下的落点换算：宽度与窗口内编辑框一致，且完全不影响卡片版面。 */
+    function caretOffsetForWindow(field: ActionField, value: string, x: number, y: number): number | null {
+        const reference = document.querySelector<HTMLElement>(".xz-action-card--primary .xz-markdown-preview")
+            ?? document.querySelector<HTMLElement>(".xz-action-card--primary");
+        const referenceRect = reference?.getBoundingClientRect() ?? null;
+        if (referenceRect && (y < referenceRect.top || y > referenceRect.bottom)) {
+            // 点在正文之外（标题/提示行）：按上下位置取开头或末尾，避免"点了上面却跑到末尾"
+            return y < referenceRect.top ? 0 : value.length;
+        }
+        const measure = document.createElement("textarea");
+        measure.className = "b3-text-field";
+        measure.value = value;
+        const width = Math.max(320, Math.round(window.innerWidth * 0.82) - 48);
+        measure.style.cssText = `position:fixed;left:-9999px;top:0;width:${width}px;visibility:hidden;pointer-events:none;`;
+        document.body.append(measure);
+        try {
+            measure.style.height = `${measure.scrollHeight}px`;
+            const rect = measure.getBoundingClientRect();
+            const relativeX = referenceRect ? x - referenceRect.left : 0;
+            const clampedX = rect.left + Math.min(Math.max(relativeX, 4), width - 4);
+            const clampedY = Math.min(Math.max(y, rect.top + 4), rect.bottom - 4);
+            const direct = readCaretOffset(measure, clampedX, clampedY);
+            if (direct !== null) return direct;
+            const styles = getComputedStyle(measure);
+            const lineHeight = Number.parseFloat(styles.lineHeight) || 21;
+            const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+            const lineIndex = Math.max(0, Math.round((clampedY - rect.top - paddingTop - lineHeight / 2) / lineHeight));
+            const lines = value.split("\n");
+            let offset = 0;
+            for (let index = 0; index < Math.min(lineIndex, lines.length); index += 1) offset += lines[index].length + 1;
+            return Math.min(offset, value.length);
+        } finally {
+            measure.remove();
+        }
+    }
+
+    /**
+     * 打开大编辑窗口。卡片本身不动，编辑框位置稳定，因此不会再有"进入编辑时跳一下"，
+     * 落点也不受卡片重排影响。
+     */
+    function openActionEditorWindow(field: ActionField, value: string) {
+        actionWindowDialog?.destroy();
+        actionWindowField = field;
+        const host = document.createElement("div");
+        host.className = "xz-action-editor-window__host";
+        const component = new ActionEditorWindow({
+            target: host,
+            props: {
+                label: field === "currentAction" ? fieldLabel(selected!) : "下一步行动",
+                initialValue: value,
+                caretOffset: actionWindowCaret,
+                restoredNotice: actionRestoredNotice[field],
+                saving: savingAction === field,
+                error: actionErrors[field],
+                dragging: actionDragging === field,
+                imageRows: field === "currentAction" ? currentActionImageRows : nextActionImageRows,
+                imageTotal: field === "currentAction" ? currentActionImageTotal : nextActionImageTotal,
+                pendingUploads: listPendingActionImages(detailDraft[field]).length,
+                onInput: (next: string, _selectionStart: number, composing: boolean) => {
+                    // 列表编号只做最小就地替换；合成期间完全不碰 DOM
+                    const value = composing ? next : applyOrderedListNormalization(actionWindowNode(field));
+                    detailDraft = { ...detailDraft, [field]: value };
+                    actionCursor = { ...actionCursor, [field]: actionWindow?.currentCaret() ?? value.length };
+                    if (!composing) rememberActionDraft(field, value);
+                },
+                onKeydown: (event: KeyboardEvent) => handleActionKeydown(event, field),
+                onPaste: (event: ClipboardEvent) => handleActionPaste(event, field),
+                onDragover: (event: DragEvent) => handleActionDragOver(event, field),
+                onDragleave: (event: DragEvent) => handleActionDragLeave(event, field),
+                onDrop: (event: DragEvent) => handleActionDrop(event, field),
+                onRemoveImage: (syntax: string) => removeDraftImage(field, syntax),
+                onSave: () => void saveAction(field),
+                onCancel: () => cancelActionEditing(field),
+                onExplainImages: () => showMessage("直接粘贴截图，或把图片文件拖到编辑窗口里", 4000),
+                onImageContextMenu: (event: MouseEvent) => handleImageContextMenu(event),
+            },
+        });
+        actionWindow = component;
+        const dialog = new Dialog({
+            title: field === "currentAction" ? fieldLabel(selected!) : "下一步行动",
+            width: "82vw",
+            height: "82vh",
+            // 思源 Dialog 只接受字符串内容：先占位，再把组件挂进去
+            content: '<div class="xz-action-editor-window__slot"></div>',
+            // 点窗口外关闭时，思源只会销毁对话框，不会通知插件：必须在这里收尾，否则编辑态会卡住
+            destroyCallback: () => {
+                // 只处理「宿主自己关掉」的情况；插件主动关闭时已经收尾过
+                if (closingActionWindow) return;
+                handleActionWindowDismissed();
+            },
+        });
+        // 兜底：部分版本点遮罩只关 DOM 不走 destroyCallback
+        dialog.element.parentElement?.addEventListener("mousedown", (event) => {
+            if (event.target !== event.currentTarget) return;
+            handleActionWindowDismissed();
+        });
+        const slot = dialog.element.querySelector<HTMLElement>(".xz-action-editor-window__slot");
+        if (slot) slot.append(host);
+        actionWindowDialog = dialog;
         editingAction = field;
+        // 打开后聚焦并把光标放到预先算好的落点
+        requestAnimationFrame(() => actionWindow?.focusAt(actionWindowCaret));
+    }
+
+    /** 窗口里的实际编辑框节点（用于就地替换等 DOM 级操作）。 */
+    function actionWindowNode(field: ActionField): HTMLTextAreaElement {
+        const host = actionWindowDialog?.element.querySelector<HTMLTextAreaElement>(".xz-action-editor-window__input");
+        if (host) return host;
+        // 兜底：拿文档里唯一的大编辑框
+        return document.querySelector<HTMLTextAreaElement>(".xz-action-editor-window__input") as HTMLTextAreaElement;
+    }
+
+    /**
+     * 关闭大编辑窗口（保存、取消、以及用户在窗口外点击都走这里）。
+     * 必须幂等：思源的对话框自己也会因为"点外面"而销毁，销毁回调与我们的关闭流程可能同时进来。
+     */
+    let closingActionWindow = false;
+    function closeActionEditorWindow() {
+        if (closingActionWindow) return;
+        closingActionWindow = true;
+        const dialog = actionWindowDialog;
+        const component = actionWindow;
+        actionWindowDialog = null;
+        actionWindow = null;
+        actionWindowField = null;
+        try {
+            component?.$destroy();
+        } catch {
+            // 组件可能已随对话框一起移除
+        }
+        try {
+            // destroy 会触发 destroyCallback；此时 actionWindowDialog 已置空，
+            // 回调里的「是否仍是当前对话框」判断会跳过重复收尾，不会递归
+            dialog?.destroy();
+        } catch {
+            // 对话框可能已经被宿主销毁
+        }
+        closingActionWindow = false;
+    }
+
+    /**
+     * 窗口被外部关闭（点窗口外、宿主关闭）时的收尾：
+     * 不清编辑态就会出现"窗口没了，卡片还显示正在编辑，而且再也点不开"的死状态。
+     */
+    function handleActionWindowDismissed() {
+        if (!editingAction) return;
+        const field = editingAction;
+        recordActionEditorEvent("窗口被外部关闭", `字段=${field} 视为保存`);
+        // 与卡片内联编辑时的规则保持一致：点到外面 = 保存。
+        // 内容已经在 detailDraft 里（每次 input 都同步），所以先把编辑态收干净，
+        // 再走统一保存流程；保存失败会写明错误并保留草稿兜底，不会静默丢内容。
+        actionErrors = { ...actionErrors, [field]: "" };
+        editingAction = null;
+        actionEditorNodes = { ...actionEditorNodes, [field]: null };
+        actionSyncedValues = { ...actionSyncedValues, [field]: null };
+        actionWindowCaret = null;
+        void saveAction(field);
+    }
+
+    /** 编辑结束：先卸下编辑器，再让异步结果决定草稿与保存状态。 */
+    function finishActionEditing(field: ActionField) {
+        if (editingAction !== field) return;
+        recordActionEditorEvent("退出编辑态", `字段=${field}`);
+        closeActionEditorWindow();
+        editingAction = null;
+        actionEditorNodes = { ...actionEditorNodes, [field]: null };
+        actionSyncedValues = { ...actionSyncedValues, [field]: null };
+        actionWindowCaret = null;
     }
 
     function cancelActionEditing(field: ActionField) {
         if (!selected) return;
         detailDraft = { ...detailDraft, [field]: selected[field] };
         actionErrors = { ...actionErrors, [field]: "" };
+        actionRestoredNotice = { ...actionRestoredNotice, [field]: "" };
+        clearActionDraft(field);
         resetActionImages(field);
-        if (editingAction === field) editingAction = null;
+        finishActionEditing(field);
+    }
+
+    /** 输入链路写入草稿：光标由浏览器维护，这里只记录位置并留一份本地快照。 */
+    function applyActionDraft(field: ActionField, value: string, cursor: number) {
+        detailDraft = { ...detailDraft, [field]: value };
+        actionCursor = { ...actionCursor, [field]: cursor };
+        rememberActionDraft(field, value);
+    }
+
+    /**
+     * 程序化改动草稿（插入图片、回填、移除图片）：编辑中要同步到 DOM，已收起时只改草稿。
+     * 提前写入 actionSyncedValues 可让紧随其后的响应式同步跳过，从而保留光标位置。
+     */
+    function writeActionDraft(field: ActionField, value: string, cursor: number) {
+        // 编辑中：程序化变更（插入图片、移除图片、上传回填）直接写进窗口里的编辑框
+        if (editingAction === field) actionWindow?.applyValue(value, cursor);
+        actionCursor = { ...actionCursor, [field]: cursor };
+        detailDraft = { ...detailDraft, [field]: value };
+        rememberActionDraft(field, value);
+    }
+
+    /** 保存前以 DOM 为准：输入法合成中的内容还没写回草稿，不能漏掉。 */
+    function actionValueForSave(field: ActionField): string {
+        if (editingAction === field && actionWindow) return actionWindow.currentValue();
+        return detailDraft[field];
+    }
+
+    /** 保存返回后草稿是否已被更新的编辑接管；接管后绝不能用旧快照覆盖。 */
+    function actionEditingOwner(field: ActionField): HTMLTextAreaElement | null {
+        return editingAction === field ? actionEditorNodes[field] : null;
     }
 
     async function saveAction(field: ActionField) {
@@ -771,18 +1186,18 @@
         if (pendingUploadCount(field) > 0) {
             // 图片还在上传：先留在编辑态，上传流程结束后会补一次保存；
             // 不写入半成品后仍可能被其它流程触发保存，这里退化为移除未完成的占位符。
-            const cleaned = markdownForStorage(reconcileActionUploads(field, detailDraft[field]));
+            const cleaned = markdownForStorage(reconcileActionUploads(field, actionValueForSave(field)));
             detailDraft = { ...detailDraft, [field]: cleaned };
             actionImageUploads = { ...actionImageUploads, [field]: [] };
             resetActionImages(field);
-            if (editingAction === field) editingAction = null;
             return;
         }
-        const value = markdownForStorage(reconcileActionUploads(field, detailDraft[field]));
+        const value = markdownForStorage(reconcileActionUploads(field, actionValueForSave(field)));
         if (value === selected[field]) {
             actionImageUploads = { ...actionImageUploads, [field]: [] };
             savedActionValues = { ...savedActionValues, [field]: value };
-            if (editingAction === field) editingAction = null;
+            clearActionDraft(field);
+            finishActionEditing(field);
             return;
         }
         const sourceId = selected.id;
@@ -792,14 +1207,17 @@
         try {
             applyData(await saveItem(data, selected, { [field]: value }));
             const updated = data?.items.find((item) => item.rowId === sourceRowId);
-            if (updated) {
-                detailDraft = { ...detailDraft, [field]: updated[field] };
-                if (selectedId === sourceId) draftSourceId = updated.id;
-            }
+            const savedValue = updated?.[field] ?? value;
+            detailDraft = { ...detailDraft, [field]: savedValue };
+            if (updated && selectedId === sourceId) draftSourceId = updated.id;
             actionImageUploads = { ...actionImageUploads, [field]: [] };
-            savedActionValues = { ...savedActionValues, [field]: updated?.[field] ?? value };
-            if (editingAction === field) editingAction = null;
+            savedActionValues = { ...savedActionValues, [field]: savedValue };
+            clearActionDraft(field);
+            finishActionEditing(field);
         } catch (caught) {
+            // 写入失败：内容留在草稿与窗口里，绝不静默丢掉
+            detailDraft = { ...detailDraft, [field]: value };
+            rememberActionDraft(field, value);
             actionErrors = { ...actionErrors, [field]: caught instanceof Error ? caught.message : String(caught) };
         } finally {
             savingAction = null;
@@ -821,22 +1239,37 @@
             const edit = continueMarkdownList(event.target.value, event.target.selectionStart, event.target.selectionEnd);
             if (!edit) return;
             event.preventDefault();
-            detailDraft = { ...detailDraft, [field]: edit.value };
-            event.target.value = edit.value;
-            event.target.setSelectionRange(edit.cursor, edit.cursor);
+            const node = event.target;
+            // 整段重写会让原生撤销栈失效：只在「新建列表项」处插入，编号重排用 setRangeText 就地改
+            const inserted = edit.value.slice(node.selectionStart, edit.cursor);
+            node.setRangeText(inserted, node.selectionStart, node.selectionEnd, "preserve");
+            node.setSelectionRange(edit.cursor, edit.cursor);
+            applyActionDraft(field, applyOrderedListNormalization(node), node.selectionStart ?? edit.cursor);
         }
     }
 
     function handleActionInput(event: Event, field: ActionField) {
         if (!(event.target instanceof HTMLTextAreaElement)) return;
+        recordActionEditorEvent("input", `字段=${field} 长度=${event.target.value.length} 光标=${event.target.selectionStart} 合成中=${(event as InputEvent).isComposing}`);
         if ((event as InputEvent).isComposing) {
+            // 输入法合成期间不回写 DOM，也不在这里做规范化：那会把候选串打散
             detailDraft = { ...detailDraft, [field]: event.target.value };
             return;
         }
-        const normalized = normalizeMarkdownOrderedLists(event.target.value, event.target.selectionStart, event.target.selectionEnd);
-        detailDraft = { ...detailDraft, [field]: normalized.value };
-        event.target.value = normalized.value;
-        event.target.setSelectionRange(normalized.selectionStart, normalized.selectionEnd);
+        // 列表编号只做最小就地替换；不需要替换时完全不碰 DOM，浏览器自带的撤销与光标不受影响
+        const value = applyOrderedListNormalization(event.target);
+        applyActionDraft(field, value, event.target.selectionStart ?? value.length);
+    }
+
+    /**
+     * 组合结束要等下一轮事件循环再解除「合成中」标记：
+     * compositionend 与浏览器补发的最后一个 input 之间有一个空隙，
+     * 在那个空隙里同步草稿会读到还没更新的旧值，把刚上屏的字顶掉。
+     */
+    function finishActionComposition(field: ActionField) {
+        window.setTimeout(() => {
+            actionComposing = { ...actionComposing, [field]: false };
+        }, 0);
     }
 
     function handleActionCardKeydown(event: KeyboardEvent, field: ActionField) {
@@ -845,10 +1278,106 @@
         startActionEditing(field);
     }
 
-    function focusOnMount(node: HTMLTextAreaElement) {
-        node.focus();
-        node.setSelectionRange(node.value.length, node.value.length);
+    /**
+     * 编辑器挂载：写入一次草稿值并聚焦，之后输入期间不再有程序的 DOM 写入。
+     * 之前用 `value={...}` 绑定会让每一帧都重设 textarea.value：
+     * 拼音合成被打断、光标被拉回末尾、原生撤销栈被清空（⌘Z 无法恢复）。
+     */
+    /** 编辑器挂载：写入一次草稿值并聚焦，之后输入期间不再有程序的 DOM 写入。 */
+    function prepareActionEditor(node: HTMLTextAreaElement, field: ActionField) {
+        recordActionEditorEvent("prepareActionEditor", `字段=${field} 草稿长度=${detailDraft[field].length}`);
+        node.value = detailDraft[field];
+        actionEditorNodes = { ...actionEditorNodes, [field]: node };
+        actionSyncedValues = { ...actionSyncedValues, [field]: node.value };
+        actionComposing = { ...actionComposing, [field]: false };
+        if (!node.isConnected) return;
+        // 只聚焦，不改选区、不滚动
+        node.focus({ preventScroll: true });
+        const planned = pendingActionCaretOffset;
+        pendingActionCaretPoint = null;
+        if (!planned || planned.field !== field || planned.offset === null) {
+            recordActionEditorEvent("光标定位失败", `字段=${field}`);
+            pendingActionCaretOffset = null;
+            return;
+        }
+        pendingActionCaretOffset = null;
+        const offset = planned.offset;
+        const panel = detailElement;
+        const restoreTop = panel?.scrollTop ?? 0;
+        // 先放好光标、再聚焦并禁止聚焦滚动；聚焦后把面板滚动位置原样写回。
+        // 少了这一步，浏览器会为了"显示新光标"把面板滚走，看起来就是进入编辑时跳一下。
+        node.setSelectionRange(offset, offset);
+        node.blur();
+        node.focus({ preventScroll: true });
+        keepPanelTop(panel, restoreTop);
+        actionCursor = { ...actionCursor, [field]: offset };
+        recordActionEditorEvent("按点击位置定位光标", `字段=${field} 光标=${offset} 面板=${Math.round(restoreTop)}`);
     }
+
+    /** 进入／退出编辑态期间守住面板滚动位置（连续两帧，覆盖挂载引起的回流）。 */
+    function keepPanelTop(panel: HTMLElement | null, top: number) {
+        if (!panel) return;
+        const restore = () => {
+            if (panel.isConnected && Math.abs(panel.scrollTop - top) > 0.5) panel.scrollTop = top;
+        };
+        restore();
+        requestAnimationFrame(() => { restore(); requestAnimationFrame(restore); });
+    }
+
+    /**
+     * 在编辑框挂载之前，用一个「宽度与编辑框一致、不可见」的量尺节点把点击坐标换算成字符位置。
+     * 这样换算用的是点击那一刻的版面（此时预览还在原位），结果才对得上用户点的那一行；
+     * 挂载后再换算会因为提示行消失、编辑框变高而对到别的行。
+     */
+    function caretOffsetAtPoint(field: ActionField, x: number, y: number): number | null {
+        const anchor = document.querySelector<HTMLElement>(".xz-action-card--primary");
+        const reference = document.querySelector<HTMLElement>(".xz-action-card--primary .xz-action-editor")
+            ?? document.querySelector<HTMLElement>(".xz-action-card--primary .xz-markdown-preview");
+        const measure = document.createElement("textarea");
+        measure.className = "b3-text-field xz-action-editor";
+        measure.setAttribute("aria-hidden", "true");
+        measure.value = detailDraft[field];
+        const width = (reference ?? anchor)?.getBoundingClientRect().width ?? 0;
+        measure.style.cssText = `position:fixed;left:-9999px;top:0;width:${Math.max(80, Math.round(width))}px;visibility:hidden;pointer-events:none;`;
+        document.body.append(measure);
+        try {
+            measure.style.height = `${measure.scrollHeight}px`;
+            const rect = measure.getBoundingClientRect();
+            if (rect.height <= 0) return null;
+            // 量尺节点被放在屏幕外，所以横向要按「相对卡片左边缘」换算，
+            // 不能用点击坐标直接和量尺节点的 left 比较（那会把所有点击都判成界外）。
+            const referenceLeft = (reference ?? anchor)?.getBoundingClientRect().left ?? 0;
+            const relativeX = x - referenceLeft;
+            const clampedX = rect.left + Math.min(Math.max(relativeX, 4), Math.max(8, rect.width - 4));
+            const clampedY = Math.min(Math.max(y, rect.top + 4), rect.bottom - 4);
+            const direct = readCaretOffset(measure, clampedX, clampedY);
+            if (direct !== null) return direct;
+            const styles = getComputedStyle(measure);
+            const lineHeight = Number.parseFloat(styles.lineHeight) || 21;
+            const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+            const lineIndex = Math.max(0, Math.round((clampedY - rect.top - paddingTop - lineHeight / 2) / lineHeight));
+            const lines = measure.value.split("\n");
+            let offset = 0;
+            for (let index = 0; index < Math.min(lineIndex, lines.length); index += 1) offset += lines[index].length + 1;
+            return Math.min(offset, measure.value.length);
+        } finally {
+            measure.remove();
+        }
+    }
+
+    function readCaretOffset(node: HTMLTextAreaElement, pointX: number, pointY: number): number | null {
+        if (typeof document.caretPositionFromPoint === "function") {
+            const position = document.caretPositionFromPoint(pointX, pointY);
+            if (position && position.offsetNode === node) return position.offset;
+        }
+        if (typeof document.caretRangeFromPoint === "function") {
+            const range = document.caretRangeFromPoint(pointX, pointY);
+            if (range && range.startContainer === node) return range.startOffset;
+        }
+        return null;
+    }
+
+
 
     async function saveInline(role: "title" | "type" | "status" | "parent" | "topProject" | "planDate" | "deadline" | "duration" | "energy", value: string) {
         if (!data || !selected || savingInline || savingSlices) return;
@@ -1807,8 +2336,7 @@
     }
 
     function applyDetailEdit(field: ActionField, edit: ActionEdit) {
-        actionCursor[field] = edit.cursor;
-        detailDraft = { ...detailDraft, [field]: edit.value };
+        writeActionDraft(field, edit.value, edit.cursor);
     }
 
     /** 程序化插入的内容（含图片）按规范重排引用页，用户手动输入保持原样。 */
@@ -1942,8 +2470,7 @@
 
             const cursor = actionCursor[field];
             const inserted = insertImageSyntax(detailDraft[field], cursor, cursor, uploadPlaceholderSyntax(uploadId, file.name));
-            actionCursor[field] = inserted.cursor;
-            detailDraft = { ...detailDraft, [field]: inserted.value };
+            writeActionDraft(field, inserted.value, inserted.cursor);
             const upload: ActionImageUpload = {
                 uploadId,
                 name: file.name || imageFileNameFor(hash, file),
@@ -1965,8 +2492,8 @@
                 const placeholder = findPlaceholderSyntax(detailDraft[field], uploadId);
                 if (placeholder) {
                     const replacement = markdownImageSyntax(result.path);
-                    actionCursor[field] = shiftCursorForReplacement(detailDraft[field].indexOf(placeholder), placeholder.length, replacement.length, actionCursor[field]);
-                    detailDraft = { ...detailDraft, [field]: detailDraft[field].replace(placeholder, replacement) };
+                    const cursor = shiftCursorForReplacement(detailDraft[field].indexOf(placeholder), placeholder.length, replacement.length, actionCursor[field]);
+                    writeActionDraft(field, detailDraft[field].replace(placeholder, replacement), cursor);
                 }
             } catch (caught) {
                 if (staleUpload()) continue;
@@ -1975,7 +2502,8 @@
                 actionErrors = { ...actionErrors, [field]: message };
                 // 失败后不能把占位符留在内容里：整行移除，用户可重新粘贴。
                 const placeholder = findPlaceholderSyntax(detailDraft[field], uploadId);
-                if (placeholder) detailDraft = { ...detailDraft, [field]: removeImageLine(detailDraft[field], placeholder) };            }
+                if (placeholder) writeActionDraft(field, removeImageLine(detailDraft[field], placeholder), actionCursor[field]);
+            }
         }
         await flushActionImages(field, draftKey, sourceItemId);
     }
@@ -2706,7 +3234,7 @@
                             class="xz-action-card xz-action-card--primary xz-action-card--editable"
                             role="button"
                             tabindex="0"
-                            on:click={() => startActionEditing("currentAction")}
+                            on:click={(event) => startActionEditing("currentAction", { x: event.clientX, y: event.clientY })}
                             on:keydown={(event) => handleActionCardKeydown(event, "currentAction")}
                             on:dragover={(event) => handleActionDragOver(event, "currentAction")}
                             on:dragleave={(event) => handleActionDragLeave(event, "currentAction")}
@@ -2718,41 +3246,11 @@
                                     {#if selectedCleanupBadge}
                                         <button class="xz-cleanup-badge" type="button" title="条目已结束，这些图片在宽限期后可以清理" on:mousedown|preventDefault on:click|stopPropagation={() => openCleanupPage()}>{selectedCleanupBadge}</button>
                                     {/if}
-                                    <span>{savingAction === "currentAction" ? "正在保存并复核…" : editingAction === "currentAction" ? "Esc 取消 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span>
+                                    <span>{savingAction === "currentAction" ? "正在保存并复核…" : editingAction === "currentAction" ? "在大编辑窗口中编辑 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span>
                                 </span>
                             </header>
                             {#if editingAction === "currentAction"}
-                                {#if actionDragging === "currentAction"}
-                                    <p class="xz-action-hint xz-action-hint--drop">松开即可插入图片</p>
-                                {:else}
-                                    <p class="xz-action-hint">可直接粘贴截图或拖入图片，图片按原分辨率存入思源资源库。</p>
-                                {/if}
-                            {/if}
-                            {#if editingAction === "currentAction"}
-                                <textarea use:focusOnMount use:autoResizeTextarea={detailDraft.currentAction} class="b3-text-field xz-action-editor" rows="6" aria-label={fieldLabel(selected)} value={detailDraft.currentAction} disabled={savingAction === "currentAction"} on:input={(event) => handleActionInput(event, "currentAction")} on:click|stopPropagation on:keyup={(event) => updateActionCursor(event, "currentAction")} on:select={(event) => updateActionCursor(event, "currentAction")} on:paste={(event) => handleActionPaste(event, "currentAction")} on:blur={() => void saveAction("currentAction")} on:keydown={(event) => handleActionKeydown(event, "currentAction")}></textarea>
-                                {#if currentActionImageRows.length > 0}
-                                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                                    <div class="xz-action-images" on:contextmenu={handleImageContextMenu}>
-                                        {#each currentActionImageRows as row (row.key)}
-                                            <div class="xz-action-images__item" class:xz-action-images__item--pending={row.status !== "done"} class:xz-action-images__item--failed={row.status === "failed"} title={row.error || row.label}>
-                                                {#if row.status === "done" && row.src}
-                                                    <img class="xz-action-thumb" src={row.src} alt={row.label} loading="lazy" />
-                                                {:else if row.status === "failed"}
-                                                    <span class="xz-action-images__state">上传失败</span>
-                                                {:else}
-                                                    <span class="xz-action-images__state"><i class="xz-spinner"></i>上传中…</span>
-                                                {/if}
-                                                <button class="xz-action-images__remove" type="button" aria-label={`移除图片 ${row.label}`} title="从细则中移除" on:mousedown|preventDefault on:click|stopPropagation={() => removeDraftImage("currentAction", row.syntax)}>×</button>
-                                                <small>{row.status === "failed" ? "重试请重新粘贴" : formatImageBytes(row.bytes ?? 0)}</small>
-                                            </div>
-                                        {/each}
-                                    </div>
-                                    <div class="xz-action-summary">
-                                        <span>🖼 {currentActionImageTotal} 张图</span>
-                                        {#if countActionImages(detailDraft.currentAction, (src) => src.startsWith("assets/")) > 0}<span class="is-pending">原分辨率</span>{/if}
-                                        <button type="button" on:mousedown|preventDefault on:click|stopPropagation={() => showMessage("直接粘贴截图，或把图片文件拖到这张卡片上", 4000)}>如何插入图片？</button>
-                                    </div>
-                                {/if}
+                                <p class="xz-action-hint xz-action-hint--window">正在大编辑窗口中编辑「{fieldLabel(selected)}」；保存或取消后回到这里。</p>
                             {:else if selected.currentAction}
                                 <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
                                 <div class="xz-markdown-preview" on:click={(event) => handleActionImageClick(event, "currentAction")} on:contextmenu={handleImageContextMenu}>{@html renderActionMarkdown(selected.currentAction)}</div>
@@ -2774,39 +3272,16 @@
                             class="xz-action-card xz-action-card--editable"
                             role="button"
                             tabindex="0"
-                            on:click={() => startActionEditing("nextAction")}
+                            on:click={(event) => startActionEditing("nextAction", { x: event.clientX, y: event.clientY })}
                             on:keydown={(event) => handleActionCardKeydown(event, "nextAction")}
                             on:dragover={(event) => handleActionDragOver(event, "nextAction")}
                             on:dragleave={(event) => handleActionDragLeave(event, "nextAction")}
                             on:drop={(event) => handleActionDrop(event, "nextAction")}
                         >
-                            <header><h3>下一步行动</h3><span>{savingAction === "nextAction" ? "正在保存并复核…" : editingAction === "nextAction" ? "Esc 取消 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span></header>
+                            <header><h3>下一步行动</h3><span>{savingAction === "nextAction" ? "正在保存并复核…" : editingAction === "nextAction" ? "在大编辑窗口中编辑 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span></header>
                             {#if editingAction === "nextAction"}
-                                {#if actionDragging === "nextAction"}
-                                    <p class="xz-action-hint xz-action-hint--drop">松开即可插入图片</p>
-                                {:else}
-                                    <p class="xz-action-hint">可直接粘贴截图或拖入图片，图片按原分辨率存入思源资源库。</p>
-                                {/if}
-                                <textarea use:focusOnMount use:autoResizeTextarea={detailDraft.nextAction} class="b3-text-field xz-action-editor" rows="4" aria-label="下一步行动" value={detailDraft.nextAction} disabled={savingAction === "nextAction"} on:input={(event) => handleActionInput(event, "nextAction")} on:click|stopPropagation on:keyup={(event) => updateActionCursor(event, "nextAction")} on:select={(event) => updateActionCursor(event, "nextAction")} on:paste={(event) => handleActionPaste(event, "nextAction")} on:blur={() => void saveAction("nextAction")} on:keydown={(event) => handleActionKeydown(event, "nextAction")}></textarea>
-                                {#if nextActionImageRows.length > 0}
-                                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                                    <div class="xz-action-images" on:contextmenu={handleImageContextMenu}>
-                                        {#each nextActionImageRows as row (row.key)}
-                                            <div class="xz-action-images__item" class:xz-action-images__item--pending={row.status !== "done"} class:xz-action-images__item--failed={row.status === "failed"} title={row.error || row.label}>
-                                                {#if row.status === "done" && row.src}
-                                                    <img class="xz-action-thumb" src={row.src} alt={row.label} loading="lazy" />
-                                                {:else if row.status === "failed"}
-                                                    <span class="xz-action-images__state">上传失败</span>
-                                                {:else}
-                                                    <span class="xz-action-images__state"><i class="xz-spinner"></i>上传中…</span>
-                                                {/if}
-                                                <button class="xz-action-images__remove" type="button" aria-label={`移除图片 ${row.label}`} title="从细则中移除" on:mousedown|preventDefault on:click|stopPropagation={() => removeDraftImage("nextAction", row.syntax)}>×</button>
-                                                <small>{row.status === "failed" ? "重试请重新粘贴" : formatImageBytes(row.bytes ?? 0)}</small>
-                                            </div>
-                                        {/each}
-                                    </div>
-                                {/if}
-                            {:else if selected.nextAction}
+                                <p class="xz-action-hint xz-action-hint--window">正在大编辑窗口中编辑「下一步行动」；保存或取消后回到这里。</p>
+                                                        {:else if selected.nextAction}
                                 <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
                                 <div class="xz-markdown-preview" on:click={(event) => handleActionImageClick(event, "nextAction")} on:contextmenu={handleImageContextMenu}>{@html renderActionMarkdown(selected.nextAction)}</div>
                             {:else}
@@ -2827,7 +3302,7 @@
                     {:else}
                         <p class="xz-detached-note">这是行舟内部工作项，当前没有关联思源文档。</p>
                     {/if}
-                    <p class="xz-detail-note">点击行动卡片可直接编辑；失焦自动保存，Esc 取消。修改会写入插件内部数据并重新读取复核。</p>
+                    <p class="xz-detail-note">点击行动卡片可从点击处开始编辑；点到别处即保存，Esc 取消，⌘/Ctrl+Enter 立即保存。修改会写入插件内部数据并重新读取复核。</p>
                 {:else}
                     <div class="xz-empty"><p>选择一个工作项查看详情。</p></div>
                 {/if}

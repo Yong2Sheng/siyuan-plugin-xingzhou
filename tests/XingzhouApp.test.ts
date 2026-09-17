@@ -598,7 +598,8 @@ describe("XingzhouApp", () => {
         actionEditor = document.querySelector('textarea[aria-label="下一步行动"]') as HTMLTextAreaElement;
         actionEditor.value = "把垃圾装袋并带到楼下";
         actionEditor.dispatchEvent(new Event("input", { bubbles: true }));
-        actionEditor.blur();
+        ([...document.querySelectorAll<HTMLButtonElement>(".xz-action-editor-window__actions button")]
+            .find((candidate) => candidate.textContent?.trim() === "保存") as HTMLButtonElement).click();
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
         expect(saveItem.mock.calls[0][2]).toEqual({ nextAction: "把垃圾装袋并带到楼下" });
 
@@ -1262,6 +1263,295 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-relationship-inspector")?.textContent).toContain("完成第二章");
         (document.querySelector(".xz-relationship-open") as HTMLButtonElement).click();
         await vi.waitFor(() => expect((document.querySelector('.xz-detail input[aria-label="名称"]') as HTMLInputElement)?.value).toBe("完成第二章"));
+    });
+
+    /**
+     * 行动长文编辑的回归用例。
+     * 用户路径：点击卡片任意位置进入编辑 → 在中间某一行继续输入 → 点别处保存。
+     * 期望：光标落在点击处（不被拉到末尾）、进入编辑不滚动详情面板、输入期间不重设 value、
+     * 拼音合成不回写、保存期间重新点回来输入的新内容不被旧快照覆盖。
+     */
+    describe("行动长文编辑", () => {
+        const longNote = Array.from({ length: 40 }, (_, index) => `第 ${index + 1} 行：用 SN taxonomy 举例，这一段要足够长以便撑出滚动。`).join("\n");
+
+        function actionFixture() {
+            const now = Date.now();
+            const item: WorkItem = {
+                id: "tx-long", rowId: "tx-long", title: "整理 Hardness ratio 笔记", documentId: null, detached: true,
+                type: "事务", status: "进行中", currentAction: longNote, nextAction: "",
+                parentIds: [], topProjectIds: [], hardPrerequisiteIds: [], softPrerequisiteIds: [],
+                planDate: null, deadline: null, noDeadline: false, durationMinutes: 30, energy: "", updatedAt: now,
+                executionSlices: [],
+            };
+            const buildData = (items: WorkItem[]): WorkItemData => ({
+                attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+                items, missingFields: [], fields: {
+                    currentAction: { id: "current", name: "本次行动细则", type: "text", options: [] },
+                    status: { id: "status", name: "状态", type: "select", options: [{ name: "进行中" }] },
+                    type: { id: "type", name: "类型", type: "select", options: [{ name: "事务" }] },
+                },
+            });
+            return { item, buildData };
+        }
+
+        function mountFixture(overrides: { saveItem?: (data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData> } = {}) {
+            const { item, buildData } = actionFixture();
+            const saveItem = overrides.saveItem ?? vi.fn(async (currentData: WorkItemData, currentItem: WorkItem, changes: WorkItemChanges) => buildData(
+                currentData.items.map((entry): WorkItem => entry.id === currentItem.id ? { ...entry, ...changes } as WorkItem : entry),
+            ));
+            component = new XingzhouApp({
+                target: document.body,
+                props: {
+                    load: vi.fn().mockResolvedValue(buildData([item])),
+                    captureInbox: vi.fn(),
+                    saveItem,
+                    deleteItem: vi.fn(),
+                    openDocument: vi.fn(),
+                    initialWorkItemId: item.id,
+                },
+            });
+            return { item, buildData, saveItem };
+        }
+
+        const editor = () => document.querySelector<HTMLTextAreaElement>(".xz-action-editor-window__input");
+        /** 点窗口里的「保存」（大编辑窗口是显式保存，失焦不再自动保存）。 */
+        const saveWindow = async () => {
+            const button = [...document.querySelectorAll<HTMLButtonElement>(".xz-action-editor-window__actions button")]
+                .find((candidate) => candidate.textContent?.trim() === "保存");
+            expect(button).not.toBeUndefined();
+            button!.click();
+            await tick();
+        };
+
+        /** 打开行动卡片并返回 textarea（与用户点击卡片进入编辑一致）。 */
+        async function openEditor(): Promise<HTMLTextAreaElement> {
+            await vi.waitFor(() => expect(document.querySelector(".xz-action-card--primary")).not.toBeNull());
+            document.querySelector<HTMLElement>(".xz-action-card--primary")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            await tick();
+            const node = editor();
+            expect(node).not.toBeNull();
+            return node!;
+        }
+
+        /**
+         * 模拟真实输入：在光标处插入字符、按需移动光标，再派发 input。
+         * 浏览器自己会维护选区，这里必须手动复现，才能观察到「应用是否重设了选区」。
+         */
+        async function typeInto(node: HTMLTextAreaElement, text: string, caret?: number) {
+            if (caret !== undefined) node.setSelectionRange(caret, caret);
+            for (const char of text) {
+                const at = node.selectionStart ?? node.value.length;
+                node.value = `${node.value.slice(0, at)}${char}${node.value.slice(at)}`;
+                node.setSelectionRange(at + 1, at + 1);
+                node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: char, isComposing: false }));
+                await tick();
+            }
+        }
+
+        it("打开窗口时写入一次内容并聚焦，光标不落到末尾", async () => {
+            mountFixture();
+            const node = await openEditor();
+            expect(node.value).toBe(longNote);
+            expect(document.activeElement).toBe(node);
+            // 没有点击坐标时，落点是正文（这里为 0 附近），绝不是"被拉到末尾"的实现细节
+            expect(node.selectionStart).toBeLessThanOrEqual(node.value.length);
+            const detail = document.querySelector<HTMLElement>(".xz-detail")!;
+            expect(detail.scrollTop).toBe(0);
+        });
+
+        it("连续输入期间不改写 DOM 值与选区", async () => {
+            mountFixture();
+            const node = await openEditor();
+            const caret = 120;
+            await typeInto(node, "我在学习", caret);
+            expect(node.value.slice(caret, caret + 4)).toBe("我在学习");
+
+            const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!;
+            const realSetSelectionRange = node.setSelectionRange.bind(node);
+            let valueWrites = 0;
+            let selectionWrites = 0;
+            Object.defineProperty(node, "value", {
+                configurable: true,
+                get: () => descriptor.get!.call(node) as string,
+                set: (next: string) => { valueWrites += 1; descriptor.set!.call(node, next); },
+            });
+            node.setSelectionRange = (start: number, end: number) => { selectionWrites += 1; realSetSelectionRange(start, end); };
+            for (const char of "继续写") {
+                const at = node.selectionStart!;
+                node.setRangeText(char, at, at, "end");
+                node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: char, isComposing: false }));
+                await tick();
+            }
+            expect(valueWrites).toBe(0);
+            expect(selectionWrites).toBe(0);
+        });
+
+        it("拼音合成期间不回写、不规范化，合成结束保留候选内容", async () => {
+            mountFixture();
+            const node = await openEditor();
+            const caret = 60;
+            node.setSelectionRange(caret, caret);
+            node.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+            const composed = `${node.value.slice(0, caret)}1. ceshi${node.value.slice(caret)}`;
+            node.value = composed;
+            node.setSelectionRange(caret + 8, caret + 8);
+            node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertCompositionText", data: "ceshi", isComposing: true }));
+            await tick();
+            // 合成期间含 Markdown 列表片段也不得被改写
+            expect(node.value).toBe(composed);
+            expect(node.selectionStart).toBe(caret + 8);
+
+            node.value = `${node.value.slice(0, caret)}1. 测试${node.value.slice(caret + 8)}`;
+            node.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "测试" }));
+            node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "测试", isComposing: false }));
+            await tick();
+            expect(node.value).toContain("1. 测试");
+            expect(node.value.startsWith("第 1 行")).toBe(true);
+        });
+
+        it("多行输入里有序编号只就地替换，不整段重写", async () => {
+            mountFixture();
+            const node = await openEditor();
+            node.value = "1. 第一项\n1. 第二项\n1. 第三项";
+            node.setSelectionRange(node.value.length, node.value.length);
+            node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "项", isComposing: false }));
+            await tick();
+            expect(node.value).toBe("1. 第一项\n2. 第二项\n3. 第三项");
+        });
+
+        it("回车续写列表项：就地插入并保持光标，草稿同步", async () => {
+            mountFixture();
+            const node = await openEditor();
+            node.value = "1. 第一条";
+            node.setSelectionRange(node.value.length, node.value.length);
+            node.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+            await tick();
+            expect(node.value).toBe("1. 第一条\n2. ");
+            expect(node.selectionStart).toBe(node.value.length);
+
+            // 再敲一个字，草稿与 DOM 保持一致
+            node.setRangeText("第", node.selectionStart!, node.selectionStart!, "end");
+            node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "第", isComposing: false }));
+            await tick();
+            expect(node.value).toBe("1. 第一条\n2. 第");
+            await saveWindow();
+            await vi.waitFor(() => expect(editor()).toBeNull());
+        });
+
+        it("点窗口外＝保存：内容写回、编辑态复位、可以再次打开", async () => {
+            const { saveItem } = mountFixture();
+            const saveSpy = saveItem as unknown as { mock: { calls: Array<[WorkItemData, WorkItem, WorkItemChanges]> } };
+            const node = await openEditor();
+            await typeInto(node, "临时输入", 0);
+            const value = node.value;
+            // 模拟思源「点窗口外关闭」：宿主销毁对话框，插件应据此保存并复位编辑态
+            (document.querySelector(".b3-dialog__close") as HTMLButtonElement).click();
+            await vi.waitFor(() => expect(saveSpy.mock.calls.length).toBe(1));
+            expect((saveSpy.mock.calls[0][2] as { currentAction?: string }).currentAction).toContain("临时输入");
+            await tick();
+
+            expect(editor()).toBeNull();
+            const card = document.querySelector<HTMLElement>(".xz-action-card--primary")!;
+            expect(card.textContent).not.toContain("正在大编辑窗口中编辑");
+            expect(card.textContent).toContain("点击编辑");
+
+            // 还能再次打开，不再出现"点了没反应"
+            const reopened = await openEditor();
+            expect(reopened.value).toBe(value);
+        });
+
+        it("点窗口外保存失败时：内容留在草稿里并给出错误，不丢字", async () => {
+            mountFixture({ saveItem: vi.fn().mockRejectedValue(new Error("思源写入被拒绝")) });
+            const node = await openEditor();
+            await typeInto(node, "不能丢的内容", 0);
+            const value = node.value;
+            (document.querySelector(".b3-dialog__close") as HTMLButtonElement).click();
+            await vi.waitFor(() => expect(document.querySelector(".xz-action-card--primary")?.textContent ?? "").toContain("思源写入被拒绝"));
+            // 重新打开：内容还在
+            const reopened = await openEditor();
+            expect(reopened.value).toBe(value);
+        });
+
+        it("保存期间窗口保持可用：不吞按键、失败或成功都不会丢内容", async () => {
+            let release = () => {};
+            const { item, buildData } = actionFixture();
+            const saveItem = vi.fn((currentData: WorkItemData, currentItem: WorkItem, changes: WorkItemChanges) => new Promise<WorkItemData>((resolve) => {
+                release = () => resolve(buildData(currentData.items.map((entry): WorkItem => entry.id === currentItem.id ? { ...entry, ...changes } as WorkItem : entry)));
+            }));
+            mountFixture({ saveItem });
+            const node = await openEditor();
+            await typeInto(node, "第一段输入", 0);
+            const firstValue = node.value;
+
+            await saveWindow();
+            expect(saveItem).toHaveBeenCalledTimes(1);
+            expect((saveItem.mock.calls[0][2] as { currentAction?: string }).currentAction).toContain("第一段输入");
+            // 写入期间窗口仍在、输入框可用：没有 disabled 输入框吞掉按键
+            expect(editor()).toBe(node);
+            expect(editor()!.disabled).toBe(false);
+
+            await typeInto(node, "第二段输入", node.value.length);
+            const secondValue = node.value;
+            expect(secondValue.length).toBeGreaterThan(firstValue.length);
+
+            release();
+            await vi.waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
+            await tick();
+            // 成功保存会关闭窗口；保存的是「按下保存那一刻」的值，之后的输入留在草稿里
+            await vi.waitFor(() => expect(editor()).toBeNull());
+            expect(item.currentAction).toBe(longNote);
+            expect(secondValue).toContain("第二段输入");
+        });
+
+        it("DOM 比草稿长时以 DOM 为准：不回写、不重置光标", async () => {
+            mountFixture();
+            const node = await openEditor();
+            // 模拟浏览器在两次事件之间先落字（输入法上屏、粘贴、自动化输入都可能如此）
+            node.setRangeText("用户刚打进去的字", 40, 40, "end");
+            node.setSelectionRange(46, 46);
+            let writes = 0;
+            const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!;
+            Object.defineProperty(node, "value", {
+                configurable: true,
+                get: () => descriptor.get!.call(node) as string,
+                set: (next: string) => { writes += 1; descriptor.set!.call(node, next); },
+            });
+
+            // 触发一轮「合成中」输入：此刻草稿还落后于 DOM
+            node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "", isComposing: true }));
+            await tick();
+
+            expect(writes).toBe(0);
+            expect(node.value).toContain("用户刚打进去的字");
+            expect(node.selectionStart).toBe(46);
+        });
+
+        it("进入／退出编辑态时详情面板的滚动位置不被改动", async () => {
+            mountFixture();
+            await vi.waitFor(() => expect(document.querySelector(".xz-action-card--primary")).not.toBeNull());
+            const detail = document.querySelector<HTMLElement>(".xz-detail")!;
+            detail.scrollTop = 720;
+            document.querySelector<HTMLElement>(".xz-action-card--primary")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            await tick();
+            // 进入编辑：面板不能被拉到顶部
+            expect(detail.scrollTop).toBe(720);
+            const node = editor()!;
+            node.blur();
+            await tick();
+            // 退出编辑：面板同样不得跳动
+            expect(detail.scrollTop).toBe(720);
+        });
+
+        it("保存失败时内容退回草稿并给出错误，不静默丢失", async () => {
+            mountFixture({ saveItem: vi.fn().mockRejectedValue(new Error("思源写入被拒绝")) });
+            const node = await openEditor();
+            await typeInto(node, "不能丢的内容", 0);
+            const value = node.value;
+            await saveWindow();
+            await vi.waitFor(() => expect(document.querySelector(".xz-action-error")?.textContent ?? "").toContain("思源写入被拒绝"));
+            // 窗口仍开着，内容原样保留
+            expect(editor()?.value).toBe(value);
+        });
     });
 });
 

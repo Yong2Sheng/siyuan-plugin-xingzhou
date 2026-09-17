@@ -73,7 +73,7 @@ function pressMouse(element: HTMLElement) {
 }
 
 function isEditing(): boolean {
-    return document.querySelector(".xz-action-editor") !== null;
+    return document.querySelector(".xz-action-editor-window__input") !== null;
 }
 
 function snackbarTexts(): string[] {
@@ -141,6 +141,8 @@ describe("行动细则的图片支持", () => {
         component?.$destroy();
         component = undefined;
         document.body.replaceChildren();
+        // 行动长文有本地草稿兜底（sessionStorage），用例之间必须清空，否则会互相污染
+        try { sessionStorage.clear(); } catch { /* jsdom 可能禁用本地存储 */ }
         delete (globalThis as unknown as { Lute?: unknown }).Lute;
         vi.unstubAllGlobals();
     });
@@ -161,8 +163,8 @@ describe("行动细则的图片支持", () => {
     async function enterEditing() {
         await vi.waitFor(() => expect(document.querySelector(".xz-action-card")).not.toBeNull(), { timeout: 4000 });
         (document.querySelector(".xz-action-card") as HTMLElement).click();
-        await vi.waitFor(() => expect(document.querySelector(".xz-action-editor")).not.toBeNull(), { timeout: 4000 });
-        return document.querySelector(".xz-action-editor") as HTMLTextAreaElement;
+        await vi.waitFor(() => expect(document.querySelector(".xz-action-editor-window__input")).not.toBeNull(), { timeout: 4000 });
+        return document.querySelector(".xz-action-editor-window__input") as HTMLTextAreaElement;
     }
 
     async function selectTreeItem(title: string) {
@@ -223,7 +225,7 @@ describe("行动细则的图片支持", () => {
         pasteInto(editor, [imageFile("bad.png", "bad-bytes")]);
 
         await vi.waitFor(() => expect(document.querySelector(".xz-action-error")?.textContent).toContain("Path is not in workspace"), { timeout: 4000 });
-        expect((document.querySelector(".xz-action-editor") as HTMLTextAreaElement).value).toBe("");
+        expect((document.querySelector(".xz-action-editor-window__input") as HTMLTextAreaElement).value).toBe("");
         expect(document.querySelectorAll(".xz-action-images__item")).toHaveLength(0);
         for (const call of save.calls()) {
             expect(savedAction(call)).not.toContain("xz-upload://");
@@ -238,7 +240,7 @@ describe("行动细则的图片支持", () => {
         const text = "上传按钮点完之后没有任何反馈。";
         const event = pasteInto(editor, [], text);
         expect(event.defaultPrevented).toBe(false);
-        await vi.waitFor(() => expect((document.querySelector(".xz-action-editor") as HTMLTextAreaElement).value).toBe(text), { timeout: 4000 });
+        await vi.waitFor(() => expect((document.querySelector(".xz-action-editor-window__input") as HTMLTextAreaElement).value).toBe(text), { timeout: 4000 });
     });
 
     it("拖入图片文件即可插入，拖拽结束后移除高亮", async () => {
@@ -247,17 +249,40 @@ describe("行动细则的图片支持", () => {
         mount([transactionItem()], save.fn);
         await enterEditing();
 
-        const card = document.querySelector(".xz-action-card") as HTMLElement;
+        const card = document.querySelector(".xz-action-editor-window__dropzone") as HTMLElement;
         const image = imageFile("drop.png", "dropped-bytes");
         card.dispatchEvent(dragEvent("dragover", { types: ["Files"], dropEffect: "" }));
         await tick();
-        expect(document.querySelector(".xz-action-card--drop")).not.toBeNull();
-        expect(document.querySelector(".xz-action-hint--drop")).not.toBeNull();
+        expect(document.querySelector(".xz-action-editor-window__dropzone--active")).not.toBeNull();
 
         card.dispatchEvent(dragEvent("drop", { types: ["Files"], files: [image], items: [{ kind: "file", type: image.type, getAsFile: () => image }] }));
         await vi.waitFor(() => expect(save.fn).toHaveBeenCalled(), { timeout: 4000 });
         expect(savedAction(save.calls().at(-1))).toMatch(/^!\[\]\(assets\/xz-/);
-        expect(document.querySelector(".xz-action-card--drop")).toBeNull();
+        expect(document.querySelector(".xz-action-editor-window__dropzone--active")).toBeNull();
+    });
+
+    it("编辑中上传完成：图片语法立刻同步进 textarea，不依赖重新挂载", async () => {
+        stubUpload();
+        const save = createSaveItem();
+        mount([transactionItem()], save.fn);
+        const editor = await enterEditing();
+        // 用户先打了一段字（真实浏览器打完字后光标在末尾），再粘贴图片
+        editor.value = "先写一段说明";
+        editor.setSelectionRange(editor.value.length, editor.value.length);
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        await tick();
+
+        pasteInto(editor, [imageFile("sync.png", "sync-bytes")]);
+
+        await vi.waitFor(() => expect(editor.value).toContain("![](assets/xz-"), { timeout: 4000 });
+        expect(editor.value.startsWith("先写一段说明")).toBe(true);
+        expect(editor.value).not.toContain("xz-upload://");
+        // 光标落在图片之后：接着输入的字符必须进同一段内容（jsdom 对 textarea 选区支持有限，
+        // 这里直接验证可观察的行为：继续输入不会丢掉前面的文字与图片）
+        editor.setRangeText("补充", editor.value.length, editor.value.length, "end");
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        await tick();
+        expect(editor.value).toMatch(/^先写一段说明\n!\[\]\(assets\/xz-[0-9a-f]{12}\.png\)补充$/);
     });
 
     it("上传完成前不写入条目，完成后才落到内容里", async () => {
@@ -269,7 +294,7 @@ describe("行动细则的图片支持", () => {
 
         pasteInto(editor, [imageFile("pending.png", "pending-bytes")]);
         await vi.waitFor(() => expect(deferred.state.file).not.toBeNull(), { timeout: 4000 });
-        await vi.waitFor(() => expect((document.querySelector(".xz-action-editor") as HTMLTextAreaElement).value).toContain("xz-upload://"), { timeout: 4000 });
+        await vi.waitFor(() => expect((document.querySelector(".xz-action-editor-window__input") as HTMLTextAreaElement).value).toContain("xz-upload://"), { timeout: 4000 });
         for (const call of save.calls()) {
             expect(savedAction(call)).not.toContain("xz-upload://");
         }
@@ -284,14 +309,14 @@ describe("行动细则的图片支持", () => {
         mount([transactionItem({ currentAction: "先写下这一条\n![](assets/xz-aaaa1111bbbb.png)" })], createSaveItem().fn);
         const editor = await enterEditing();
 
-        const help = [...document.querySelectorAll<HTMLButtonElement>(".xz-action-summary button")]
+        const help = [...document.querySelectorAll<HTMLButtonElement>(".xz-action-editor-window__actions button")]
             .find((button) => button.textContent?.includes("如何插入图片"));
         expect(help, "编辑态应显示插入提示按钮").toBeTruthy();
         pressMouse(help!);
 
         await tick();
         expect(isEditing()).toBe(true);
-        expect((document.querySelector(".xz-action-editor") as HTMLTextAreaElement).value).toBe(editor.value);
+        expect((document.querySelector(".xz-action-editor-window__input") as HTMLTextAreaElement).value).toBe(editor.value);
         expect(snackbarTexts().some((message) => message.includes("粘贴截图"))).toBe(true);
     });
 
@@ -301,10 +326,10 @@ describe("行动细则的图片支持", () => {
         mount([transactionItem()], save.fn);
         await enterEditing();
 
-        pasteInto(document.querySelector(".xz-action-editor") as HTMLTextAreaElement, [imageFile("keep.png", "keep-bytes")]);
+        pasteInto(document.querySelector(".xz-action-editor-window__input") as HTMLTextAreaElement, [imageFile("keep.png", "keep-bytes")]);
         await vi.waitFor(() => expect(save.fn).toHaveBeenCalled(), { timeout: 4000 });
-
-        (document.querySelector(".xz-action-card") as HTMLElement).click();
+        // 保存成功会关掉窗口；重新打开后应有缩略图
+        await enterEditing();
         await vi.waitFor(() => expect(document.querySelector(".xz-action-thumb")).not.toBeNull(), { timeout: 4000 });
 
         pressMouse(document.querySelector(".xz-action-images__remove") as HTMLElement);
@@ -333,9 +358,9 @@ describe("行动细则的图片支持", () => {
 
         await selectTreeItem("第一条");
         (document.querySelector(".xz-action-card") as HTMLElement).click();
-        await vi.waitFor(() => expect(document.querySelector(".xz-action-editor")).not.toBeNull(), { timeout: 4000 });
+        await vi.waitFor(() => expect(document.querySelector(".xz-action-editor-window__input")).not.toBeNull(), { timeout: 4000 });
 
-        pasteInto(document.querySelector(".xz-action-editor") as HTMLTextAreaElement, [imageFile("late.png", "late-bytes")]);
+        pasteInto(document.querySelector(".xz-action-editor-window__input") as HTMLTextAreaElement, [imageFile("late.png", "late-bytes")]);
         await vi.waitFor(() => expect(deferred.state.file).not.toBeNull(), { timeout: 4000 });
 
         await selectTreeItem("第二条");

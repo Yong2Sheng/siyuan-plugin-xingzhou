@@ -1,5 +1,51 @@
 import { describe, expect, it } from "vitest";
-import { continueMarkdownList, normalizeMarkdownOrderedLists } from "../src/markdown-editor";
+import { applyOrderedListNormalization, continueMarkdownList, normalizeMarkdownOrderedLists, planOrderedListNormalization } from "../src/markdown-editor";
+
+describe("planOrderedListNormalization", () => {
+    it("只给出需要改写的编号片段", () => {
+        const value = "1. 第一项\n3. 第二项";
+        expect(planOrderedListNormalization(value)).toEqual([
+            { start: value.indexOf("3."), end: value.indexOf("3.") + 1, text: "2" },
+        ]);
+    });
+
+    it("没有需要改写的编号时返回空列表", () => {
+        expect(planOrderedListNormalization("1. 第一项\n2. 第二项")).toEqual([]);
+    });
+});
+
+describe("applyOrderedListNormalization", () => {
+    it("就地改写编号并保留光标位置", () => {
+        const textarea = document.createElement("textarea");
+        textarea.value = "1. 第一项\n1. 第二项\n1. 第三项";
+        const caret = textarea.value.indexOf("第三项");
+        textarea.setSelectionRange(caret, caret);
+
+        expect(applyOrderedListNormalization(textarea)).toBe("1. 第一项\n2. 第二项\n3. 第三项");
+        expect(textarea.value).toBe("1. 第一项\n2. 第二项\n3. 第三项");
+        expect(textarea.selectionStart).toBe(caret);
+    });
+
+    it("编号位数变化后光标仍贴着原来的文字", () => {
+        const textarea = document.createElement("textarea");
+        textarea.value = "8. 第一项\n12. 第二项";
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+        const result = applyOrderedListNormalization(textarea);
+        expect(result).toBe("8. 第一项\n9. 第二项");
+        expect(textarea.value.slice(0, textarea.selectionStart)).toBe("8. 第一项\n9. 第二项");
+    });
+
+    it("无需改写时不触碰 DOM 选区", () => {
+        const textarea = document.createElement("textarea");
+        textarea.value = "1. 第一项\n2. 第二项";
+        textarea.setSelectionRange(3, 6);
+
+        expect(applyOrderedListNormalization(textarea)).toBe("1. 第一项\n2. 第二项");
+        expect(textarea.selectionStart).toBe(3);
+        expect(textarea.selectionEnd).toBe(6);
+    });
+});
 
 describe("continueMarkdownList", () => {
     it("按顺序续写编号列表", () => {

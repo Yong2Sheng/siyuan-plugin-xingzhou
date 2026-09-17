@@ -80,7 +80,7 @@ describe("细则图片的右键复制入口", () => {
     async function enterEditing() {
         await vi.waitFor(() => expect(document.querySelector(".xz-action-card")).not.toBeNull(), { timeout: 4000 });
         (document.querySelector(".xz-action-card") as HTMLElement).click();
-        await vi.waitFor(() => expect(document.querySelector(".xz-action-editor")).not.toBeNull(), { timeout: 4000 });
+        await vi.waitFor(() => expect(document.querySelector(".xz-action-editor-window__input")).not.toBeNull(), { timeout: 4000 });
     }
 
     it("编辑态右键缩略图把真实地址与尺寸交给菜单，并阻止默认菜单", async () => {

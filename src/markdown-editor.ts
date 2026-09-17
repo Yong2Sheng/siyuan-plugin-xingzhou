@@ -22,6 +22,27 @@ type Replacement = {
 };
 
 export function normalizeMarkdownOrderedLists(value: string, selectionStart: number, selectionEnd: number): NormalizedMarkdownEdit {
+    const replacements = planOrderedListNormalization(value);
+    if (replacements.length === 0) return { value, selectionStart, selectionEnd };
+
+    let normalized = value;
+    for (let index = replacements.length - 1; index >= 0; index -= 1) {
+        const replacement = replacements[index];
+        normalized = normalized.slice(0, replacement.start) + replacement.text + normalized.slice(replacement.end);
+    }
+    return {
+        value: normalized,
+        selectionStart: adjustSelection(selectionStart, replacements),
+        selectionEnd: adjustSelection(selectionEnd, replacements),
+    };
+}
+
+/**
+ * 只算出「哪一段文本要改成什么」，不改写整段内容。
+ * 调用方用 `setRangeText` 就地替换，浏览器才会保留原生撤销栈与光标上下文；
+ * 整段 `value = ...` 会把用户的撤销历史一次性清空。
+ */
+export function planOrderedListNormalization(value: string): Replacement[] {
     const counters = new Map<string, OrderedListCounter>();
     const replacements: Replacement[] = [];
     let offset = 0;
@@ -57,18 +78,26 @@ export function normalizeMarkdownOrderedLists(value: string, selectionStart: num
         offset += line.length + 1;
     }
 
-    if (replacements.length === 0) return { value, selectionStart, selectionEnd };
+    return replacements;
+}
 
-    let normalized = value;
+/**
+ * 就地改写 textarea 里的有序编号，保留光标与原生撤销栈。
+ * 返回改写后的整段文本；没有需要改写的片段时原样返回。
+ */
+export function applyOrderedListNormalization(node: HTMLTextAreaElement): string {
+    const replacements = planOrderedListNormalization(node.value);
+    if (replacements.length === 0) return node.value;
+
+    const selectionStart = node.selectionStart ?? 0;
+    const selectionEnd = node.selectionEnd ?? selectionStart;
+    const normalized = normalizeMarkdownOrderedLists(node.value, selectionStart, selectionEnd);
     for (let index = replacements.length - 1; index >= 0; index -= 1) {
         const replacement = replacements[index];
-        normalized = normalized.slice(0, replacement.start) + replacement.text + normalized.slice(replacement.end);
+        node.setRangeText(replacement.text, replacement.start, replacement.end, "preserve");
     }
-    return {
-        value: normalized,
-        selectionStart: adjustSelection(selectionStart, replacements),
-        selectionEnd: adjustSelection(selectionEnd, replacements),
-    };
+    node.setSelectionRange(normalized.selectionStart, normalized.selectionEnd);
+    return normalized.value;
 }
 
 export function continueMarkdownList(value: string, selectionStart: number, selectionEnd: number): MarkdownEdit | null {
