@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onDestroy } from "svelte";
     import type { CaptureDialogRequest } from "./capture-dialog";
     import type { DailyRecord, DailyRecordStore } from "./daily-records";
     import { createDefaultChecklistStore, type ChecklistStore } from "./checklist";
@@ -6,6 +7,7 @@
     import type { ActionImageCopyTarget } from "./image-clipboard";
     import { createEmptyNutritionStore, type NutritionStore } from "./nutrition";
     import XingzhouApp from "./XingzhouApp.svelte";
+    import { log } from "./log";
     import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData, WorkItemViewState } from "./work-items";
 
     export let load: () => Promise<WorkItemData>;
@@ -39,6 +41,21 @@
     let projectViewState: WorkItemViewState | null = null;
     export let loadProjectViewState: () => Promise<WorkItemViewState | null> = async () => null;
     export let saveProjectViewState: (state: WorkItemViewState) => Promise<void> = async () => undefined;
+    /** 打开日志面板：按需注入，未注入时按钮只显示未读数提示。 */
+    export let openLog: () => void = () => undefined;
+
+    /**
+     * 日志未读数（warn/error）。
+     * 订阅放在组件里，出问题时头部一直显示"日志"入口的可点击状态与未读数，
+     * 使用者不需要知道 DevTools 在哪。
+     */
+    let unreadLogs = 0;
+    const unsubscribeLog = log.subscribe(() => {
+        const next = log.stats().unread;
+        if (next !== unreadLogs) unreadLogs = next;
+    });
+    unreadLogs = log.stats().unread;
+    onDestroy(unsubscribeLog);
 
     async function changeModule(next: "projects" | "rhythm", workItemId: string | null = null) {
         if (next === module && !workItemId) return;
@@ -67,6 +84,19 @@
         <div class="xz-shell-actions">
             {#if module === "projects" && projectQuickCaptureNotice}<span class="xz-quick-capture-notice" aria-live="polite">{projectQuickCaptureNotice}</span>{/if}
             <span class="xz-data-source">插件内部数据</span>
+            <button
+                class="b3-button b3-button--outline xz-log-entry"
+                class:xz-log-entry--alert={unreadLogs > 0}
+                type="button"
+                title={unreadLogs > 0 ? `日志有 ${unreadLogs} 条新警告/错误，点此查看并导出` : "查看、复制或下载插件日志"}
+                aria-label={unreadLogs > 0 ? `日志（${unreadLogs} 条新警告或错误）` : "日志"}
+                on:click={() => openLog()}
+            >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 3.5h8.5L19 8v11.5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                    <path d="M14 3.5V8h4.5M8 12h8M8 15.5h8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>日志{#if unreadLogs > 0}<span class="xz-log-entry__badge" aria-hidden="true">{unreadLogs > 99 ? "99+" : unreadLogs}</span>{/if}
+            </button>
             {#if module === "projects"}
                 <button class="b3-button b3-button--outline" type="button" on:click={() => void projectApp?.refresh()} disabled={projectLoading}>
                     <svg><use href="#iconRefresh"></use></svg>{projectLoading ? "读取中" : "刷新"}
@@ -94,6 +124,7 @@
                 initialViewState={projectViewState}
                 loadSavedViewState={loadProjectViewState}
                 saveViewState={(state) => void saveProjectViewState(state)}
+                {openLog}
             />
         {:else}
             <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} {loadChecklist} {saveChecklist} {loadNutrition} {saveNutrition} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />

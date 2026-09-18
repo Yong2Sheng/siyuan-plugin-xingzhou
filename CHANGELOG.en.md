@@ -2,6 +2,19 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## 2.4.0 - 2026-09-18
+
+### Added
+
+- **A general-purpose logging utility**: a uniform record of "who did what, when" that reconstructs a causal timeline when something goes wrong. It is an always-on recorder rather than a probe instrumented for one feature: the instrumentation sits on the critical paths, so a bug can no longer fall outside the list of instrumented places.
+  - **View, copy, and export inside the interface**: a "Log" button now sits next to "插件内部数据" in the header and shows a red unread count when new warnings or errors appear. The panel filters by level (verbose / info / warn / error) and by source, searches by keyword, offers "warnings and errors only", follows the newest entries (pausing when you scroll up), and supports **copy all**, **download .txt / .json**, and **clear**.
+  - The **export header** states the export time, the SiYuan kernel version, the levels in effect with their per-source overrides, the buffer size, and **how many entries were discarded by level** — so "why is the log empty?" is answerable too.
+  - A **self-test** button writes one entry and really throws an exception nobody catches, confirming that "record → unread badge → export" works without DevTools.
+  - **Automatic instrumentation** covers: plugin lifecycle and settings reads/writes; SiYuan API endpoint names, durations, success/failure, and readable failure reasons; for all four data files the revision increment (with action and the list of changed field names), backup rotation before writing, the write, the full read-back comparison, recovery from the valid backup with the highest revision, and the branch that stops writing when primary and backups are all unusable; the main user actions (opening the editor window, successful/failed saves, deleting items, editing fields and dependencies, quick capture, image upload, filter and page switches); and `window.onerror` plus unhandled promise rejections with source file, line/column, and a truncated stack.
+  - **Cost and switches**: only warnings and errors are recorded by default — entries below the level skip string building, field construction, and the buffer, and merely bump a discarded counter. When investigating, switch the relevant sources to "verbose" in the panel; the change applies immediately and is written to the plugin settings (the `log` field of `settings.json`), surviving a reload. The in-memory ring buffer holds 2000 entries by default (adjustable 200–10000), writes nothing to disk, sends nothing over the network, and is cleared on unload.
+  - **Privacy**: logs never contain note text — content-bearing fields are masked by name and keep only length and type, and other strings are truncated. Keystrokes are not recorded; only save actions and field names are.
+  - **Limits**: at the default level, successful lifecycle events (plugin load, tab init) are intentionally hidden; switch "lifecycle" to verbose to inspect startup. Logging is side-channel only: revisions, backup rotation, read-back verification, corruption recovery, the stop-writing branch, and the serial write queue all behave exactly as before.
+
 ## 2.3.2 - 2026-09-17
 
 ### Removed

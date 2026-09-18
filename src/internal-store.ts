@@ -1,10 +1,26 @@
 import type { WorkItem, WorkItemChanges, WorkItemData, WorkItemField } from "./work-items";
 import { normalizeExecutionSlices } from "./execution-slices";
+import { log, type LogDetail } from "./log";
 
 export const INTERNAL_STORE_FILE = "work-items.json";
 export const MIGRATION_SNAPSHOT_FILE = "migration-source-snapshot.json";
 export const INTERNAL_STORE_VERSION = 2;
 export const INTERNAL_DATA_SOURCE_ID = "xingzhou-internal";
+
+const SCOPE = "store";
+
+/** 修订号变更的统一记录点：所有写路径都会经过它，便于还原"第几版改了什么"。 */
+function logRevision(store: InternalWorkItemStore, action: string, itemId?: string, extra: LogDetail = {}): void {
+    if (!log.isEnabled(SCOPE, "verbose")) return;
+    log.verbose(SCOPE, "store.revision.bump", {
+        action,
+        from: store.revision,
+        to: store.revision + 1,
+        items: store.items.length,
+        ...(itemId ? { itemId } : {}),
+        ...extra,
+    });
+}
 
 export function isAbsentInternalStore(value: unknown): boolean {
     if (value === null || value === undefined || value === "") return true;
@@ -39,7 +55,7 @@ export function parseInternalStore(value: unknown): InternalWorkItemStore | null
         items.push(item);
     }
     const createdAt = finiteNumber(source.createdAt) ?? Date.now();
-    return {
+    const store: InternalWorkItemStore = {
         version: INTERNAL_STORE_VERSION,
         revision: Math.max(0, Math.trunc(finiteNumber(source.revision) ?? 0)),
         createdAt,
@@ -54,11 +70,19 @@ export function parseInternalStore(value: unknown): InternalWorkItemStore | null
             } }
             : {}),
     };
+    log.verbose(SCOPE, "store.parse.ok", {
+        version: source.version,
+        revision: store.revision,
+        items: store.items.length,
+        migratedFrom: store.migration?.sourceId ?? null,
+    });
+    return store;
 }
 
 export function migrateWorkItemData(data: WorkItemData, now = Date.now()): InternalWorkItemStore {
     const items = data.items.map((item) => normalizeWorkItem(item)).filter((item): item is WorkItem => Boolean(item));
     if (items.length !== data.items.length) throw new Error("旧数据库中存在无法识别的工作项，已停止迁移以避免数据丢失。");
+    log.info(SCOPE, "store.migrate", { source: data.attributeViewId, items: items.length, dropped: data.items.length - items.length });
     return {
         version: INTERNAL_STORE_VERSION,
         revision: 1,
@@ -75,6 +99,7 @@ export function migrateWorkItemData(data: WorkItemData, now = Date.now()): Inter
 }
 
 export function createEmptyInternalStore(now = Date.now()): InternalWorkItemStore {
+    log.info(SCOPE, "store.created.empty", { reason: "没有可导入的旧数据" });
     return {
         version: INTERNAL_STORE_VERSION,
         revision: 1,
@@ -115,6 +140,7 @@ export function updateStoredWorkItem(
     if (changes.parent !== undefined && moved && oldParentId !== newParentId) {
         items = normalizeOrdersAfterParentChange(items, moved.id, oldParentId, newParentId);
     }
+    logRevision(store, "update", itemId, { fields: Object.keys(changes).sort() });
     return nextRevision(store, items, now);
 }
 
@@ -162,6 +188,7 @@ export function addStoredWorkItem(
         updatedAt: now,
         sortOrder: siblings.length,
     };
+    logRevision(store, "add", id, { parentId: parentId ?? null, type: item.type, status: item.status });
     return nextRevision(store, [...existingItems, item], now);
 }
 
@@ -178,6 +205,7 @@ export function removeStoredWorkItem(store: InternalWorkItemStore, itemId: strin
             hardPrerequisiteIds: (item.hardPrerequisiteIds ?? []).filter((id) => id !== itemId),
             softPrerequisiteIds: (item.softPrerequisiteIds ?? []).filter((id) => id !== itemId),
         }));
+    logRevision(store, "remove", itemId, { remaining: items.length });
     return nextRevision(store, items, now);
 }
 
@@ -197,6 +225,7 @@ export function reorderStoredWorkItems(
     const items = store.items.map((item) => siblingIds.has(item.id)
         ? { ...cloneWorkItem(item), sortOrder: orderById.get(item.id) ?? null }
         : cloneWorkItem(item));
+    logRevision(store, "reorder", undefined, { parentId: parentId ?? null, count: orderedIds.length });
     return nextRevision(store, items, now);
 }
 

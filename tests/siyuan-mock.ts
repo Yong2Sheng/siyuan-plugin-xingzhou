@@ -2,6 +2,64 @@ export async function fetchSyncPost(): Promise<{ code: number; msg: string; data
     return { code: 0, msg: "", data: null };
 }
 
+/**
+ * 插件基类替身：只保留测试需要的可写字段。
+ * 真实宿主会注入 app/name/i18n；测试里由用例自行赋值或覆写 loadData/saveData。
+ */
+export class Plugin {
+    app: unknown = {};
+    name = "siyuan-plugin-xingzhou";
+    i18n: Record<string, string> = {};
+    version = "0.0.0-test";
+    setting: unknown;
+    eventBus: unknown;
+
+    constructor(options: unknown = {}) {
+        Object.assign(this, options);
+    }
+
+    addIcons(): void {}
+    addTopBar(): HTMLElement {
+        return document.createElement("div");
+    }
+    addTab(): void {}
+    addStatusBar(): void {}
+    async loadData(): Promise<unknown> {
+        return undefined;
+    }
+    async saveData(): Promise<{ code: number; msg: string; data: null }> {
+        return { code: 0, msg: "", data: null };
+    }
+    async removeData(): Promise<{ code: number; msg: string; data: null }> {
+        return { code: 0, msg: "", data: null };
+    }
+}
+
+/** 设置对话框替身：只记录注册项，供设置相关断言使用。 */
+export class Setting {
+    readonly items: unknown[] = [];
+    constructor(public readonly options: unknown = {}) {}
+    addItem(item: unknown): void {
+        this.items.push(item);
+    }
+    open(): void {}
+}
+
+/** 右键菜单替身：记录新增项，便于断言入口是否存在。 */
+export class Menu {
+    readonly items: Array<{ label?: string; click?: () => void }> = [];
+    constructor(public readonly id = "") {}
+    addItem(item: { label?: string; click?: () => void }): void {
+        this.items.push(item);
+    }
+    addSeparator(): void {}
+    open(): void {}
+}
+
+export function openTab(): Promise<unknown> {
+    return Promise.resolve({});
+}
+
 /** 测试用的对话框替身：在 document.body 中建立与思源一致的最小 DOM 结构。 */
 export class Dialog {
     readonly element: HTMLElement;

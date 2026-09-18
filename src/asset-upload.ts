@@ -1,4 +1,5 @@
 import { imageFileNameFor, isUploadPlaceholder } from "./action-images";
+import { describeError, log } from "./log";
 
 type AssetUploadSuccess = {
     index?: number;
@@ -96,6 +97,8 @@ async function statAssetBytes(path: string): Promise<number | null> {
  */
 export async function uploadActionImage(file: File, hash: string): Promise<UploadedActionImage> {
     const fileName = imageFileNameFor(hash, file);
+    const started = Date.now();
+    log.verbose("asset", "asset.upload.start", { name: fileName, bytes: file.size || null });
     const payload = new FormData();
     payload.append("assetsDirPath", "assets");
     payload.append("file[]", file, fileName);
@@ -108,6 +111,7 @@ export async function uploadActionImage(file: File, hash: string): Promise<Uploa
             body: payload,
         });
     } catch (caught) {
+        log.warn("asset", "asset.upload.failed", { name: fileName, ms: Date.now() - started, err: describeError(caught) });
         throw new Error(`图片上传失败：${caught instanceof Error ? caught.message : String(caught)}`);
     }
 
@@ -118,13 +122,20 @@ export async function uploadActionImage(file: File, hash: string): Promise<Uploa
         throw new Error(`图片上传失败：思源返回了无法解析的响应（HTTP ${response.status}）`);
     }
 
-    if (result.code !== 0) throw new Error(`图片上传失败：${result.msg || "思源未接受该文件"}`);
+    if (result.code !== 0) {
+        log.warn("asset", "asset.upload.failed", { name: fileName, code: result.code, err: result.msg || "思源未接受该文件" });
+        throw new Error(`图片上传失败：${result.msg || "思源未接受该文件"}`);
+    }
 
     const path = normalizedAssetPath(pickUploadedPath(result, fileName));
-    if (!path) throw new Error("图片上传失败：思源没有返回资源路径");
+    if (!path) {
+        log.warn("asset", "asset.upload.failed", { name: fileName, err: "思源没有返回资源路径" });
+        throw new Error("图片上传失败：思源没有返回资源路径");
+    }
 
     const byContent = path.toLowerCase() === `assets/${fileName}`.toLowerCase();
     const bytes = await statAssetBytes(path);
+    log.verbose("asset", "asset.upload.ok", { name: fileName, bytes: bytes ?? file.size ?? null, reusedName: byContent, ms: Date.now() - started });
     return {
         path,
         bytes: bytes ?? (file.size || null),
@@ -194,6 +205,7 @@ export async function removeUnusedAsset(path: string): Promise<AssetRemovalResul
             body: JSON.stringify({ path: target }),
         });
     } catch (caught) {
+        log.warn("asset", "asset.remove.failed", { path: target, err: describeError(caught) });
         return { path: target, removed: false, reason: caught instanceof Error ? caught.message : String(caught) };
     }
     let payload: { code: number; msg?: string };
@@ -202,7 +214,11 @@ export async function removeUnusedAsset(path: string): Promise<AssetRemovalResul
     } catch {
         return { path: target, removed: false, reason: `思源返回了无法解析的响应（HTTP ${response.status}）` };
     }
-    if (payload.code !== 0) return { path: target, removed: false, reason: payload.msg || "思源拒绝删除" };
+    if (payload.code !== 0) {
+        log.warn("asset", "asset.remove.failed", { path: target, code: payload.code, err: payload.msg || "思源拒绝删除" });
+        return { path: target, removed: false, reason: payload.msg || "思源拒绝删除" };
+    }
+    log.info("asset", "asset.remove.ok", { path: target });
     return { path: target, removed: true, reason: "" };
 }
 

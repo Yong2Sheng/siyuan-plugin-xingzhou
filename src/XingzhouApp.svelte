@@ -69,6 +69,7 @@
     import { getAutomaticHierarchyStatusChanges } from "./status-hierarchy";
     import { automaticStatusForPlanDate } from "./status-schedule";
     import { autoResizeTextarea } from "./textarea-autosize";
+    import { log } from "./log";
     import { getTodayFocusCounts, isTodayFocusItem } from "./today-focus";
     import TreeNode from "./TreeNode.svelte";
     import { buildWorkItemTree, collectDescendantIds, compareWorkItemOrder, hasActiveDescendant, hasOngoingDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
@@ -98,6 +99,8 @@
     export let initialViewState: WorkItemViewState | null = null;
     export let saveViewState: ((state: WorkItemViewState) => Promise<void> | void) | null = null;
     export let loadSavedViewState: (() => Promise<WorkItemViewState | null>) | null = null;
+    /** 打开日志面板：由 index.ts 提供（面板是命令式对话框，不在组件里再建一套生命周期）。 */
+    export let openLog: () => void = () => undefined;
 
     type MainPage = "week" | "all" | "review" | "graph" | "cleanup";
     type ItemFilter = "all" | "today" | "active" | "future" | "closed";
@@ -431,6 +434,7 @@
     export async function refresh() {
         loading = true;
         error = "";
+        const started = Date.now();
         try {
             if (!appliedInitialViewState && !initialViewState && loadSavedViewState) {
                 const saved = await loadSavedViewState();
@@ -438,13 +442,17 @@
             }
             const loaded = await load();
             applyData(loaded);
+            log.verbose("ui", "ui.refresh.ok", { items: loaded.items.length, ms: Date.now() - started });
             try {
                 applyData(await reconcileAutomaticStatuses(loaded));
             } catch (caught) {
                 inlineError = `日期状态自动更新失败：${caught instanceof Error ? caught.message : String(caught)}`;
+                log.warn("ui", "ui.reconcile.failed", { err: caught instanceof Error ? caught.message : String(caught) });
             }
         } catch (caught) {
-            error = caught instanceof Error ? caught.message : String(caught);
+            const message = caught instanceof Error ? caught.message : String(caught);
+            error = message;
+            log.error("ui", "ui.refresh.failed", { err: message, ms: Date.now() - started });
         } finally {
             loading = false;
         }
@@ -650,6 +658,7 @@
         capturing = true;
         try {
             const refreshed = await captureInbox(title, options);
+            log.info("ui", "ui.capture.ok", { length: title.trim().length, items: refreshed.items.length });
             applyData(refreshed);
             const created = refreshed.items.find((item) => !previousIds.has(item.id));
             quickCaptureNotice = mode === "child" && parent
@@ -747,6 +756,7 @@
     function requestDelete(item: WorkItem) {
         deleteTarget = item;
         deleteError = "";
+        log.info("ui", "ui.item.delete.request", { itemId: item.id, type: item.type });
     }
 
     async function confirmDelete() {
@@ -754,6 +764,7 @@
         const target = deleteTarget;
         deleting = true;
         deleteError = "";
+        log.info("ui", "ui.item.delete.confirm", { itemId: target.id, type: target.type });
         try {
             const refreshed = await deleteItem(data, target);
             if (scope === target.id) scope = "all";
@@ -762,8 +773,10 @@
             if (pinnedFocusId === target.id) pinnedFocusId = null;
             applyData(refreshed);
             deleteTarget = null;
+            log.info("ui", "ui.item.delete.ok", { itemId: target.id });
         } catch (caught) {
             deleteError = caught instanceof Error ? caught.message : String(caught);
+            log.error("ui", "ui.item.delete.failed", { itemId: target.id, err: deleteError });
         } finally {
             deleting = false;
         }
@@ -912,6 +925,7 @@
     function openActionEditorWindow(field: ActionField, value: string) {
         actionWindowDialog?.destroy();
         actionWindowField = field;
+        log.info("editor", "editor.window.open", { field, length: value.length, itemId: selected?.id ?? null });
         const host = document.createElement("div");
         host.className = "xz-action-editor-window__host";
         const component = new ActionEditorWindow({
@@ -1112,6 +1126,7 @@
         }
         const sourceId = selected.id;
         const sourceRowId = selected.rowId;
+        log.info("editor", "editor.action.save.start", { field, length: value.length, images: countActionImages(value), itemId: sourceId });
         savingAction = field;
         actionErrors = { ...actionErrors, [field]: "" };
         try {
@@ -1124,11 +1139,13 @@
             savedActionValues = { ...savedActionValues, [field]: savedValue };
             clearActionDraft(field);
             finishActionEditing(field);
+            log.info("editor", "editor.action.save.ok", { field, length: savedValue.length, itemId: sourceId });
         } catch (caught) {
             // 写入失败：内容留在草稿与窗口里，绝不静默丢掉
             detailDraft = { ...detailDraft, [field]: value };
             rememberActionDraft(field, value);
             actionErrors = { ...actionErrors, [field]: caught instanceof Error ? caught.message : String(caught) };
+            log.error("editor", "editor.action.save.failed", { field, length: value.length, itemId: sourceId, err: actionErrors[field] });
         } finally {
             savingAction = null;
         }
@@ -1247,6 +1264,7 @@
         }
         savingInline = role;
         inlineError = "";
+        log.info("ui", "ui.item.field.save", { field: role, itemId: selected.id, changedFields: Object.keys(changes).sort() });
         try {
             const selectedRowId = selected.rowId;
             const refreshed = await saveItem(data, selected, changes);
@@ -1258,10 +1276,12 @@
                 selectedId = updated.id;
                 resetDetailDraft(updated);
             }
+            log.info("ui", "ui.item.field.saved", { field: role, ok: true });
         } catch (caught) {
             const message = caught instanceof Error ? caught.message : String(caught);
             resetDetailDraft(selected);
             inlineError = message;
+            log.error("ui", "ui.item.field.failed", { field: role, err: message });
         } finally {
             savingInline = null;
         }
@@ -1293,6 +1313,7 @@
         const selectedRowId = selected.rowId;
         savingInline = kind;
         inlineError = "";
+        log.info("ui", "ui.dependency.save", { kind, count: normalized.length, itemId: selected.id });
         try {
             applyData(await saveItem(data, selected, { [kind]: normalized }));
             const updated = data?.items.find((item) => item.rowId === selectedRowId);
@@ -1302,6 +1323,7 @@
             }
         } catch (caught) {
             inlineError = caught instanceof Error ? caught.message : String(caught);
+            log.error("ui", "ui.dependency.failed", { kind, err: inlineError });
         } finally {
             savingInline = null;
         }
@@ -1785,6 +1807,7 @@
         const previousFilter = filter;
         filter = nextFilter;
         scope = "all";
+        log.verbose("ui", "ui.filter.changed", { from: previousFilter, to: nextFilter });
         // 主动切筛选属于用户明确动作：放下钉子，让本轮筛选如实生效
         pinnedFocusId = null;
         focusPinRejected = nextFilter !== previousFilter;
@@ -2414,6 +2437,12 @@
             <button class="b3-button b3-button--outline" type="button" on:click={() => void refresh()} disabled={loading}>
                 <svg><use href="#iconRefresh"></use></svg>{loading ? "读取中" : "刷新"}
             </button>
+            <button class="b3-button b3-button--outline" type="button" on:click={() => openLog()}>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 3.5h8.5L19 8v11.5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                    <path d="M14 3.5V8h4.5M8 12h8M8 15.5h8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>日志
+            </button>
         </div>
     </header>{/if}
 
@@ -2421,7 +2450,7 @@
         <div class="xz-project-toolbar__scroll">
         <nav class="xz-main-nav" aria-label="主页面">
             {#each mainPages as entry}
-                <button class:active={page === entry.id} type="button" on:click={() => page = entry.id}>
+                <button class:active={page === entry.id} type="button" on:click={() => { if (page !== entry.id) log.verbose("ui", "ui.page.changed", { from: page, to: entry.id }); page = entry.id; }}>
                     {entry.label}
                 </button>
             {/each}
