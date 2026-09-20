@@ -64,6 +64,8 @@ import {
 } from "./nutrition";
 import { loadWorkItems, type InboxCaptureOptions, type WorkItem, type WorkItemChanges, type WorkItemData, type WorkItemViewState } from "./work-items";
 import { UI_STATE_FILE, parseViewStateFile, wrapViewStateFile } from "./ui-state";
+import { TREND_VIEW_FILE, parseTrendViewFile, wrapTrendViewFile } from "./trend-view";
+import type { TrendViewSettings } from "./trend-metrics";
 import { requestSiYuan } from "./siyuan-api";
 import "./index.scss";
 
@@ -97,6 +99,7 @@ export default class XingzhouPlugin extends Plugin {
     private settingsReady: Promise<void> = Promise.resolve();
     private mutationQueue: Promise<void> = Promise.resolve();
     private viewStateSaveQueue: Promise<void> = Promise.resolve();
+    private trendViewSaveQueue: Promise<void> = Promise.resolve();
     private logPanel?: LogPanelHandle;
     /** 思源内核版本：导出日志时带上，便于按版本比对行为。 */
     private kernelVersion = "";
@@ -325,6 +328,8 @@ export default class XingzhouPlugin extends Plugin {
                             saveNutrition: (store: NutritionStore) => plugin.saveNutritionStore(store),
                             loadProjectViewState: () => plugin.loadProjectViewState(),
                             saveProjectViewState: (state: WorkItemViewState) => plugin.saveProjectViewState(state),
+                            loadTrendViewState: () => plugin.loadTrendViewState(),
+                            saveTrendViewState: (state: TrendViewSettings) => plugin.saveTrendViewState(state),
                             openLog: () => plugin.openLog(),
                         },
                     });
@@ -1001,6 +1006,33 @@ export default class XingzhouPlugin extends Plugin {
             }
         }).catch(() => undefined);
         return this.viewStateSaveQueue;
+    }
+
+    /** 趋势视图设置（非关键 UI 数据）：独立文件，损坏或字段非法时逐字段回落默认。 */
+    private async loadTrendViewState(): Promise<TrendViewSettings | null> {
+        try {
+            await this.trendViewSaveQueue;
+            const raw: unknown = await this.loadData(TREND_VIEW_FILE);
+            const state = parseTrendViewFile(raw);
+            log.verbose("ui", "ui.trendView.load", { usable: Boolean(state), metrics: state?.metricIds.length ?? 0 });
+            return state;
+        } catch (error) {
+            log.verbose("ui", "ui.trendView.load", { usable: false, err: describeError(error) });
+            return null;
+        }
+    }
+
+    private async saveTrendViewState(state: TrendViewSettings): Promise<void> {
+        this.trendViewSaveQueue = this.trendViewSaveQueue.then(async () => {
+            try {
+                await this.saveData(TREND_VIEW_FILE, wrapTrendViewFile(state));
+                log.verbose("ui", "ui.trendView.save", { metrics: state.metricIds.length, range: state.range });
+            } catch (error) {
+                // 非关键数据：失败只留痕，不影响任何正式数据写入
+                log.verbose("ui", "ui.trendView.save.failed", { err: describeError(error) });
+            }
+        }).catch(() => undefined);
+        return this.trendViewSaveQueue;
     }
 }
 

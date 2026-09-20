@@ -7,6 +7,7 @@
     import type { ActionImageCopyTarget } from "./image-clipboard";
     import { createEmptyNutritionStore, type NutritionStore } from "./nutrition";
     import XingzhouApp from "./XingzhouApp.svelte";
+    import type { TrendViewSettings } from "./trend-metrics";
     import { log } from "./log";
     import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData, WorkItemViewState } from "./work-items";
 
@@ -31,6 +32,8 @@
     export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore> = async (store) => store;
     export let loadNutrition: () => Promise<NutritionStore> = async () => createEmptyNutritionStore();
     export let saveNutrition: (store: NutritionStore) => Promise<NutritionStore> = async (store) => store;
+    export let loadTrendViewState: () => Promise<TrendViewSettings | null> = async () => null;
+    export let saveTrendViewState: (state: TrendViewSettings) => Promise<void> = async () => undefined;
 
     let module: "projects" | "rhythm" = "projects";
     let dailyRhythm: DailyRhythm | undefined;
@@ -127,7 +130,7 @@
                 {openLog}
             />
         {:else}
-            <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} {loadChecklist} {saveChecklist} {loadNutrition} {saveNutrition} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
+            <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} {loadChecklist} {saveChecklist} {loadNutrition} {saveNutrition} loadTrendView={loadTrendViewState} saveTrendView={saveTrendViewState} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
         {/if}
     </div>
 </div>

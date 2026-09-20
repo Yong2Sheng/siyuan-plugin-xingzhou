@@ -24,6 +24,8 @@
     import DailyChecklist from "./DailyChecklist.svelte";
     import DailyWorkItemPicker from "./DailyWorkItemPicker.svelte";
     import ScoreInput from "./ScoreInput.svelte";
+    import TrendView from "./TrendView.svelte";
+    import type { TrendViewSettings } from "./trend-metrics";
     import TimeSelect from "./TimeSelect.svelte";
     import NutritionTracker from "./NutritionTracker.svelte";
     import { createEmptyNutritionStore, type NutritionStore } from "./nutrition";
@@ -47,8 +49,10 @@
     export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore> = async (store) => store;
     export let loadNutrition: () => Promise<NutritionStore> = async () => createEmptyNutritionStore();
     export let saveNutrition: (store: NutritionStore) => Promise<NutritionStore> = async (store) => store;
+    export let loadTrendView: () => Promise<TrendViewSettings | null> = async () => null;
+    export let saveTrendView: (state: TrendViewSettings) => Promise<void> = async () => undefined;
 
-    type View = "today" | "checklist" | "nutrition" | "history" | "rubrics" | "timeline";
+    type View = "today" | "checklist" | "nutrition" | "history" | "rubrics" | "timeline" | "trends";
     type Stage = "morning" | "learning" | "boundary" | "after-work" | "recovery" | "evening" | "all";
     const AUTO_SAVE_DELAY_MS = 900;
 
@@ -608,6 +612,7 @@
             <button class:active={view === "history"} type="button" on:click={() => void changeView("history")}>历史数据</button>
             <button class:active={view === "rubrics"} type="button" on:click={() => void changeView("rubrics")}>评分标准</button>
             <button class:active={view === "timeline"} type="button" on:click={() => void changeView("timeline")}>时间线</button>
+            <button class:active={view === "trends"} type="button" on:click={() => void changeView("trends")}>趋势</button>
         </nav>
     </div>
 
@@ -977,6 +982,16 @@
             <header><div><span class="xz-section-kicker">插件内部数据库</span><h2>历史数据</h2></div><span>{store?.records.length ?? 0} 天</span></header>
             {#if !store?.records.length}<div class="xz-daily-empty"><h3>还没有每日记录</h3><p>从 9 月 3 日开始手动录入即可；这里不会迁移旧文档数据。</p></div>{:else}{#each [...store.records].reverse() as record (record.date)}<button class="xz-daily-history-row" type="button" on:click={() => void openHistoryRecord(record.date)}><strong>{record.date}</strong><span>{dayTypeLabel(record.dayType)}</span><span>睡眠 {record.fields.sleepDurationMinutes === null ? "—" : `${Math.floor(record.fields.sleepDurationMinutes / 60)} 小时 ${record.fields.sleepDurationMinutes % 60} 分`}{#if record.fields.lightsOffBand === "after-midnight"}<em class="xz-daily-night-owl">熬夜</em>{/if}</span><span>精力 {record.fields.daytimeEnergy ?? "—"}</span><span>{statusFor(record)}</span></button>{/each}{/if}
         </section>
+    {:else if view === "trends"}
+        <TrendView
+            records={store?.records ?? []}
+            {loadNutrition}
+            loadSettings={loadTrendView}
+            saveSettings={saveTrendView}
+            openRecord={(date) => void openHistoryRecord(date)}
+            goToday={() => void changeView("today")}
+            today={localDateKey()}
+        />
     {:else if view === "rubrics"}
         <section class="xz-daily-list-view">
             <header><div><span class="xz-section-kicker">固定评分口径</span><h2>评分标准</h2></div></header>

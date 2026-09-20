@@ -2,6 +2,26 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## 3.0.0 - 2026-09-20
+
+### Added
+
+- **Trend view (Life Rhythm › Trend, the seventh view)**: turns the numeric fields of the daily and nutrition records into line charts that answer "which way is this going?". Thirteen metrics are available; three are shown by default — Sleep window, Morning weight, and Daytime energy — and the rest (sleep duration, watch sleep score, subjective sleep quality, depleting stress, promoting stress, work efficiency, work boundary, closure duration, and recorded protein/calories) can be ticked on.
+  - **Convention 1: night anchoring with 24-hour notation.** Sleep metrics use the evening the night started as their X value, so a 01:00 lights-off never jumps to the next column. The Y axis is continuous in 24-hour notation (01:00 plots as 25.0), which is why averaging 23:30 and 00:30 gives 00:00 rather than 12:00, and why an extreme 13:10 wake-up still lands correctly instead of folding back at midnight. Lights-off, wake-up, and planned lights-off share one chart; the plan is dashed, and the vertical gap between the two lines is the bedtime delay.
+  - **Convention 2: bands instead of verdicts.** The late-night danger zone covers only **24:00–05:00** — colouring the whole after-midnight stretch red would paint the 06:00–08:00 wake-up target red as well — while 06:00–08:00 gets its own green band. Scores are banded by their own direction: energy, work efficiency, and subjective sleep quality are green at 4–5, grey at 3, red at 1–2; depleting stress is green below **3** and red above; promoting stress is green in the **3–4** band (1–2 means "no drive formed", which also counts as not met). Dashed boundaries and a text legend accompany the colours, with a separate palette for the dark theme.
+  - **Convention 3: missing data is never filled.** Days without a record break the line instead of becoming zero, and a night marked only as "after midnight" without a time becomes a red band rather than a guessed value.
+  - **Aggregation**: day, week, or month, defaulting to automatic (day up to 45 days, week up to 180, month beyond) and stepping down to a finer grain when the data is concentrated — under a "this year" window with data in a single month it falls back to weeks instead of compressing twelve days into one point. Mean and median are switchable (scores default to median), bins follow calendar weeks (starting Monday) and calendar months, bins with fewer than three days are drawn hollow, and every chart reports its coverage and how many days in the window actually have records.
+  - **Filtering and interaction**: range (this week, last week, 30 days, 90 days, this year, all, custom), granularity, and statistic are switchable; day types can be excluded (all, research workdays only, exclude holidays, exclude weekends) while excluded points stay visible in grey and out of the average; clicking any dot opens that day's record; the weight target (65 kg by default) is editable and clearable right on the chart, and the unit switches between kg and lb (each record stores its own unit, so mixed units are converted before plotting).
+  - **Persistence**: display settings live in `trend-view.json` and fall back field by field when damaged or invalid.
+- Metric definitions are centralised in the registry of `src/trend-metrics.ts` — each declares its source field, unit, direction, bands, and reference lines — so adding a metric is a registration rather than a rendering change. `src/trend-chart.ts` computes specification → geometry as pure data that can be tested without starting the UI.
+
+### Notes
+
+- This release only adds a read-only view: it **writes no daily records and no nutrition records** and takes no part in the revision or rotating-backup flow. `trend-view.json` is non-critical UI state, and a failed write is reported without blocking anything.
+- **No new dependencies**: the charts are hand-drawn SVG, and the new code is three pure-function domain modules plus two Svelte components.
+- The test suite grew from 409 to 478 passing tests (69 new: 28 metric conventions, 13 geometry, 12 settings, 13 component, 3 layout invariants), together with an "implemented-geometry audit" that renders the real component at 1440/1100/980/760/620/420 and in a "this year (monthly aggregation)" state, then checks overflow, text overlap, zero-size elements, tap-target size, and whether a band label is covered by a data point.
+- Edge cases handled during development rather than after release: late-night bands must aggregate with the chosen granularity (otherwise nightly bands pile into one blob on long ranges); band labels are painted above the data points and placed to avoid them; automatic granularity steps down by data distribution on long windows; the empty state is decided by "days with data" rather than by aggregated point count, and a single aggregated point prompts for a finer granularity; and the trend view is its own scroll container, otherwise the module's `overflow: hidden` clips it.
+
 ## 2.4.0 - 2026-09-18
 
 ### Added
