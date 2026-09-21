@@ -130,7 +130,7 @@
                 {openLog}
             />
         {:else}
-            <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} {loadChecklist} {saveChecklist} {loadNutrition} {saveNutrition} loadTrendView={loadTrendViewState} saveTrendView={saveTrendViewState} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
+            <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} checklistEnabled={true} {loadChecklist} {saveChecklist} {loadNutrition} {saveNutrition} loadTrendView={loadTrendViewState} saveTrendView={saveTrendViewState} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
         {/if}
     </div>
 </div>

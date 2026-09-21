@@ -947,12 +947,18 @@ describe("XingzhouApp", () => {
         await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="makeup"] .xz-week-item-meta`)?.textContent).toContain("进行中"));
     });
 
-    it("事务先前已是已完成的存量数据，撤销切片完成后也会退回进行中", async () => {
+    it.skipIf(new Date().getDay() === 1)("事务先前已是已完成的存量数据，撤销切片完成后也会退回进行中", async () => {
         /* 用户实测的存量状态：事务早已手工标记为已完成，切片停在“未完成” */
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const yesterday = new Date(today);
         yesterday.setDate(yesterday.getDate() - 1);
+        /*
+         * 这条用例依赖真实时钟：卡片只给「今天之前」的已排期切片显示「补记完成」，
+         * 而周视图只渲染本周。周一时本周之内不存在更早的一天（昨天属于上一周、不在视图里），
+         * 用例在周一必然失败；周二到周日成立。因此周一跳过，同一行为由
+         * tests/WeekMakeupFixedClock.test.ts 用固定系统时间（周三）稳定覆盖。
+         */
         const item: WorkItem = {
             id: "legacy", rowId: "legacy", title: "存量已完成的事务", documentId: null, detached: true,
             type: "事务", status: "已完成", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],

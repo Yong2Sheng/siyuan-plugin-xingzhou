@@ -4,9 +4,14 @@
     import {
         cloneChecklistStore,
         createDefaultChecklistStore,
+        boundaryKeyFor,
+        pruneEntryBoundaries,
+        reconcileReminders,
+        setChecklistBoundary,
         updateChecklistDayState,
         updateChecklistStore,
         type ChecklistEntry,
+        type ChecklistReminder,
         type ChecklistReminderState,
         type ChecklistStore,
         type ChecklistTemplate,
@@ -18,8 +23,15 @@
 
     export let date: string;
     export let dayType: DailyDayType | null = null;
-    export let loadChecklist: () => Promise<ChecklistStore>;
+    /**
+     * 数据来源：默认由本组件自加载。
+     * 「今日记录」里的边界提醒面板会用同一个 checklist.json 写入勾选状态，
+     * 那时由父组件传入同一个 loader，让两个视图共用一份数据，避免各持旧快照互相覆盖。
+     */
+    export let loadChecklist: (() => Promise<ChecklistStore>) | undefined = undefined;
     export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore>;
+    /** 每次成功保存后回调当前快照，供父组件同步它持有的那份数据。 */
+    export let onStorePersisted: ((store: ChecklistStore) => void) | undefined = undefined;
 
     let store = createDefaultChecklistStore();
     let loading = true;
@@ -36,13 +48,24 @@
     let editHasTrainingChoices = false;
     let editTone: ChecklistTone = "plain";
     let lastDate = date;
+    /** 行内「＋ 添加一行提醒」：正在给哪个条目输入新提醒。 */
+    let addingEntryId = "";
+    let addingText = "";
+    let addInput: HTMLInputElement | null = null;
+    /** 窄屏用「?」浮层展示类型图例。 */
+    let typeHelpOpen = false;
+    /**
+     * 行内删除的两步确认：第一次点只是选中（行变成确认态），再点一次才真的删。
+     * 不用弹窗，避免删一行提醒也要开对话框；点的别的行会自动切换目标。
+     */
+    let pendingDeleteKey = "";
     let reminderStates = new Map<string, ChecklistReminderState>();
     let trainingMode: ChecklistTrainingMode = "";
     let saveSequence = 0;
 
     $: templateId = dayType === "conference-day" ? "conference" : templateIdForDate(date);
     $: template = store.templates.find((candidate) => candidate.id === templateId) ?? store.templates[0];
-    $: allReminderKeys = template.entries.flatMap((item) => visibleReminders(item, trainingMode).map((reminder) => reminder.key));
+    $: allReminderKeys = template.entries.flatMap((item) => visibleReminderRows(item, trainingMode).map((reminder) => reminder.key));
     $: completedCount = countState(allReminderKeys, "completed");
     $: partialCount = countState(allReminderKeys, "partial");
     $: missedCount = countState(allReminderKeys, "missed");
@@ -58,7 +81,7 @@
 
     Promise.resolve().then(async () => {
         try {
-            store = cloneChecklistStore(await loadChecklist());
+            store = cloneChecklistStore(await (loadChecklist?.() ?? createDefaultChecklistStore()));
             hydrateDayState(date);
         } catch (caught) {
             error = caught instanceof Error ? caught.message : String(caught);
@@ -66,6 +89,25 @@
             loading = false;
         }
     });
+
+    /*
+     * 父组件换了数据源（边界提醒面板写入后 loadChecklist 会返回新快照）就重新读取。
+     * 用序号丢弃过期结果：连续两次写入时，先到的旧快照不能盖掉后到的新快照。
+     */
+    $: if (!loading && loadChecklist) void reloadFromSource(loadChecklist);
+
+    let reloadSequence = 0;
+    async function reloadFromSource(source: () => Promise<ChecklistStore>) {
+        const sequence = ++reloadSequence;
+        try {
+            const loaded = cloneChecklistStore(await source());
+            if (sequence !== reloadSequence || loaded.revision === store.revision) return;
+            store = loaded;
+            hydrateDayState(date);
+        } catch (caught) {
+            if (sequence === reloadSequence) error = caught instanceof Error ? caught.message : String(caught);
+        }
+    }
 
     function hydrateDayState(currentDate: string) {
         const state = store.dayStates.find((candidate) => candidate.date === currentDate);
@@ -95,13 +137,100 @@
         void persistDayState();
     }
 
-    function visibleReminders(item: ChecklistEntry, mode: ChecklistTrainingMode): Array<{ key: string; text: string }> {
-        const common = item.reminders.map((text, index) => ({ key: `${item.id}:common:${index}`, text }));
-        if (!item.trainingChoices || !mode) return common;
-        return [
-            ...common,
-            ...item.trainingChoices[mode].map((text, index) => ({ key: `${item.id}:${mode}:${index}`, text })),
-        ];
+    /** 当前模式下实际显示的提醒，各自带上状态键与边界时间。 */
+    function visibleReminderRows(item: ChecklistEntry, mode: ChecklistTrainingMode): Array<{ key: string; reminderId: string; text: string; at: string }> {
+        return visibleReminderGroups(item, mode).flatMap((group) => group.reminders.map((reminder) => {
+            const key = boundaryKeyFor(item.id, reminder.id);
+            return { key, reminderId: reminder.id, text: reminder.text, at: item.boundaries?.[key] ?? "" };
+        }));
+    }
+
+    function visibleReminderGroups(item: ChecklistEntry, mode: ChecklistTrainingMode): Array<{ mode: "common" | "training" | "rest"; reminders: ChecklistReminder[] }> {
+        const groups: Array<{ mode: "common" | "training" | "rest"; reminders: ChecklistReminder[] }> = [{ mode: "common", reminders: item.reminders }];
+        if (!item.trainingChoices || !mode) return groups;
+        groups.push({ mode, reminders: item.trainingChoices[mode] });
+        return groups;
+    }
+
+    /** 四种类型的中文名，与纸质视图共用同一套 tone。 */
+    function toneLabel(tone: ChecklistTone): string {
+        if (tone === "mint") return "节律提示";
+        if (tone === "sand") return "准备事项";
+        if (tone === "rose") return "边界提醒";
+        return "普通";
+    }
+
+    function startAdding(item: ChecklistEntry) {
+        addingEntryId = item.id;
+        addingText = "";
+        void tick().then(() => addInput?.focus());
+    }
+
+    function cancelAdding() {
+        addingEntryId = "";
+        addingText = "";
+    }
+
+    /**
+     * 把正在输入的这一行追加到条目末尾。
+     * 复用保存编辑时同一套对齐逻辑，因此新增一行不会影响任何已有提醒的 id 与边界时间。
+     */
+    async function commitAdding(item: ChecklistEntry) {
+        const text = addingText.trim();
+        if (!text || saving) return;
+        const next = cloneChecklistStore(store);
+        const target = next.templates.find((candidate) => candidate.id === template.id)?.entries.find((candidate) => candidate.id === item.id);
+        if (!target) return;
+        target.reminders = reconcileReminders(item.id, [...target.reminders.map((reminder) => reminder.text), text], target.reminders);
+        if (await persist(updateChecklistStore(next, { templates: next.templates }))) {
+            // 保持展开，方便连续添加多行
+            addingText = "";
+            void tick().then(() => addInput?.focus());
+        }
+    }
+
+    /**
+     * 行内删除一条提醒。第一次调用只是进入确认态，第二次才真的删除。
+     * 删除时该提醒的边界时间会一起消失（它绑在这条提醒上），这是预期行为。
+     */
+    async function removeReminder(item: ChecklistEntry, reminder: { key: string; text: string }) {
+        if (pendingDeleteKey !== reminder.key) {
+            pendingDeleteKey = reminder.key;
+            return;
+        }
+        pendingDeleteKey = "";
+        const next = cloneChecklistStore(store);
+        const target = next.templates.find((candidate) => candidate.id === template.id)?.entries.find((candidate) => candidate.id === item.id);
+        if (!target) return;
+        const kept = target.reminders.filter((candidate) => candidate.text !== reminder.text);
+        // 至少保留一条提醒，否则这个时间节点就没有内容了
+        if (!kept.length) {
+            error = "每个时间节点至少要保留一条提醒。";
+            return;
+        }
+        target.reminders = reconcileReminders(item.id, kept.map((candidate) => candidate.text), target.reminders);
+        Object.assign(target, pruneEntryBoundaries(target));
+        await persist(updateChecklistStore(next, { templates: next.templates }));
+    }
+
+    function handleAddKeydown(event: KeyboardEvent, item: ChecklistEntry) {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            void commitAdding(item);
+            return;
+        }
+        if (event.key === "Escape") {
+            event.preventDefault();
+            cancelAdding();
+        }
+    }
+
+    /**
+     * 设置或清空某条提醒的边界提醒时间。
+     * 绑定在提醒 id 上，因此调整清单顺序不会让时间跑到别的事情上。
+     */
+    async function editBoundaryTime(item: ChecklistEntry, reminderId: string, value: string) {
+        await persist(setChecklistBoundary(store, template.id, { entryId: item.id, reminderId, at: value }));
     }
 
     async function changeViewMode(viewMode: ChecklistViewMode) {
@@ -119,10 +248,10 @@
         editingId = selected?.id ?? "";
         editTime = selected?.time ?? "";
         editTitle = selected?.title ?? "";
-        editReminders = selected?.reminders.join("\n") ?? "";
+        editReminders = selected?.reminders.map((reminder) => reminder.text).join("\n") ?? "";
         editHasTrainingChoices = Boolean(selected?.trainingChoices);
-        editTrainingReminders = selected?.trainingChoices?.training.join("\n") ?? "";
-        editRestReminders = selected?.trainingChoices?.rest.join("\n") ?? "";
+        editTrainingReminders = selected?.trainingChoices?.training.map((reminder) => reminder.text).join("\n") ?? "";
+        editRestReminders = selected?.trainingChoices?.rest.map((reminder) => reminder.text).join("\n") ?? "";
         editTone = selected?.tone ?? "plain";
         editorOpen = true;
     }
@@ -155,9 +284,38 @@
         if (!target) return;
         if (editingId) {
             const index = target.entries.findIndex((candidate) => candidate.id === editingId);
-            if (index >= 0) target.entries[index] = { id: target.entries[index].id, time, title, reminders, tone: editTone, ...(trainingChoices ? { trainingChoices } : {}) };
+            if (index >= 0) {
+                const previous = target.entries[index];
+                /*
+                 * 文字没变的提醒保留原 id，边界时间因此跟着这条提醒走；
+                 * 新加的文字拿新 id；被删掉的提醒连同它的边界时间一起消失。
+                 */
+                const merged: ChecklistEntry = {
+                    ...previous,
+                    time,
+                    title,
+                    reminders: reconcileReminders(previous.id, reminders, previous.reminders),
+                    tone: editTone,
+                    ...(trainingChoices
+                        ? {
+                            trainingChoices: {
+                                training: reconcileReminders(previous.id, trainingChoices.training, previous.trainingChoices?.training ?? [], "training"),
+                                rest: reconcileReminders(previous.id, trainingChoices.rest, previous.trainingChoices?.rest ?? [], "rest"),
+                            },
+                        }
+                        : { trainingChoices: undefined }),
+                };
+                target.entries[index] = pruneEntryBoundaries(merged);
+            }
         } else {
-            target.entries.push({ id: createEntryId(), time, title, reminders, tone: editTone });
+            const created: ChecklistEntry = {
+                id: createEntryId(),
+                time,
+                title,
+                reminders: reconcileReminders("", reminders, []),
+                tone: editTone,
+            };
+            target.entries.push({ ...created, reminders: created.reminders.map((reminder, position) => ({ id: `${created.id}:${position}`, text: reminder.text })) });
         }
         if (await persist(updateChecklistStore(next, { templates: next.templates }))) editorOpen = false;
     }
@@ -195,6 +353,7 @@
         try {
             const saved = cloneChecklistStore(await saveChecklist(next));
             if (sequence === saveSequence) store = saved;
+            onStorePersisted?.(saved);
             return true;
         } catch (caught) {
             if (sequence === saveSequence) store = previous;
@@ -269,12 +428,13 @@
                     </header>
                     <div class="xz-checklist-native-entries">
                         {#each template.entries as item, entryIndex (item.id)}
-                            <section class="xz-checklist-native-entry">
-                                <div class="xz-checklist-native-time">{item.time}</div>
+                            <section class="xz-checklist-native-entry t-{item.tone}">
+                                <div class="xz-type-strip" title="类型：{toneLabel(item.tone)}"><span>{toneLabel(item.tone)}</span></div>
                                 <div class="xz-checklist-native-content">
                                     <div class="xz-checklist-native-title">
                                         <strong>{item.title}</strong>
-                                        <span>{visibleReminders(item, trainingMode).length} 项提醒</span>
+                                        <span class="xz-checklist-native-when">{item.time}</span>
+                                        <span>{visibleReminderRows(item, trainingMode).length} 项提醒</span>
                                         <div>
                                             <button type="button" aria-label="上移" disabled={entryIndex === 0 || saving} on:click={() => void moveEntry(item.id, -1)}>↑</button>
                                             <button type="button" aria-label="下移" disabled={entryIndex === template.entries.length - 1 || saving} on:click={() => void moveEntry(item.id, 1)}>↓</button>
@@ -290,8 +450,17 @@
                                         </div>
                                     {/if}
                                     <div class="xz-checklist-native-reminders">
-                                        {#each visibleReminders(item, trainingMode) as reminder (reminder.key)}
+                                        {#each visibleReminderRows(item, trainingMode) as reminder (reminder.key)}
                                             <label class:completed={reminderState(reminder.key) === "completed"} class:partial={reminderState(reminder.key) === "partial"} class:missed={reminderState(reminder.key) === "missed"}>
+                                                <input
+                                                    class="xz-checklist-boundary-time"
+                                                    class:is-set={Boolean(reminder.at)}
+                                                    type="time"
+                                                    value={reminder.at}
+                                                    title="边界提醒时间：填了以后，这条会在「今日记录」里到点浮出来"
+                                                    aria-label={`“${reminder.text}”的边界提醒时间`}
+                                                    on:change={(event) => void editBoundaryTime(item, reminder.reminderId, event.currentTarget.value)}
+                                                />
                                                 <select class="xz-checklist-state-select" aria-label={`设置“${reminder.text}”状态`} value={reminderState(reminder.key)} on:change={(event) => changeReminderState(reminder.key, event.currentTarget.value)}>
                                                     <option value="">○ 待处理</option>
                                                     <option value="completed">✓ 已完成</option>
@@ -299,9 +468,33 @@
                                                     <option value="missed">× 未完成</option>
                                                 </select>
                                                 <span>{reminder.text}</span>
+                                                <button
+                                                    class="xz-checklist-remove-reminder"
+                                                    class:is-confirming={pendingDeleteKey === reminder.key}
+                                                    type="button"
+                                                    title={pendingDeleteKey === reminder.key ? "再点一次确认删除" : "删除这条提醒"}
+                                                    aria-label={pendingDeleteKey === reminder.key ? `确认删除“${reminder.text}”` : `删除“${reminder.text}”`}
+                                                    disabled={saving}
+                                                    on:click={() => void removeReminder(item, reminder)}
+                                                >{pendingDeleteKey === reminder.key ? "确认删除" : "×"}</button>
                                             </label>
                                         {/each}
                                     </div>
+                                    {#if addingEntryId === item.id}
+                                        <div class="xz-checklist-add-reminder__box">
+                                            <input
+                                                bind:this={addInput}
+                                                bind:value={addingText}
+                                                placeholder="这一行要提醒什么？回车添加"
+                                                aria-label={`给“${item.title}”添加一行提醒`}
+                                                on:keydown={(event) => handleAddKeydown(event, item)}
+                                            />
+                                            <button class="primary" type="button" disabled={saving || !addingText.trim()} on:click={() => void commitAdding(item)}>{saving ? "保存中…" : "添加"}</button>
+                                            <button type="button" on:click={cancelAdding}>取消</button>
+                                        </div>
+                                    {:else}
+                                        <button class="xz-checklist-add-reminder" type="button" disabled={saving} on:click={() => startAdding(item)}>＋ 添加一行提醒</button>
+                                    {/if}
                                 </div>
                             </section>
                         {/each}
@@ -314,6 +507,30 @@
                     <div class="xz-checklist-progress"><i style={`width:${completionPercent}%`}></i></div>
                     <div class="xz-checklist-state-summary"><span>✓ {completedCount}</span><span>◐ {partialCount}</span><span>× {missedCount}</span><span>○ {pendingCount}</span></div>
                     <p>Checklist 只负责提醒。需要记录的结果、时长和观察仍在“今日记录”中填写。</p>
+                    <div class="xz-checklist-type-legend">
+                        <h4>类型底色</h4>
+                        <dl>
+                            <div class="plain"><i></i><dt>普通</dt><dd>常规时间节点</dd></div>
+                            <div class="mint"><i></i><dt>节律提示</dt><dd>照顾身体与状态：鱼油、专业学习、熄灯</dd></div>
+                            <div class="sand"><i></i><dt>准备事项</dt><dd>为下一段做准备：下班区间、准备明天</dd></div>
+                            <div class="rose"><i></i><dt>边界提醒</dt><dd>工作与生活的分界：收尾仪式、无工作区间</dd></div>
+                        </dl>
+                        <p>纸质视图用同一套颜色；打印后按深浅区分。</p>
+                    </div>
+                    <div class="xz-checklist-type-help">
+                        {#if typeHelpOpen}
+                            <div class="xz-checklist-type-help__popover">
+                                <h4>类型底色</h4>
+                                <dl>
+                                    <div class="plain"><i></i><dt>普通</dt><dd>常规时间节点</dd></div>
+                                    <div class="mint"><i></i><dt>节律提示</dt><dd>照顾身体与状态：鱼油、学习、熄灯</dd></div>
+                                    <div class="sand"><i></i><dt>准备事项</dt><dd>为下一段做准备：下班区间、准备明天</dd></div>
+                                    <div class="rose"><i></i><dt>边界提醒</dt><dd>工作与生活的分界：收尾仪式、无工作区间</dd></div>
+                                </dl>
+                            </div>
+                        {/if}
+                        <button class="xz-checklist-type-help__button" type="button" aria-expanded={typeHelpOpen} title="类型底色说明" aria-label="类型底色说明" on:click={() => typeHelpOpen = !typeHelpOpen}>?</button>
+                    </div>
                 </aside>
             </div>
         {:else}
@@ -338,7 +555,7 @@
                                                 <button class:active={trainingMode === "rest"} type="button" on:click={() => chooseTrainingMode("rest")}>休息日</button>
                                             </div>
                                         {/if}
-                                        {#each visibleReminders(item, trainingMode) as reminder (reminder.key)}
+                                        {#each visibleReminderRows(item, trainingMode) as reminder (reminder.key)}
                                             <label class:completed={reminderState(reminder.key) === "completed"} class:partial={reminderState(reminder.key) === "partial"} class:missed={reminderState(reminder.key) === "missed"}>
                                                 <select class="xz-checklist-state-select" aria-label={`设置“${reminder.text}”状态`} value={reminderState(reminder.key)} on:change={(event) => changeReminderState(reminder.key, event.currentTarget.value)}>
                                                     <option value="">○ 待处理</option>
@@ -346,7 +563,10 @@
                                                     <option value="partial">◐ 部分完成</option>
                                                     <option value="missed">× 未完成</option>
                                                 </select>
-                                                <span>{reminder.text}</span>
+                                                <span>{reminder.text}{#if reminder.at}<em class="xz-checklist-boundary-badge">边界 {reminder.at}</em>{/if}</span>
+                                                {#if reminder.at}
+                                                    <button type="button" class="xz-checklist-boundary-clear" title="取消这条的边界提醒" on:click={() => void editBoundaryTime(item, reminder.reminderId, "")}>×</button>
+                                                {/if}
                                             </label>
                                         {/each}
                                     </section>
@@ -363,6 +583,30 @@
                     <div class="xz-checklist-progress"><i style={`width:${completionPercent}%`}></i></div>
                     <div class="xz-checklist-state-summary"><span>✓ {completedCount}</span><span>◐ {partialCount}</span><span>× {missedCount}</span><span>○ {pendingCount}</span></div>
                     <p>当前仍是可交互的纸质样式。可以直接选择状态或编辑，打印时只输出左侧清单。</p>
+                    <div class="xz-checklist-type-legend">
+                        <h4>类型底色</h4>
+                        <dl>
+                            <div class="plain"><i></i><dt>普通</dt><dd>常规时间节点</dd></div>
+                            <div class="mint"><i></i><dt>节律提示</dt><dd>照顾身体与状态：鱼油、专业学习、熄灯</dd></div>
+                            <div class="sand"><i></i><dt>准备事项</dt><dd>为下一段做准备：下班区间、准备明天</dd></div>
+                            <div class="rose"><i></i><dt>边界提醒</dt><dd>工作与生活的分界：收尾仪式、无工作区间</dd></div>
+                        </dl>
+                        <p>纸质视图用同一套颜色；打印后按深浅区分。</p>
+                    </div>
+                    <div class="xz-checklist-type-help">
+                        {#if typeHelpOpen}
+                            <div class="xz-checklist-type-help__popover">
+                                <h4>类型底色</h4>
+                                <dl>
+                                    <div class="plain"><i></i><dt>普通</dt><dd>常规时间节点</dd></div>
+                                    <div class="mint"><i></i><dt>节律提示</dt><dd>照顾身体与状态：鱼油、学习、熄灯</dd></div>
+                                    <div class="sand"><i></i><dt>准备事项</dt><dd>为下一段做准备：下班区间、准备明天</dd></div>
+                                    <div class="rose"><i></i><dt>边界提醒</dt><dd>工作与生活的分界：收尾仪式、无工作区间</dd></div>
+                                </dl>
+                            </div>
+                        {/if}
+                        <button class="xz-checklist-type-help__button" type="button" aria-expanded={typeHelpOpen} title="类型底色说明" aria-label="类型底色说明" on:click={() => typeHelpOpen = !typeHelpOpen}>?</button>
+                    </div>
                 </aside>
             </div>
         {/if}

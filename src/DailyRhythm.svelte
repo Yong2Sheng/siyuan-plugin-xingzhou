@@ -22,6 +22,7 @@
     } from "./daily-records";
     import DurationSelect from "./DurationSelect.svelte";
     import DailyChecklist from "./DailyChecklist.svelte";
+    import DailyBoundaryPanel from "./DailyBoundaryPanel.svelte";
     import DailyWorkItemPicker from "./DailyWorkItemPicker.svelte";
     import ScoreInput from "./ScoreInput.svelte";
     import TrendView from "./TrendView.svelte";
@@ -32,7 +33,8 @@
     import { slicesOnDate } from "./execution-slices";
     import { buildWorkItemTree, flattenWorkItemTree } from "./tree";
     import type { WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
-    import { createDefaultChecklistStore, type ChecklistStore } from "./checklist";
+    import { createDefaultChecklistStore, updateChecklistDayState, type ChecklistStore } from "./checklist";
+    import { boundaryAttention, boundaryTemplateId } from "./checklist-boundary";
     import {
         calculateDailyCompletion,
         type DailyCompletionStage,
@@ -45,6 +47,7 @@
     export let loadWorkItems: (() => Promise<WorkItemData>) | null = null;
     export let saveWorkItem: ((data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData>) | null = null;
     export let openWorkItem: (workItemId: string) => void = () => undefined;
+    export let checklistEnabled = true;
     export let loadChecklist: () => Promise<ChecklistStore> = async () => createDefaultChecklistStore();
     export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore> = async (store) => store;
     export let loadNutrition: () => Promise<NutritionStore> = async () => createEmptyNutritionStore();
@@ -55,6 +58,8 @@
     type View = "today" | "checklist" | "nutrition" | "history" | "rubrics" | "timeline" | "trends";
     type Stage = "morning" | "learning" | "boundary" | "after-work" | "recovery" | "evening" | "all";
     const AUTO_SAVE_DELAY_MS = 900;
+    /** 边界提醒窗口按分钟推进：一分钟一次足够，且不会让页面持续重算。 */
+    const BOUNDARY_TICK_MS = 60_000;
 
     const dayTypes: Array<{ value: DailyDayType; label: string; guidance: string }> = [
         { value: "research-workday", label: "科研工作日", guidance: "记录完整科研工作、学习、下班边界和个人生活。" },
@@ -92,6 +97,24 @@
     let missingOpen = false;
     /** 「12 点后 + 不记具体时间」时是否已展开精确时间输入；纯界面状态，不持久化。 */
     let sleepTimeExpanded = false;
+    /*
+     * 边界提醒：checklist 数据由本组件统一持有（面板与 Checklist 视图共用同一份），
+     * 避免两个视图各持一份快照、互相用旧数据覆盖。
+     */
+    let checklistStore: ChecklistStore = createDefaultChecklistStore();
+    let checklistLoaded = false;
+    let checklistSaving = false;
+    let checklistError = "";
+    /**
+     * 边界提醒的时间基准：初始为挂载时刻，之后每分钟更新一次。
+     * 写成状态而不是直接调 Date.now()，是因为 Date.now() 不是响应式的，
+     * 时间窗口不会自己推进——必须有一个每分钟变化的值让下面的语句重算。
+     */
+    let boundaryTick = Date.now();
+    let boundaryTimer: ReturnType<typeof setInterval> | null = null;
+    /** 供 DailyChecklist 复用的同一份数据；不传 loadChecklist 时它保留自加载行为。 */
+    const loadChecklistForView = () => Promise.resolve(checklistStore);
+    const saveChecklistForView = (next: ChecklistStore) => saveChecklistStore(next);
 
     $: workApplicable = isWorkMetricApplicable(draft.dayType);
     $: isSaturdayReset = draft.dayType === "saturday-reset";
@@ -114,13 +137,89 @@
     $: afterWorkCompletion = stagePresentation(completion, "after-work");
     $: recoveryCompletion = stagePresentation(completion, "recovery");
     $: eveningCompletion = stagePresentation(completion, "evening");
+    /*
+     * 边界提醒只依赖这两个字段，因此在数据源变化时只换这两个引用：
+     * 模板（含边界时间）来自 templates，勾选状态来自当天 dayStates。
+     * 这样面板引用不变时不会触发下面 loadChecklist 的重新读取，避免自我循环。
+     */
+    $: boundaryTemplates = checklistStore.templates;
+    $: boundaryDayState = checklistStore.dayStates.find((state) => state.date === currentDate);
+    $: boundaryReminderStates = new Map(Object.entries(boundaryDayState?.reminderStates ?? {}));
+    $: boundaryContext = {
+        date: currentDate,
+        dayType: draft.dayType,
+        trainingMode: boundaryDayState?.trainingMode ?? "",
+    };
+    $: boundaryTemplate = boundaryTemplates.find((candidate) => candidate.id === boundaryTemplateId(boundaryContext.date, boundaryContext.dayType)) ?? boundaryTemplates[0];
+    // boundaryTick 每分钟更新一次，因此「现在要确认的」窗口最多滞后一分钟，而不会停在打开页面的那一刻
+    $: boundaryAttentionState = boundaryTemplate ? boundaryAttention(boundaryTemplate, boundaryReminderStates, { ...boundaryContext, now: boundaryTick }) : null;
 
     Promise.resolve().then(() => void refresh());
+    Promise.resolve().then(() => void loadChecklistState());
+    Promise.resolve().then(() => scheduleBoundaryTick());
 
     onDestroy(() => {
         clearAutoSaveTimer();
+        clearBoundaryTimer();
         if (dirty) void saveNow();
     });
+
+    async function loadChecklistState() {
+        try {
+            checklistStore = await loadChecklist();
+            checklistError = "";
+        } catch (caught) {
+            checklistError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            checklistLoaded = true;
+        }
+    }
+
+    /**
+     * 边界勾选：与 Checklist 视图共用 checklist.json 的当日状态。
+     * dayState 以本组件持有的最新快照为基准，避免把别处刚写入的勾选覆盖掉。
+     */
+    async function saveChecklistStore(next: ChecklistStore): Promise<ChecklistStore> {
+        if (checklistSaving) return checklistStore;
+        const previous = checklistStore;
+        checklistSaving = true;
+        checklistError = "";
+        checklistStore = next;
+        try {
+            const saved = await saveChecklist(next);
+            checklistStore = saved;
+            return saved;
+        } catch (caught) {
+            checklistStore = previous;
+            checklistError = caught instanceof Error ? caught.message : String(caught);
+            return previous;
+        } finally {
+            checklistSaving = false;
+        }
+    }
+
+    async function toggleBoundary(key: string, completed: boolean) {
+        const states = new Map(Object.entries(boundaryDayState?.reminderStates ?? {}));
+        if (completed) states.set(key, "completed");
+        else states.delete(key);
+        try {
+            await saveChecklistStore(updateChecklistDayState(checklistStore, currentDate, states, boundaryDayState?.trainingMode ?? ""));
+        } catch {
+            // saveChecklistStore 已经把错误写进 checklistError，这里只保证不再往外抛
+        }
+    }
+
+    function scheduleBoundaryTick() {
+        boundaryTimer = setInterval(() => {
+            boundaryTick = Date.now();
+        }, BOUNDARY_TICK_MS);
+    }
+
+    function clearBoundaryTimer() {
+        if (boundaryTimer === null) return;
+        clearInterval(boundaryTimer);
+        boundaryTimer = null;
+    }
 
     async function refresh() {
         loading = true;
@@ -644,6 +743,17 @@
             <div><i>{workApplicable ? "5" : "3"}</i><span><strong>21:00 复盘</strong><small>生活结果与明日承接</small></span></div>
         </div>
 
+        {#if checklistEnabled && checklistLoaded && boundaryAttentionState && boundaryAttentionState.totalCount}
+            <DailyBoundaryPanel
+                attention={boundaryAttentionState}
+                saving={checklistSaving}
+                error={checklistError}
+                isToday={currentDate === localDateKey()}
+                onToggle={(key, completed) => void toggleBoundary(key, completed)}
+                onOpenChecklist={() => void changeView("checklist")}
+            />
+        {/if}
+
         <div class="xz-daily-layout">
             <article class="xz-daily-record">
                 <header class="xz-daily-record-header">
@@ -976,7 +1086,13 @@
             </aside>
         </div>
     {:else if view === "checklist"}
-        <DailyChecklist date={currentDate} dayType={draft.dayType} {loadChecklist} {saveChecklist} />
+        <DailyChecklist
+            date={currentDate}
+            dayType={draft.dayType}
+            loadChecklist={checklistLoaded ? loadChecklistForView : undefined}
+            saveChecklist={saveChecklistForView}
+            onStorePersisted={(next) => { checklistStore = next; }}
+        />
     {:else if view === "history"}
         <section class="xz-daily-list-view">
             <header><div><span class="xz-section-kicker">插件内部数据库</span><h2>历史数据</h2></div><span>{store?.records.length ?? 0} 天</span></header>

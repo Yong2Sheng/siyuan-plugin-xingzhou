@@ -1,4 +1,21 @@
 :root {
+    /* 条目类型色分三级，颜色身份集中在标签块上：
+       fill＝条目底（与白卡对比 1.04–1.09，整屏铺开也不刺眼）
+       strip＝竖排标签底（与条目底对比 1.29–1.41，是唯一的颜色焦点）
+       text＝标签文字（对比 5.47–6.74，小字也清晰） */
+    --xz-tone-plain-fill: #f4f5f7;
+    --xz-tone-plain-strip: #ccd3dd;
+    --xz-tone-plain-text: #39424f;
+    --xz-tone-mint-fill: #f1f8f3;
+    --xz-tone-mint-strip: #b6dfc3;
+    --xz-tone-mint-text: #1d5533;
+    --xz-tone-sand-fill: #fdfaf0;
+    --xz-tone-sand-strip: #f2dd9e;
+    --xz-tone-sand-text: #6d4d0c;
+    --xz-tone-rose-fill: #fef5f2;
+    --xz-tone-rose-strip: #f3c9ba;
+    --xz-tone-rose-text: #8c2f18;
+
     --xingzhou-bg: var(--b3-theme-background);
     --xingzhou-surface: var(--b3-theme-surface);
     --xingzhou-surface-light: var(--b3-theme-surface-light);
@@ -1333,20 +1350,42 @@
 .xz-checklist-view-switch button.active { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 600; }
 .xz-checklist-error { margin: 0 0 10px; padding: 9px 11px; border-left: 3px solid var(--xingzhou-danger); color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 8%, var(--xingzhou-panel)); font-size: 12px; }
 .xz-checklist-native-layout, .xz-checklist-paper-layout { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 10px; align-items: start; }
-.xz-checklist-native-list, .xz-checklist-summary { border: 1px solid var(--xingzhou-strong-border); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-panel); box-shadow: var(--xingzhou-panel-shadow); }
-.xz-checklist-native-list { min-width: 0; overflow: hidden; }
-.xz-checklist-native-list > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--xingzhou-border); background: var(--xingzhou-panel-subtle); }
+/* 右侧「今日进度」仍是卡片；左侧清单去掉外层大框，只由条目自己的圆角卡片构成 */
+.xz-checklist-summary { border: 1px solid var(--xingzhou-strong-border); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-panel); box-shadow: var(--xingzhou-panel-shadow); }
+.xz-checklist-native-list { min-width: 0; }
+.xz-checklist-native-list > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 2px 10px; }
 .xz-checklist-native-list > header h3 { margin: 0; color: var(--xingzhou-primary); font-size: 18px; }
 .xz-checklist-native-list > header p { margin: 3px 0 0; color: var(--xingzhou-muted); font-size: 13px; }
 .xz-checklist-native-list > header > span { color: var(--xingzhou-muted); font-size: 12px; }
-.xz-checklist-native-entries { padding: 2px 14px 12px; }
-.xz-checklist-native-entry { display: grid; grid-template-columns: 145px minmax(0, 1fr); border-bottom: 1px solid var(--xingzhou-border); }
-.xz-checklist-native-entry:last-child { border-bottom: 0; }
-.xz-checklist-native-time { padding: 14px 14px 12px 2px; color: var(--xingzhou-muted); font-size: 14px; font-variant-numeric: tabular-nums; }
-.xz-checklist-native-content { min-width: 0; padding: 11px 0; }
+.xz-checklist-native-entry { display: grid; grid-template-columns: 40px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--xingzhou-border); border-radius: 12px; box-shadow: var(--xingzhou-panel-shadow); }
+.xz-checklist-native-entry:last-child { border-bottom: 1px solid var(--xingzhou-border); }
+/*
+ * 条目类型：左侧竖排标签 + 类型底色。
+ * 四个 tone 也是纸质视图用的同一套（mint／sand／rose／plain），
+ * 这里用更深的实色块 + 反白文字，让类型在行舟视图里也一眼可辨。
+ */
+.xz-checklist-native-entries { display: grid; gap: 8px; padding: 8px 10px 12px; }
+.xz-checklist-native-entry.t-plain { background: var(--xz-tone-plain-fill); }
+.xz-checklist-native-entry.t-mint { background: var(--xz-tone-mint-fill); }
+.xz-checklist-native-entry.t-sand { background: var(--xz-tone-sand-fill); }
+.xz-checklist-native-entry.t-rose { background: var(--xz-tone-rose-fill); }
+.xz-type-strip { display: flex; align-items: center; justify-content: center; padding: 8px 0; }
+.xz-type-strip span { font-size: 12px; letter-spacing: 4px; writing-mode: vertical-rl; text-orientation: upright; }
+/* 竖排标签：浅底 + 深色字，与条目底色同色系但更深一档 */
+.xz-type-strip { background: var(--xz-tone-plain-strip); }
+.xz-type-strip span { color: var(--xz-tone-plain-text); }
+.xz-checklist-native-entry.t-mint .xz-type-strip { background: var(--xz-tone-mint-strip); }
+.xz-checklist-native-entry.t-sand .xz-type-strip { background: var(--xz-tone-sand-strip); }
+.xz-checklist-native-entry.t-rose .xz-type-strip { background: var(--xz-tone-rose-strip); }
+.xz-checklist-native-entry.t-mint .xz-type-strip span { color: var(--xz-tone-mint-text); }
+.xz-checklist-native-entry.t-sand .xz-type-strip span { color: var(--xz-tone-sand-text); }
+.xz-checklist-native-entry.t-rose .xz-type-strip span { color: var(--xz-tone-rose-text); }
+
+.xz-checklist-native-content { min-width: 0; padding: 12px 16px 12px 17px; }
 .xz-checklist-native-title { display: flex; align-items: center; gap: 8px; }
 .xz-checklist-native-title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
 .xz-checklist-native-title > span { flex: 0 0 auto; color: var(--xingzhou-muted); font-size: 12px; }
+.xz-checklist-native-when { padding: 1px 7px; border-radius: 5px; background: color-mix(in srgb, var(--xingzhou-text) 7%, transparent); font-variant-numeric: tabular-nums; }
 .xz-checklist-native-title > div { display: flex; margin-left: auto; }
 .xz-checklist-native-title button { padding: 2px 5px; border: 0; color: var(--xingzhou-muted); background: transparent; cursor: pointer; font-size: 12px; }
 .xz-checklist-native-title button:disabled { opacity: .35; cursor: default; }
@@ -1356,7 +1395,16 @@
 .xz-checklist-training-choice > button.active { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 700; }
 .xz-checklist-training-choice > small { color: var(--xingzhou-muted); font-size: 11px; }
 .xz-checklist-native-reminders { display: grid; gap: 1px; margin-top: 5px; }
-.xz-checklist-native-reminders label, .xz-checklist-paper section > label { min-width: 0; display: grid; grid-template-columns: 102px minmax(0, 1fr); align-items: start; gap: 7px; }
+.xz-checklist-add-reminder { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; margin-top: 3px; padding: 2px 8px; border: 1px dashed var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: transparent; cursor: pointer; font-size: 12px; }
+.xz-checklist-add-reminder:hover { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); }
+.xz-checklist-add-reminder:disabled { opacity: 0.55; cursor: wait; }
+.xz-checklist-add-reminder__box { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.xz-checklist-add-reminder__box input { box-sizing: border-box; min-width: 0; flex: 1 1 auto; min-height: 28px; padding: 3px 8px; border: 1px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-panel); font: inherit; font-size: 13px; }
+.xz-checklist-add-reminder__box button { min-height: 28px; padding: 3px 10px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-panel); cursor: pointer; font-size: 12px; white-space: nowrap; }
+.xz-checklist-add-reminder__box button.primary { border-color: var(--xingzhou-primary); color: var(--b3-theme-on-primary, #fff); background: var(--xingzhou-primary); }
+.xz-checklist-add-reminder__box button:disabled { opacity: 0.55; cursor: wait; }
+.xz-checklist-native-reminders label { min-width: 0; display: grid; grid-template-columns: auto 102px minmax(0, 1fr) auto; align-items: center; gap: 9px; }
+.xz-checklist-paper section > label { min-width: 0; display: grid; grid-template-columns: 86px minmax(0, 1fr); align-items: start; gap: 7px; }
 .xz-checklist-native-reminders label { padding: 5px 6px 5px 0; border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); font-size: 14px; line-height: 1.55; }
 .xz-checklist-native-reminders label:hover { background: var(--xingzhou-surface-light); }
 .xz-checklist-state-select { box-sizing: border-box; width: 100%; min-height: 27px; margin: 0; padding: 2px 5px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel); cursor: pointer; font-size: 11px; }
@@ -1374,6 +1422,22 @@
 .xz-checklist-progress i { display: block; height: 100%; background: var(--b3-theme-success, var(--xingzhou-primary)); transition: width .2s ease; }
 .xz-checklist-state-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: -3px 0 12px; color: var(--xingzhou-muted); font-size: 11px; text-align: center; }
 .xz-checklist-state-summary span { padding: 3px 1px; border-radius: var(--xingzhou-radius); background: var(--xingzhou-surface-light); }
+.xz-checklist-type-legend { margin-top: 10px; padding: 10px 11px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel-subtle); }
+.xz-checklist-type-legend h4 { margin: 0 0 7px; color: var(--xingzhou-muted); font-size: 12px; font-weight: 500; }
+.xz-checklist-type-legend dl { display: grid; gap: 6px; margin: 0; }
+.xz-checklist-type-legend > dl > div { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 7px; align-items: start; }
+.xz-checklist-type-legend i { width: 10px; height: 10px; margin-top: 4px; border-radius: 2px; background: var(--xz-tone-plain-strip); }
+.xz-checklist-type-legend div.mint i { background: var(--xz-tone-mint-strip); }
+.xz-checklist-type-legend div.sand i { background: var(--xz-tone-sand-strip); }
+.xz-checklist-type-legend div.rose i { background: var(--xz-tone-rose-strip); }
+.xz-checklist-type-legend dt { font-size: 12px; }
+.xz-checklist-type-legend dd { grid-column: 2; margin: 1px 0 0; color: var(--xingzhou-muted); font-size: 11px; line-height: 1.5; }
+.xz-checklist-type-legend > p { margin: 8px 0 0; color: var(--xingzhou-muted); font-size: 11px; line-height: 1.5; }
+.xz-checklist-type-help { position: relative; display: none; justify-content: flex-end; margin-top: 8px; }
+.xz-checklist-type-help__button { width: 28px; height: 28px; padding: 0; border: 1px solid var(--xingzhou-border); border-radius: 50%; color: var(--xingzhou-muted); background: var(--xingzhou-panel); cursor: pointer; font-size: 13px; line-height: 1; }
+.xz-checklist-type-help__button[aria-expanded="true"] { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); }
+.xz-checklist-type-help__popover { position: absolute; z-index: 5; right: 0; bottom: 34px; width: 230px; padding: 10px 11px; border: 1px solid var(--xingzhou-strong-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel); box-shadow: 0 8px 22px color-mix(in srgb, var(--xingzhou-text) 18%, transparent); }
+.xz-checklist-type-help__popover h4 { margin: 0 0 7px; color: var(--xingzhou-muted); font-size: 12px; font-weight: 500; }
 .xz-checklist-summary p { margin: 0; padding: 10px; border-left: 3px solid var(--xingzhou-primary); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; line-height: 1.6; }
 .xz-checklist-reset-note { margin: 10px 0 0; color: var(--xingzhou-muted); text-align: center; font-size: 12px; }
 
@@ -1395,11 +1459,11 @@
 .xz-checklist-paper-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 14px; align-items: start; }
 .xz-checklist-paper-columns > div { display: grid; gap: 8px; }
 .xz-checklist-paper section { position: relative; overflow: hidden; padding: 9px 10px 8px 16px; border: 1px solid #d7e0dd; border-radius: 9px; background: #fefdfc; }
-.xz-checklist-paper section::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 6px; background: #527e79; }
-.xz-checklist-paper section.mint { background: #edf5f2; }
-.xz-checklist-paper section.sand { background: #f7f1e6; }
-.xz-checklist-paper section.rose { background: #f8ece8; }
-.xz-checklist-paper section.rose::before { background: #b85f48; }
+.xz-checklist-paper section::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 6px; background: var(--xz-tone-mint-strip); }
+.xz-checklist-paper section.mint { background: var(--xz-tone-mint-fill); }
+.xz-checklist-paper section.sand { background: var(--xz-tone-sand-fill); }
+.xz-checklist-paper section.rose { background: var(--xz-tone-rose-fill); }
+.xz-checklist-paper section.rose::before { background: var(--xz-tone-rose-strip); }
 .xz-checklist-paper section > header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .xz-checklist-paper section > header > span { flex: 0 0 auto; padding: 3px 11px; border: 1px solid #355d59; border-radius: 999px; color: #fff; background: #527e79; font-size: 12px; }
 .xz-checklist-paper section.rose > header > span { border-color: #8d4938; background: #b85f48; }
@@ -1482,6 +1546,8 @@
 @keyframes xz-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 980px) {
+    .xz-checklist-type-legend { display: none; }
+    .xz-checklist-type-help { display: flex; }
     .xz-quick-capture-notice, .xz-data-source { display: none; }
     .xz-shell-header { gap: 10px; padding-inline: 12px; }
     .xz-shell-brand .xz-eyebrow { display: none; }
@@ -1513,6 +1579,11 @@
     .xz-checklist-header { align-items: flex-start; flex-direction: column; }
     .xz-checklist-native-layout, .xz-checklist-paper-layout { grid-template-columns: 1fr; }
     .xz-checklist-summary { position: static; }
+}
+
+@media (max-width: 760px) {
+    .xz-checklist-native-entry { grid-template-columns: 36px minmax(0, 1fr); }
+    .xz-checklist-native-content { padding: 10px 12px 10px 13px; }
 }
 
 @media (max-width: 620px) {
@@ -1562,9 +1633,13 @@
     .xz-relationship-workspace { display: block; }
     .xz-relationship-canvas { height: 460px; }
     .xz-relationship-inspector { max-height: none; border-top: 1px solid var(--xingzhou-strong-border); border-left: 0; }
+    .xz-checklist-add-reminder { width: 100%; min-height: 32px; justify-content: center; }
+    .xz-checklist-add-reminder__box { flex-wrap: wrap; }
+    .xz-checklist-add-reminder__box input { flex: 1 1 100%; min-height: 32px; }
+    .xz-checklist-add-reminder__box button { min-height: 32px; flex: 1 1 auto; }
     .xz-checklist-actions { width: 100%; align-items: stretch; flex-direction: column; }
     .xz-checklist-view-switch { padding: 0 0 8px; border-left: 0; border-bottom: 1px solid var(--xingzhou-border); }
-    .xz-checklist-native-entry { grid-template-columns: 1fr; }
+    .xz-checklist-native-entry { grid-template-columns: 34px minmax(0, 1fr); }
     .xz-checklist-native-time { padding-bottom: 0; }
     .xz-checklist-paper { padding: 18px 12px 12px; }
     .xz-checklist-paper::before { margin: -18px -12px 13px; }
@@ -2256,6 +2331,90 @@
     .xz-trend-summary { gap: 3px 10px; }
 }
 
+/* ===== 边界提醒面板（今日记录内联，按时间浮出易漏的离散事件） ===== */
+.xz-daily-boundary-panel { padding: 11px 14px 13px; border-bottom: 1px solid var(--xingzhou-border); background: color-mix(in srgb, var(--xingzhou-primary) 5%, var(--xingzhou-panel)); }
+.xz-daily-boundary-panel.is-empty { padding: 8px 14px; background: transparent; }
+.xz-boundary-empty { margin: 0; color: var(--xingzhou-muted); font-size: 12px; }
+.xz-daily-boundary-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.xz-daily-boundary-panel > header > div { display: grid; gap: 2px; }
+.xz-daily-boundary-panel > header strong { font-size: 14px; }
+.xz-daily-boundary-panel > header small { color: var(--xingzhou-muted); font-size: 12px; }
+.xz-boundary-link { flex: 0 0 auto; padding: 4px 8px; border: 0; border-radius: var(--xingzhou-radius); color: var(--xingzhou-primary); background: transparent; cursor: pointer; font-size: 12px; }
+.xz-boundary-note { margin: 8px 0 0; color: var(--xingzhou-muted); font-size: 12px; }
+.xz-boundary-error { margin: 8px 0 0; padding: 6px 9px; border-radius: var(--xingzhou-radius); color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 10%, transparent); font-size: 12px; }
+.xz-boundary-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }
+.xz-boundary-item { position: relative; min-width: 0; min-height: 44px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 9px 7px 12px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel); }
+.xz-boundary-item::before { content: ""; position: absolute; top: 7px; bottom: 7px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: transparent; }
+.xz-boundary-item.is-overdue { border-color: color-mix(in srgb, var(--xingzhou-danger) 32%, var(--xingzhou-border)); }
+.xz-boundary-item.is-overdue::before { background: var(--xingzhou-danger); }
+.xz-boundary-item.is-soon::before { background: var(--xingzhou-primary); }
+.xz-boundary-item.is-later::before { background: color-mix(in srgb, var(--xingzhou-muted) 45%, transparent); }
+.xz-boundary-item.is-later { background: var(--xingzhou-panel-subtle); }
+.xz-boundary-item.is-later .xz-boundary-item__body strong { color: var(--xingzhou-muted); font-weight: 500; }
+.xz-boundary-item.is-done { opacity: 0.6; }
+.xz-boundary-item__time { color: var(--xingzhou-muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.xz-boundary-item.is-soon .xz-boundary-item__time { color: var(--xingzhou-primary); font-weight: 600; }
+.xz-boundary-item.is-overdue .xz-boundary-item__time { color: var(--xingzhou-danger); font-weight: 600; }
+.xz-boundary-item__body { min-width: 0; display: grid; gap: 1px; }
+.xz-boundary-item__body strong { overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.xz-boundary-item.is-done .xz-boundary-item__body strong { text-decoration: line-through; }
+.xz-boundary-item__body small { overflow: hidden; color: var(--xingzhou-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.xz-boundary-item.is-overdue .xz-boundary-item__body small { color: var(--xingzhou-danger); }
+.xz-boundary-item__done { flex: 0 0 auto; min-width: 40px; min-height: 40px; padding: 5px 8px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel); cursor: pointer; font-size: 12px; white-space: nowrap; }
+.xz-boundary-item__done:hover { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); }
+.xz-boundary-item__done:disabled { opacity: 0.55; cursor: wait; }
+.xz-boundary-item.is-done .xz-boundary-item__done { border-color: transparent; color: var(--xingzhou-primary); background: transparent; }
+.xz-boundary-more { margin: 9px 0 0; color: var(--xingzhou-muted); font-size: 12px; }
+
+/*
+ * Checklist 视图里的边界提醒时间编辑。
+ *
+ * 这个输入框是 label 网格的第三个子元素，如果按普通元素排就会被挤到下一行、
+ * 让每条提醒都多占一整行（文本 102px + 内容 1fr 的布局没有它的位置）。
+ * 因此它绝对定位在行内右上角，默认完全不可见也不占位，只在三种情况下浮出：
+ * 悬停该行、键盘聚焦该行（:focus-within）、或这条已经设了时间。
+ * 同时隐藏原生 time 控件的时钟按钮与空值占位，避免出现「--:-- + 时钟图标」。
+ */
+/*
+ * 边界提醒时间入口：紧挨在状态按钮**前面**。
+ * 放在行尾（最右）时要横跨整行去读，还得自己对齐是哪一行的，宽屏上很累；
+ * 放在状态按钮前，时刻与它修饰的那条提醒天然在同一处视线里。
+ * 未设置时只是一个很淡的虚线占位（且不显示 --:--），设置后变成实心胶囊。
+ */
+/* 行内删除：默认隐身，悬停或聚焦该行时出现，避免整列都是 × */
+.xz-checklist-remove-reminder { flex: 0 0 auto; width: 22px; min-height: 22px; padding: 0; border: 1px solid transparent; border-radius: 5px; color: var(--xingzhou-muted); background: transparent; cursor: pointer; font-size: 13px; line-height: 1; opacity: 0; transition: opacity .12s ease; }
+.xz-checklist-native-reminders label:hover .xz-checklist-remove-reminder,
+.xz-checklist-native-reminders label:focus-within .xz-checklist-remove-reminder { opacity: 1; }
+.xz-checklist-remove-reminder:hover { border-color: color-mix(in srgb, var(--xingzhou-danger) 45%, var(--xingzhou-border)); color: var(--xingzhou-danger); }
+.xz-checklist-remove-reminder.is-confirming { width: auto; padding: 0 7px; border-color: var(--xingzhou-danger); color: var(--b3-theme-on-error, #fff); background: var(--xingzhou-danger); font-size: 11px; opacity: 1; }
+.xz-checklist-remove-reminder:disabled { opacity: .5; cursor: wait; }
+@media (any-pointer: coarse) { .xz-checklist-remove-reminder { opacity: 1; } }
+
+.xz-checklist-native-reminders .xz-checklist-boundary-time { box-sizing: border-box; width: 48px; min-height: 22px; margin: 0; padding: 0; border: 1px dashed var(--xingzhou-border); border-radius: 5px; color: var(--xingzhou-muted); background: transparent; font-size: 10px; font-variant-numeric: tabular-nums; text-align: center; cursor: pointer; }
+.xz-checklist-native-reminders .xz-checklist-boundary-time:hover { border-color: var(--xingzhou-primary); }
+.xz-checklist-native-reminders .xz-checklist-boundary-time.is-set { border-style: solid; border-radius: 5px; border-color: color-mix(in srgb, var(--xingzhou-primary) 45%, var(--xingzhou-border)); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 600; }
+.xz-checklist-native-reminders .xz-checklist-boundary-time::-webkit-calendar-picker-indicator { display: none; }
+/* 未设置时不显示 --:--，避免整列都是噪音；悬停或聚焦时才露出可填写的提示 */
+.xz-checklist-native-reminders .xz-checklist-boundary-time:not(.is-set)::-webkit-datetime-edit { color: transparent; }
+.xz-checklist-native-reminders .xz-checklist-boundary-time:not(.is-set):hover::-webkit-datetime-edit,
+.xz-checklist-native-reminders .xz-checklist-boundary-time:not(.is-set):focus::-webkit-datetime-edit { color: var(--xingzhou-muted); }
+.xz-checklist-boundary-badge { margin-left: 6px; padding: 1px 5px; border-radius: 999px; color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-size: 9px; font-style: normal; white-space: nowrap; }
+.xz-checklist-boundary-clear { min-width: 26px; min-height: 26px; padding: 0; border: 0; border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: transparent; cursor: pointer; font-size: 13px; }
+.xz-checklist-boundary-clear:hover { color: var(--xingzhou-danger); }
+
+@media (max-width: 980px) {
+    .xz-boundary-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+    .xz-daily-boundary-panel > header { flex-direction: column; gap: 4px; }
+    .xz-daily-boundary-panel > header .xz-boundary-actions { align-self: flex-end; }
+    .xz-boundary-list { grid-template-columns: minmax(0, 1fr); }
+    .xz-boundary-item { min-height: 52px; }
+    .xz-boundary-item__done { min-width: 44px; min-height: 44px; }
+    .xz-boundary-item__body small { white-space: normal; }
+}
+
 @media print {
     .xz-trend-toolbar { display: none !important; }
     .xz-trend-view { padding: 0 !important; }
@@ -2269,6 +2428,7 @@
     .xz-checklist-paper-layout { display: block !important; }
     .xz-checklist-paper { width: 100% !important; display: block !important; border: 0 !important; box-shadow: none !important; }
     .xz-checklist-paper section > header button { display: none !important; }
+    .xz-checklist-type-legend, .xz-checklist-type-help { display: none !important; }
 }
 
 /* ===== 图片待清理：入口面板、条目角标与确认窗 ===== */

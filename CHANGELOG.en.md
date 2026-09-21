@@ -2,6 +2,43 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## 4.0.0 - 2026-09-21
+
+### Added
+
+- **Boundary reminder panel (Life Rhythm › Today's Record)**: surfaces, by time of day, the scattered events that fall through the cracks even when you know the overall routine by heart — fish oil with meals, glasses into the backpack, meals on time, and the end-of-work shutdown. The panel sits at the top of the record card, before the missing-fields panel: it answers "what should I do now", not "what do I still need to fill in".
+  - **Tiered display**: overdue items (within 3 hours) and items due within 60 minutes come first, marked with a red or primary-coloured bar and "should be done · 32 minutes ago" / "in 28 minutes". Later items are **listed outright** (muted, up to three) and can be confirmed early; anything further out is only counted, and moves to the front when its time comes.
+  - **It never goes invisible**: the panel is always present, and when nothing is due the headline reads "Next up: lunch at 12:10". It collapses to a single line only when nothing is configured for the day, or when everything is confirmed and nothing else remains.
+  - **One-tap confirmation**: "○ Done" writes into the checklist's day state and tapping again undoes it. It shares one copy of data and check state with the Daily Checklist view, so confirming in either place updates the other immediately; "Go to today's Checklist ›" jumps straight there.
+  - **Non-intrusive**: no system notifications, no sound, no modal dialogs. Time-based judgement applies to today only — on other dates the panel merely lists what was configured and marks it as not a reminder.
+  - **Advances every minute**: the window is recomputed once a minute (about 3 µs of pure in-memory work — no I/O, no polling). Items more than three hours overdue stop being pushed, so the evening does not nag about the morning.
+- **Reminders now have a stable identity: a boundary time is bound to *which reminder*, not to *which row***. This fixes a problem hit in practice — with row numbers as the anchor, inserting a row above a reminder, deleting one, or reordering silently moved the time onto a different task, and it still looked perfectly normal. Each reminder now carries its own id, so **inserting, deleting, reordering and rewording never displace a time**; only deleting the reminder itself removes its time.
+- **Default templates ship with boundary times** (one set each for workdays, Saturdays, Sundays): fish oil with meals at 08:45 / 12:10 / 18:00, clocking off at 17:00, casein at 20:00, glasses into the backpack at 20:15, and weekend training ending at 07:30.
+- **Inline add and delete for reminders in the Checklist**: each entry's reminder list ends with "＋ Add a reminder", which **expands an input in place** (no dialog); Enter saves and keeps it open for consecutive entries, Esc cancels. Hovering a row reveals "×" on the right; one tap turns it into "Confirm delete" and a second tap deletes (always visible on touch devices). Deleting a reminder also removes its boundary time.
+- **Entry type labels**: four types — Plain, Rhythm cue, Preparation, Boundary — are marked in the Xingzhou view by a vertical colour block on the left, over a very faint entry tint. **The colour identity lives in the small label block**: the tint sits at only 1.04–1.09 contrast against the white card, so a full screen of entries stays restful. A legend under "Today's progress" defines all four; on narrow screens it collapses into a "?" button with a popover, and the paper view reuses the same palette.
+- **The boundary-time entry moved in front of the state selector**: it used to sit at the end of the row, which on a wide screen meant scanning across the whole line and then working out which row it belonged to. Each row now reads "time → state → reminder text", so the time sits in the same line of sight as the reminder it annotates. When unset it is only a faint dashed placeholder with no `--:--`; once set it becomes a solid chip. The separate time column was removed and its width returned to the content.
+
+### Changed
+
+- **Checklist data model upgrade**: `reminders` and `trainingChoices` changed from string arrays to `{ id, text }`, and entries gained an optional `boundaries` map keyed by `${entryId}::${reminderId}`. Upgrades migrate automatically: legacy positional keys are resolved to the id of **the reminder that was there at the time**, and legacy check-state keys migrate alongside, so **boundary times and check state already in effect are not lost once during the upgrade**. Invalid times, out-of-range indices and keys that resolve to no reminder are dropped rather than guessed.
+- **Tighter default-merging rule**: defaults are applied only when the whole `boundaries` field is absent (genuinely old data). If the field exists but lacks a given default key, the user deleted that reminder or cancelled its time — **defaults are no longer pushed back in**.
+- **`wd-prepare` / `sat-prepare` / `sun-prepare` split "glasses into the backpack" onto its own line**, with the boundary time aligned to it (it used to be buried inside the "fill the water purifier" sentence and could not be reminded separately).
+- **Visual rework of the Checklist in the Xingzhou view**: entries became individual rounded cards (the outer container frame is gone); type text is 12px with 4px letter spacing; the gap between the colour block and the content is 17px on wide screens and 13px on narrow ones.
+
+### Fixed
+
+- **Style edits silently overridden**: `.xz-checklist-native-content` and `.xz-checklist-native-entries` each had two duplicate rules, the later one overriding the earlier (which showed up as "I changed the spacing and nothing happened"). Merged — one rule per class now.
+- **Deleting a boundary reminder let the default bring it back**: any missing key used to be treated as "old data that has not been configured yet" and refilled from defaults. Now handled by the tighter rule above.
+- **Rewording a reminder lost its time**: the reconciliation logic preserved ids by exact text match, so changing one character looked like "deleted the old one and added a new one". It is now a two-step pairing — text match first (stable across inserts, deletes and moves), then one-to-one pairing by key position for the remainder (a reword keeps its id), and only then are new ids issued.
+- **Early-morning runs no longer treat last night's times as today's overdue items**: opening the panel at 02:00 no longer reports a 20:15 boundary as "5 hours 45 minutes ago".
+
+### Tests
+
+- Tests grew from 478 to 527, with four new files: boundary windows and wording (`tests/checklist-boundary.test.ts`), a **binding regression suite proving edits do not displace times** (`tests/checklist-boundary-binding.test.ts`, starting from legacy-format data and running read → edit → save → read again while asserting inserts, deletes, moves, rewords and row removal), panel rendering and interaction (`tests/DailyBoundaryPanel.test.ts`), and Today's Record integration including confirmation write-back and cross-view consistency (`tests/DailyRhythmBoundary.test.ts`).
+- Added a self-check on default data: every default boundary reminder must resolve to a reminder that actually exists, so defaults cannot be edited into pointing at the wrong row.
+- Fixed a pre-existing test that **failed only on Mondays**: the week view offers "make up for it" only on slices scheduled earlier in the current week, and on a Monday the week starts that same day, so the case could never pass. It now skips on Mondays, and `tests/WeekMakeupFixedClock.test.ts` covers the same behaviour deterministically by pinning the system clock to a Wednesday.
+- Component tests cover the full inline-add flow (expand → Enter to add → stays open and cleared → Esc to collapse), the two-step inline delete and the "keep at least one reminder" rule, unchanged boundary binding after adding or deleting, and the four type labels and legend rendering by tone.
+
 ## 3.0.0 - 2026-09-20
 
 ### Added
