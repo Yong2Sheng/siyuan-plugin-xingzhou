@@ -2,6 +2,30 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## 4.1.0 - 2026-09-21
+
+Current Action Details is now a set of structured fields, and Transactions gained an item-level to-do list.
+
+### Added
+
+- **A to-do list on Transactions and Ideas**: three states (check = done, **✕ = dropped in place and restorable**, delete is a separate confirmation), progress reads "done x/y" with **dropped items excluded from the denominator**; each row expands into notes/results and reference links (both accept pasted images), "Put into today" turns that item into today's execution slice, and "Multi-select" drops or schedules several at once. The footer box adds continuously on Enter, and **pasting multiple lines creates multiple items**. Only Transactions and Ideas show the list; Projects and Areas do not.
+- **Finishing a Transaction now requires an explicit decision**: with unfinished slices or to-dos, marking it complete opens a confirmation layer that lists them and asks you to drop everything and complete, keep them as outstanding (one leftover note is written into Current State), or record why you are closing it. With nothing unfinished it completes directly, with no extra step. It is deliberately not a hard block: a slice marked missed or abandoned can never become completed again, so blocking would leave deletion as the only way to close such a transaction.
+- **Current Action Details is structured** (replacing the single long block): **Current State** (an automatic line with slice progress, to-do progress, last update and days to the deadline, plus a hand-written "where I stopped / what blocks me"), **Background & constraints**, **Prompt** (copyable), **Staged results** (dated entries, newest first), **Guidance & ideas**, and a collapsed **Definition of done**. Next Action remains a separate field rendered as the last field card, so "what is next" is written exactly once.
+- **Action detail templates**: save the current structure as a template (field text only, no staged results) and apply it from any Transaction or Idea; applying only fills **empty** fields and never overwrites what is written. Templates live in the plugin's own `action-templates.json`.
+- Every detail field supports the large editor window: long text, pasted or dropped screenshots, Markdown rendering, and Cmd/Ctrl+Enter to save. Filled fields show a one-line preview until expanded; empty ones take a single line.
+
+### Changed
+
+- **Data model extended**: items in `work-items.json` gained `todos` and `actionDetail`. The old `currentAction` long text is migrated once into "Guidance & ideas", with a "legacy details migrated" line left in Current State. The migration is idempotent, overwrites nothing already written, and the original field is kept as compatible text (image cleanup, storage checkup and the missing-field notice still read it).
+- **The "task" type is retired**: it no longer appears in creation options, the type select, the role legend, or parent candidates; the hierarchy is Area → Project → Transaction/Idea. Any legacy task still renders as "task (legacy type)" and can be re-typed by hand — no item's type is changed automatically.
+- The details panel was re-laid out: the to-do list sits above the action details, each detail field is its own small card, redundant labels were removed, and empty fields no longer reserve a dashed box.
+- Image cleanup and the storage checkup now scan every detail field, staged results and to-do notes, de-duplicated by path.
+
+### Fixed
+
+- **The to-do list stopped rendering entirely**: while reworking the details panel the `<TodoListCard>` tag was removed by accident, yet its import and logic remained, so the build and type check passed while the list was invisible. Restored, with three regression tests (position above the action details, immediate save on check, Ideas have it and Projects do not).
+- **Saving a template failed silently**: the name was asked through `window.prompt`, which the Electron renderer does not support (it returns null), so the "if null then return" guard made the button do nothing. It now uses an input inside the panel, and applying a template reports how many empty fields were filled.
+
 ## 4.0.0 - 2026-09-21
 
 ### Added

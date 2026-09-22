@@ -1,6 +1,7 @@
 import { listActionImages, removeImageLine, type ActionImageItem } from "./action-images";
+import type { ActionDetail } from "./action-detail";
 import { isClosed } from "./tree";
-import type { WorkItem } from "./work-items";
+import type { WorkItem, WorkItemChanges } from "./work-items";
 
 /** 条目进入终态后图片的宽限期：到期前只提醒，删除前一律再确认一次。 */
 export const IMAGE_CLEANUP_GRACE_DAYS = 7;
@@ -16,13 +17,20 @@ export type ActionImageCleanup = {
 
 export type ImageCleanupActionField = "currentAction" | "nextAction";
 
+/** 清理目标字段：两个旧的行动字段，加上结构化细则的五个文本字段。 */
+export type ImageCleanupTargetField = ImageCleanupActionField | keyof Pick<ActionDetail, "currentState" | "background" | "prompt" | "guidance" | "definition">;
+
+const DETAIL_CLEANUP_FIELDS: Array<keyof Pick<ActionDetail, "currentState" | "background" | "prompt" | "guidance" | "definition">> = [
+    "currentState", "background", "prompt", "guidance", "definition",
+];
+
 export type ImageCleanupTextUpdate = {
     itemId: string;
-    field: ImageCleanupActionField;
+    field: ImageCleanupTargetField;
     /** 目标细则文本。 */
     text: string;
-    /** 用摘掉图片引用后的内容替换对应字段。 */
-    changes: Partial<Record<ImageCleanupActionField, string>>;
+    /** 可直接交给 saveItem 的变更。 */
+    changes: WorkItemChanges;
     /** 这条细则里将被删除的图片路径。 */
     removable: string[];
     /** 这条细则里保留（改由笔记或其它条目承担）的图片路径。 */
@@ -62,8 +70,26 @@ export function buildImageCleanupPlan(
         const changes: ImageCleanupTextUpdate["changes"] = {};
         const textAfter: string[] = [];
 
-        for (const field of ["currentAction", "nextAction"] as ImageCleanupActionField[]) {
-            const source = item[field];
+        /*
+         * 结构化之后图片可能出现在细则的任意字段里，清理必须逐个字段处理。
+         * 具体字段名（detailFields）只在这里用于写回，其余流程看到的都是可交给 saveItem 的 changes。
+         */
+        const detailBefore: ActionDetail = {
+            currentState: item.actionDetail?.currentState ?? "",
+            background: item.actionDetail?.background ?? "",
+            prompt: item.actionDetail?.prompt ?? "",
+            guidance: item.actionDetail?.guidance ?? "",
+            definition: item.actionDetail?.definition ?? "",
+            outcomes: item.actionDetail?.outcomes ?? [],
+            updatedAt: item.actionDetail?.updatedAt ?? null,
+            migratedFromCurrentActionAt: item.actionDetail?.migratedFromCurrentActionAt ?? null,
+        };
+        const detailAfter: ActionDetail = { ...detailBefore };
+        const detailFields = new Set<ImageCleanupTargetField>();
+        const legacyAfter: Partial<Record<ImageCleanupActionField, string>> = {};
+
+        for (const field of [...(["currentAction", "nextAction"] as ImageCleanupActionField[]), ...DETAIL_CLEANUP_FIELDS] as ImageCleanupTargetField[]) {
+            const source = field === "currentAction" || field === "nextAction" ? item[field] : detailBefore[field];
             const scoped = listActionImages(source).filter((image) => Boolean(image.src) && registered.has(image.src));
             if (scoped.length === 0) continue;
 
@@ -80,16 +106,24 @@ export function buildImageCleanupPlan(
                 next = removeImageLine(next, image.syntax);
                 if (!removableHere.includes(image.src)) removableHere.push(image.src);
             }
-            changes[field] = next;
+            if (field === "currentAction" || field === "nextAction") legacyAfter[field] = next;
+            else {
+                detailAfter[field] = next;
+                detailFields.add(field);
+            }
             textAfter.push(next);
         }
 
-        if (Object.keys(changes).length === 0) continue;
+        if (Object.keys(legacyAfter).length === 0 && detailFields.size === 0) continue;
+        const changeSet: WorkItemChanges = { ...legacyAfter };
+        if (detailFields.size > 0) changeSet.actionDetail = detailAfter;
         plan.push({
             itemId,
-            field: changes.currentAction !== undefined ? "currentAction" : "nextAction",
+            field: legacyAfter.currentAction !== undefined ? "currentAction"
+                : legacyAfter.nextAction !== undefined ? "nextAction"
+                    : [...detailFields][0] ?? "currentState",
             text: textAfter.join("\n"),
-            changes,
+            changes: changeSet,
             removable: removableHere,
             kept: keptHere,
             hasImagesAfter: textAfter.some((text) => listActionImages(text).some((image) => Boolean(image.src))),
@@ -142,11 +176,51 @@ export type ActionImageCleanupEntry = {
 };
 
 /** 登记范围内、当前仍出现在细则里的图片。 */
+/**
+ * 条目里所有可能引用图片的文本：旧的行动字段 + 结构化细则的每个字段 + 待办备注。
+ *
+ * 结构化以后图片不再只出现在 currentAction 里，清理与图库体检必须扫描全部文本，
+ * 否则「待办里贴的图」永远进不了清理范围，也统计不到体积。
+ */
+export function itemImageTexts(item: WorkItem): string[] {
+    const detail = item.actionDetail;
+    const texts = [
+        item.currentAction,
+        item.nextAction,
+        detail?.currentState ?? "",
+        detail?.background ?? "",
+        detail?.prompt ?? "",
+        detail?.guidance ?? "",
+        detail?.definition ?? "",
+    ];
+    for (const outcome of detail?.outcomes ?? []) texts.push(outcome.text);
+    for (const todo of item.todos ?? []) texts.push(todo.note);
+    return texts.filter((text) => Boolean(text && text.trim()));
+}
+
+/**
+ * 条目里出现的全部图片：按路径去重，且**只保留真实资源路径**。
+ *
+ * 去重是必须的：结构化之后旧字段（currentAction 兼容文本）与新字段会描述同一张图，
+ * 不去重会让清理列表与确认列表出现重复项，keyed each 也会直接报重复 key。
+ */
+export function listItemImages(item: WorkItem): ActionImageItem[] {
+    const seen = new Set<string>();
+    const result: ActionImageItem[] = [];
+    for (const text of itemImageTexts(item)) {
+        for (const image of listActionImages(text)) {
+            if (!image.src || seen.has(image.src)) continue;
+            seen.add(image.src);
+            result.push(image);
+        }
+    }
+    return result;
+}
+
 export function cleanupImagesOf(item: WorkItem): ActionImageItem[] {
     const registered = new Set(item.imageCleanup?.paths ?? []);
     if (registered.size === 0) return [];
-    return [...listActionImages(item.currentAction), ...listActionImages(item.nextAction)]
-        .filter((image) => Boolean(image.src) && registered.has(image.src));
+    return listItemImages(item).filter((image) => registered.has(image.src));
 }
 
 export function cleanupRemainingDays(cleanup: ActionImageCleanup, now = Date.now()): number {

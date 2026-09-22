@@ -2626,3 +2626,159 @@
     .xz-storage__cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xz-storage__table th:nth-child(2), .xz-storage__table td:nth-child(2) { display: none; }
 }
+
+/* ── 待办清单（todos.ts / TodoListCard.svelte） ───────────────────────────── */
+.xz-todo-card { margin-top: 14px; border: 1px solid var(--xingzhou-border); border-left: 3px solid var(--xingzhou-primary); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-surface); }
+.xz-todo-card__head { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-bottom: 1px solid var(--xingzhou-border); }
+.xz-todo-card__head h3 { margin: 0; font-size: 13px; }
+.xz-todo-card__count { color: var(--xingzhou-muted); font-size: 11px; }
+.xz-todo-card__actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.xz-todo-card__mini { min-height: 26px; padding: 2px 8px !important; font-size: 11px; }
+.xz-todo-card__link { padding: 0 2px; border: 0; color: var(--xingzhou-primary); background: transparent; font-size: 11px; cursor: pointer; }
+.xz-todo-card__link:hover { text-decoration: underline; }
+.xz-todo-progress { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px dashed var(--xingzhou-border); color: var(--xingzhou-muted); font-size: 11px; }
+.xz-todo-progress__bar { position: relative; flex: 1 1 auto; min-width: 60px; height: 8px; border-radius: 20px; background: color-mix(in srgb, var(--xingzhou-muted) 30%, transparent); overflow: hidden; }
+.xz-todo-progress__done, .xz-todo-progress__drop { position: absolute; inset: 0 auto 0 0; }
+.xz-todo-progress__done { background: var(--b3-theme-success, #3f9a4d); }
+.xz-todo-progress__drop { background: color-mix(in srgb, var(--xingzhou-muted) 45%, transparent); }
+.xz-todo-card__body { padding: 6px 12px 12px; }
+.xz-todo-empty { margin: 6px 0; color: var(--xingzhou-muted); font-size: 12px; }
+.xz-todo { border-radius: var(--xingzhou-radius); }
+.xz-todo + .xz-todo { border-top: 1px dashed var(--xingzhou-border); }
+.xz-todo--open { background: color-mix(in srgb, var(--xingzhou-primary) 5%, transparent); }
+.xz-todo--picked { background: color-mix(in srgb, var(--xingzhou-primary) 12%, transparent); }
+.xz-todo__row { display: flex; align-items: center; gap: 8px; padding: 7px 4px; }
+.xz-todo__pick { flex: none; }
+.xz-todo__box { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: none; padding: 0; border: 1.5px solid color-mix(in srgb, var(--xingzhou-muted) 45%, var(--xingzhou-border)); border-radius: 6px; color: transparent; background: var(--xingzhou-panel); font-size: 13px; line-height: 1; cursor: pointer; }
+.xz-todo__box:hover:not(:disabled) { border-color: var(--xingzhou-primary); }
+.xz-todo__box:disabled { cursor: default; }
+.xz-todo__box--done { border-color: var(--b3-theme-success, #3f9a4d); color: #fff; background: var(--b3-theme-success, #3f9a4d); }
+.xz-todo__box--dropped { border-color: color-mix(in srgb, var(--xingzhou-muted) 45%, transparent); color: color-mix(in srgb, var(--xingzhou-muted) 90%, transparent); background: color-mix(in srgb, var(--xingzhou-muted) 16%, transparent); }
+.xz-todo__text { min-width: 0; overflow-wrap: anywhere; }
+.xz-todo--done .xz-todo__text, .xz-todo--dropped .xz-todo__text { color: var(--xingzhou-muted); text-decoration: line-through; }
+.xz-todo__meta { color: var(--xingzhou-muted); font-size: 11px; white-space: nowrap; }
+.xz-todo__actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.xz-todo__link { padding: 0 4px; border: 0; color: var(--xingzhou-primary); background: transparent; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.xz-todo__link:hover { text-decoration: underline; }
+.xz-todo__icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex: none; padding: 0; border: 0; border-radius: 5px; color: var(--xingzhou-muted); background: transparent; font-size: 12px; cursor: pointer; }
+.xz-todo__icon:hover:not(:disabled) { color: var(--xingzhou-text); background: color-mix(in srgb, var(--xingzhou-muted) 14%, transparent); }
+.xz-todo__icon--on { color: var(--xingzhou-primary); }
+.xz-todo__drawer { margin: 0 4px 8px 30px; padding: 10px 12px; border: 1px solid var(--xingzhou-border); border-left: 3px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel); }
+.xz-todo__field { display: block; margin-bottom: 8px; }
+.xz-todo__field > span { display: block; margin-bottom: 3px; color: var(--xingzhou-muted); font-size: 11px; }
+.xz-todo__input { box-sizing: border-box; width: 100%; min-height: 48px; resize: vertical; font-size: 12.5px; line-height: 1.6; }
+.xz-todo__drawer-foot { display: flex; align-items: center; gap: 8px; margin-top: 9px; padding-top: 8px; border-top: 1px dashed var(--xingzhou-border); }
+.xz-todo__drawer-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.xz-todo-card__foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 9px; border-top: 1px dashed var(--xingzhou-border); }
+.xz-todo__draft { box-sizing: border-box; flex: 1 1 auto; min-width: 0; min-height: 28px; padding: 4px 8px; overflow: hidden; resize: none; font-size: 12.5px; line-height: 1.5; }
+
+/*
+ * 结构化行动细则。
+ * 排版要求：每个字段是独立小卡片（白底 + 边框 + 留白），已填字段只显示一行预览，
+ * 未填字段只占一行虚线提示；当前状态是唯一重点，左条 + 淡底。
+ */
+.xz-plan-card { margin-top: 14px; border: 1px solid var(--xingzhou-border); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-surface); }
+.xz-plan-card__head { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-bottom: 1px solid var(--xingzhou-border); }
+.xz-plan-card__head h3 { margin: 0; font-size: 13px; }
+.xz-plan-card__count { color: var(--xingzhou-muted); font-size: 11px; }
+.xz-plan-card__head-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.xz-plan-card__hint { margin: 0; color: var(--xingzhou-muted); font-size: 11px; line-height: 1.6; }
+.xz-plan-card__link { padding: 0 2px; border: 0; color: var(--xingzhou-primary); background: transparent; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.xz-plan-card__link:hover:not(:disabled) { text-decoration: underline; }
+.xz-plan-card__link:disabled { opacity: .55; cursor: default; }
+.xz-plan-templates { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px dashed var(--xingzhou-border); background: var(--xingzhou-panel); }
+.xz-plan-card__body { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }
+
+/* 字段 = 独立小卡片 */
+.xz-plan-field { border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel); }
+.xz-plan-field__head { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 10px; }
+.xz-plan-field__head h4 { margin: 0; font-size: 12.5px; font-weight: 600; }
+.xz-plan-field__toggle { padding: 0; border: 0; background: transparent; cursor: pointer; }
+.xz-plan-field__note { min-width: 0; overflow: hidden; color: var(--xingzhou-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.xz-plan-field__edit { margin-left: auto; padding: 1px 7px; border: 1px solid transparent; border-radius: 5px; color: var(--xingzhou-primary); background: transparent; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.xz-plan-field__edit:hover:not(:disabled) { border-color: color-mix(in srgb, var(--xingzhou-primary) 45%, var(--xingzhou-border)); }
+.xz-plan-field__edit:disabled { opacity: .55; cursor: default; }
+.xz-plan-field__caret { padding: 0 4px; border: 0; color: var(--xingzhou-muted); background: transparent; font-size: 10px; cursor: pointer; }
+.xz-plan-field__body { padding-bottom: 10px; }
+.xz-plan-field__body--list { padding-top: 2px; }
+/* 展开后的正文块自己带左边界，与标题行对齐（外层不再用居中的内边距） */
+.xz-plan-field:not(.xz-plan-field--state) .xz-plan-field__body > .xz-plan-field__text { padding: 0 10px 4px; }
+.xz-plan-field:not(.xz-plan-field--state) .xz-plan-field__body--list { padding-left: 10px; padding-right: 10px; }
+.xz-plan-field__text { font-size: 13.5px; }
+/* 未展开时的单行预览：整行可点，展开全文 */
+.xz-plan-field__preview { display: block; width: 100%; margin: 0; padding: 0 10px 9px; border: 0; color: var(--xingzhou-muted); background: transparent; font-size: 12.5px; line-height: 1.6; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.xz-plan-field__preview:hover { color: var(--xingzhou-text); }
+
+/* 当前状态：整张卡的重点 */
+.xz-plan-field--state { border-left: 3px solid var(--xingzhou-primary); background: color-mix(in srgb, var(--xingzhou-primary) 5%, var(--xingzhou-panel)); }
+.xz-plan-field--state .xz-plan-field__head { padding-bottom: 2px; }
+.xz-plan-auto { display: flex; align-items: baseline; gap: 7px; margin: 0 10px 8px; padding: 5px 8px; border-radius: 5px; color: var(--xingzhou-muted); background: color-mix(in srgb, var(--xingzhou-muted) 9%, transparent); font-size: 11.5px; overflow-wrap: anywhere; }
+.xz-plan-auto__tag { flex: none; padding: 0 5px; border-radius: 20px; background: color-mix(in srgb, var(--xingzhou-muted) 16%, transparent); font-size: 10px; }
+.xz-plan-field--state .xz-plan-field__text { padding: 0 10px 10px; }
+.xz-plan-nextline { margin: 0; padding: 0 10px 10px; color: var(--xingzhou-muted); font-size: 12px; overflow-wrap: anywhere; }
+.xz-plan-nextline b { color: var(--xingzhou-text); font-weight: 600; }
+
+/* 未填写：一行虚线提示，不占版面 */
+/* 未填写不是"框"，只是一行可以点的灰字：不要用虚线盒子撑出空白 */
+.xz-plan-empty { display: block; width: 100%; margin: 0 0 10px; padding: 0; border: 0; color: var(--xingzhou-muted); background: transparent; font-size: 12px; line-height: 1.7; text-align: left; cursor: pointer; }
+.xz-plan-empty:hover:not(:disabled) { color: var(--xingzhou-primary); }
+/* 普通字段：与标题行同一个左边界 */
+.xz-plan-field:not(.xz-plan-field--state) .xz-plan-empty { padding: 0 10px; }
+/* 当前状态：手写区左右已有 10px，这里只留上下 */
+.xz-plan-field--state .xz-plan-empty { margin: 0 10px 10px; }
+.xz-plan-empty--inline { margin-bottom: 0; }
+
+.xz-plan-outcome { display: flex; align-items: flex-start; gap: 9px; padding: 4px 0; }
+.xz-plan-outcome__idx { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex: none; margin-top: 4px; border-radius: 50%; color: var(--xingzhou-muted); background: color-mix(in srgb, var(--xingzhou-muted) 14%, transparent); font-size: 10.5px; }
+.xz-plan-outcome__main { min-width: 0; flex: 1 1 auto; }
+.xz-plan-outcome__input { box-sizing: border-box; width: 100%; height: 28px; font-size: 13px; }
+.xz-plan-outcome__meta { margin-top: 2px; color: var(--xingzhou-muted); font-size: 11px; }
+.xz-plan-outcome__add { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.xz-plan-outcome__add .xz-plan-outcome__input { flex: 1 1 auto; }
+
+/* 下一步行动：仍是独立字段，只是排在卡内最后 */
+
+
+/* ── 完成确认层（completion.ts / CompletionDialog.svelte） ────────────────── */
+.xz-complete-dialog { box-sizing: border-box; width: min(560px, 100%); max-height: min(84vh, 720px); overflow: auto; padding: 16px 18px 14px; border: 1px solid var(--xingzhou-border); border-radius: calc(var(--xingzhou-radius) + 4px); background: var(--xingzhou-panel); box-shadow: 0 12px 32px color-mix(in srgb, var(--xingzhou-text) 28%, transparent); }
+.xz-complete-dialog h2 { margin: 6px 0 8px; font-size: 17px; line-height: 1.45; }
+.xz-complete-dialog > p { margin: 0 0 10px; color: var(--xingzhou-muted); font-size: 13px; line-height: 1.7; }
+.xz-complete-group { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-surface-light); }
+.xz-complete-group h4 { margin: 0 0 6px; font-size: 12px; }
+.xz-complete-group ul { margin: 0; padding: 0; list-style: none; }
+.xz-complete-group li { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.xz-chip { padding: 1px 7px; border: 1px solid var(--xingzhou-border); border-radius: 20px; color: var(--xingzhou-muted); background: var(--xingzhou-panel); font-size: 11px; white-space: nowrap; }
+.xz-chip--ghost { border-style: dashed; background: transparent; }
+.xz-complete-hint { margin: 12px 0 8px; }
+.xz-complete-option { display: flex; gap: 9px; padding: 9px 10px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel); cursor: pointer; }
+.xz-complete-option + .xz-complete-option { margin-top: 8px; }
+.xz-complete-option--picked { border-color: color-mix(in srgb, var(--xingzhou-primary) 55%, var(--xingzhou-border)); background: color-mix(in srgb, var(--xingzhou-primary) 7%, transparent); }
+.xz-complete-option input { flex: none; margin-top: 3px; }
+.xz-complete-option strong { display: block; font-size: 13px; }
+.xz-complete-option span span { color: var(--xingzhou-muted); font-size: 11.5px; line-height: 1.6; }
+.xz-complete-reason { box-sizing: border-box; width: 100%; margin-top: 8px; }
+.xz-complete-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.xz-complete-actions__spacer { flex: 1 1 auto; }
+
+@container (max-width: 620px) {
+    .xz-todo-card__head, .xz-plan-card__head { flex-wrap: wrap; }
+    .xz-todo-card__actions, .xz-plan-card__head-actions { margin-left: 0; width: 100%; flex-wrap: wrap; }
+    .xz-plan-card__hint { display: none; }
+    .xz-todo__row { align-items: flex-start; padding: 9px 4px; }
+    .xz-todo__meta { display: none; }
+    .xz-todo__box { width: 26px; height: 26px; }
+    .xz-todo__icon { width: 30px; height: 30px; }
+    .xz-todo__drawer { margin-left: 4px; }
+    .xz-plan-field__sub { white-space: normal; }
+    .xz-plan-field__right { flex-wrap: wrap; }
+    .xz-plan-auto, .xz-plan-manual { flex-direction: column; }
+    .xz-complete-actions { flex-wrap: wrap; }
+}
+
+/* 行动区块的字段名：详情面板里行动内容的标题（角色不同、叫法不同） */
+.xz-action-block-label { margin: 12px 0 -4px; color: var(--xingzhou-muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+
+/* 模板面板：提示、已存模板列表、保存模板的输入行 */
+.xz-plan-templates__list { display: flex; flex-wrap: wrap; gap: 6px; }
+.xz-plan-templates__save { display: flex; align-items: center; gap: 6px; width: 100%; }
+.xz-plan-templates__name { box-sizing: border-box; flex: 1 1 auto; min-width: 0; height: 28px; font-size: 12.5px; }

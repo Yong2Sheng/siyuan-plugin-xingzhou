@@ -7,13 +7,15 @@ export const WORK_ITEM_ROLE_META: Record<WorkItemRole, { label: string }> = {
     domain: { label: "长期领域" },
     topProject: { label: "顶层项目" },
     subproject: { label: "子项目" },
-    task: { label: "任务" },
+    /** 旧类型：不再能新建，仅用于让存量任务继续可读、可改类型。 */
+    task: { label: "任务（旧类型）" },
     transaction: { label: "事务" },
     idea: { label: "想法" },
     unclassified: { label: "未分类" },
 };
 
-export const WORK_ITEM_ROLE_LEGEND: WorkItemRole[] = ["domain", "topProject", "subproject", "task", "transaction", "idea"];
+/** 图例不再列出已退役的「任务」。 */
+export const WORK_ITEM_ROLE_LEGEND: WorkItemRole[] = ["domain", "topProject", "subproject", "transaction", "idea"];
 
 export type WorkItemProfile = {
     role: WorkItemRole;
@@ -67,7 +69,7 @@ export function getWorkItemProfile(item: WorkItem, tree: WorkItemTree): WorkItem
     if (role === "task") return {
         role, label: WORK_ITEM_ROLE_META[role].label, statusLabel: "任务状态", statuses: PROJECT_STATUSES,
         parentLabel: "上层工作项", showParent: true, showTopProject: true, showPlanDate: false, showDeadline: true,
-        showExecutionCost: false, showNextAction: true, showComplete: true, actionLabel: "完成标准／任务说明",
+        showExecutionCost: false, showNextAction: true, showComplete: true, actionLabel: "任务说明（旧类型，建议改为事务或项目）",
     };
     if (role === "transaction" || role === "idea") return {
         role, label: WORK_ITEM_ROLE_META[role].label, statusLabel: "执行状态", statuses: EXECUTION_STATUSES,

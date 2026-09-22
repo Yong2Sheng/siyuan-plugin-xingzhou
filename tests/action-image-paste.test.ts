@@ -1,6 +1,7 @@
 import { tick } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import XingzhouApp from "../src/XingzhouApp.svelte";
+import { createEmptyActionDetail } from "../src/action-detail";
 import type { WorkItem, WorkItemChanges, WorkItemData } from "../src/work-items";
 
 type SaveFn = (currentData: WorkItemData, currentItem: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData>;
@@ -130,8 +131,16 @@ function deferredUpload() {
 }
 
 function savedAction(call: SaveCall | undefined): string {
-    const value = call?.[2].currentAction;
+    // 结构化之后，细则正文保存在 actionDetail.currentState 里（currentAction 只是兼容文本）
+    const value = (call?.[2] as { actionDetail?: { currentState?: string } } | undefined)?.actionDetail?.currentState;
     return typeof value === "string" ? value : "";
+}
+
+
+/** 测试数据等价于真实存储层：旧数据没有 actionDetail，读取时由 currentAction 迁移而来。 */
+function withLegacyDetail(item: WorkItem): WorkItem {
+    if (item.actionDetail) return item;
+    return { ...item, actionDetail: { ...createEmptyActionDetail(), currentState: item.currentAction } };
 }
 
 describe("行动细则的图片支持", () => {
@@ -153,16 +162,20 @@ describe("行动细则的图片支持", () => {
             props: {
                 load: vi.fn().mockResolvedValue({
                     attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
-                    items, missingFields: [], fields: IMAGE_FIELDS,
+                    items: items.map(withLegacyDetail), missingFields: [], fields: IMAGE_FIELDS,
                 }),
                 captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(),
             },
         });
     }
 
+    /** 打开行动细则里「当前状态」字段的大编辑窗口（结构化后这里的旧入口没了）。 */
     async function enterEditing() {
-        await vi.waitFor(() => expect(document.querySelector(".xz-action-card")).not.toBeNull(), { timeout: 4000 });
-        (document.querySelector(".xz-action-card") as HTMLElement).click();
+        await vi.waitFor(() => expect(document.querySelector(".xz-plan-field")).not.toBeNull(), { timeout: 4000 });
+        [...document.querySelectorAll<HTMLElement>(".xz-plan-field")]
+            .find((field) => field.querySelector("h4")?.textContent === "当前状态")!
+            .querySelector<HTMLButtonElement>("button")!
+            .click();
         await vi.waitFor(() => expect(document.querySelector(".xz-action-editor-window__input")).not.toBeNull(), { timeout: 4000 });
         return document.querySelector(".xz-action-editor-window__input") as HTMLTextAreaElement;
     }
@@ -357,7 +370,10 @@ describe("行动细则的图片支持", () => {
         mount([first, second], save.fn);
 
         await selectTreeItem("第一条");
-        (document.querySelector(".xz-action-card") as HTMLElement).click();
+        [...document.querySelectorAll<HTMLElement>(".xz-plan-field")]
+            .find((field) => field.querySelector("h4")?.textContent === "当前状态")!
+            .querySelector<HTMLButtonElement>("button")!
+            .click();
         await vi.waitFor(() => expect(document.querySelector(".xz-action-editor-window__input")).not.toBeNull(), { timeout: 4000 });
 
         pasteInto(document.querySelector(".xz-action-editor-window__input") as HTMLTextAreaElement, [imageFile("late.png", "late-bytes")]);
@@ -410,7 +426,7 @@ describe("图片待清理与确认删除", () => {
             props: {
                 load: vi.fn().mockResolvedValue({
                     attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
-                    items, missingFields: [], fields: IMAGE_FIELDS,
+                    items: items.map(withLegacyDetail), missingFields: [], fields: IMAGE_FIELDS,
                 }),
                 captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(), openDocument: vi.fn(),
                 initialViewState: {
@@ -652,7 +668,7 @@ describe("图片待清理与确认删除", () => {
     it("未登记的已结束条目不显示任何清理入口", async () => {
         const done = transactionItem({ id: "tx-7", status: "已完成", currentAction: "只有文字" });
         mount([done], createSaveItem().fn);
-        await vi.waitFor(() => expect(document.querySelector(".xz-action-card")).not.toBeNull(), { timeout: 4000 });
+        await vi.waitFor(() => expect(document.querySelector(".xz-plan-card")).not.toBeNull(), { timeout: 4000 });
         expect(document.querySelector(".xz-cleanup-badge")).toBeNull();
         expect(document.querySelector(".xz-cleanup-panel")).toBeNull();
     });

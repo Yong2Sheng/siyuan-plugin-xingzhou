@@ -1,5 +1,7 @@
 import { DEFAULT_ALL_ITEMS_VIEW_NAME, DEFAULT_INBOX_VIEW_NAME } from "./config";
+import type { ActionDetail } from "./action-detail";
 import type { ExecutionSlice } from "./execution-slices";
+import type { Todo } from "./todos";
 import { requestSiYuan } from "./siyuan-api";
 
 export const FIELD_NAMES = {
@@ -90,6 +92,10 @@ export type WorkItemChanges = Partial<Record<EditableWorkItemField, string | num
     completedDates?: string[];
     sliceTargetCount?: number | null;
     executionSlices?: ExecutionSlice[];
+    /** 事务的待办清单（内容维度，见 todos.ts）。 */
+    todos?: Todo[];
+    /** 结构化后的本次行动细则（见 action-detail.ts）。 */
+    actionDetail?: ActionDetail;
     imageCleanup?: { startedAt: number; paths: string[] } | null;
 };
 
@@ -113,6 +119,16 @@ export type WorkItem = {
     sliceTargetCount?: number | null;
     /** 事务的执行尝试。它们不是工作项，也不参与上下层关系。 */
     executionSlices?: ExecutionSlice[];
+    /**
+     * 事务的内容清单：这件事还剩哪几件没做。
+     * 读取时一律走 `normalizeTodos`（见 internal-store），因此这里可能是 undefined（旧数据或测试构造）。
+     */
+    todos?: Todo[];
+    /**
+     * 结构化后的本次行动细则。旧数据没有这个字段，读取时由 `migrateLegacyActionText`
+     * 把旧的 `currentAction` 文本迁进「行动指导与想法」。
+     */
+    actionDetail?: ActionDetail;
     /**
      * 条目进入终态后登记的图片待清理范围；null 或缺失表示没有待清理。
      * 只记录当时引用的图片路径，之后新贴的图片不在范围内。

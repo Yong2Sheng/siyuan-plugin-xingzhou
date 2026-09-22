@@ -1,5 +1,13 @@
 import type { WorkItem, WorkItemChanges, WorkItemData, WorkItemField } from "./work-items";
+import {
+    actionDetailToLegacyText,
+    createEmptyActionDetail,
+    hasActionDetailContent,
+    migrateLegacyActionText,
+    normalizeActionDetail,
+} from "./action-detail";
 import { normalizeExecutionSlices } from "./execution-slices";
+import { normalizeTodos } from "./todos";
 import { log, type LogDetail } from "./log";
 
 export const INTERNAL_STORE_FILE = "work-items.json";
@@ -48,8 +56,9 @@ export function parseInternalStore(value: unknown): InternalWorkItemStore | null
     if ((source.version !== 1 && source.version !== INTERNAL_STORE_VERSION) || !Array.isArray(source.items)) return null;
     const ids = new Set<string>();
     const items: WorkItem[] = [];
+    const now = Date.now();
     for (const raw of source.items) {
-        const item = normalizeWorkItem(raw);
+        const item = normalizeWorkItem(raw, now);
         if (!item || ids.has(item.id)) return null;
         ids.add(item.id);
         items.push(item);
@@ -126,6 +135,8 @@ export function updateStoredWorkItem(
     changes: WorkItemChanges,
     now = Date.now(),
 ): InternalWorkItemStore {
+    const originalForLegacy = store.items.find((item) => item.id === itemId || item.rowId === itemId);
+    changes = withLegacyActionText(changes, originalForLegacy);
     let found = false;
     const original = store.items.find((item) => item.id === itemId || item.rowId === itemId);
     let items = store.items.map((item) => {
@@ -179,6 +190,8 @@ export function addStoredWorkItem(
         completedDates: [],
         sliceTargetCount: null,
         executionSlices: [],
+        todos: [],
+        actionDetail: createEmptyActionDetail(),
         imageCleanup: null,
         planDate: null,
         deadline: null,
@@ -229,6 +242,21 @@ export function reorderStoredWorkItems(
     return nextRevision(store, items, now);
 }
 
+/**
+ * 结构化细则变化后，把兼容文本写回旧的 `currentAction` 字段。
+ *
+ * 保留这个字段的原因：图片清理扫描、图库体检、「内部数据缺少字段」提示都还在读它。
+ * 生成结果为空时**跳过**写入——宁可留下旧文本，也不能把用户原有的长文悄悄清空。
+ */
+export function withLegacyActionText(changes: WorkItemChanges, item?: WorkItem): WorkItemChanges {
+    if (!changes.actionDetail) return changes;
+    const nextAction = changes.nextAction !== undefined ? String(changes.nextAction ?? "") : (item?.nextAction ?? "");
+    const legacy = actionDetailToLegacyText(changes.actionDetail, nextAction);
+    if (!legacy.trim()) return changes;
+    if (legacy === (item?.currentAction ?? "")) return changes;
+    return { ...changes, currentAction: legacy };
+}
+
 export function storesMatch(expected: InternalWorkItemStore, actual: InternalWorkItemStore): boolean {
     return JSON.stringify(expected) === JSON.stringify(actual);
 }
@@ -265,6 +293,8 @@ function applyChanges(item: WorkItem, changes: WorkItemChanges, now: number): Wo
     if (changes.completedDates !== undefined) next.completedDates = normalizeDateKeys(changes.completedDates);
     if (changes.sliceTargetCount !== undefined) next.sliceTargetCount = normalizeSliceTarget(changes.sliceTargetCount);
     if (changes.executionSlices !== undefined) next.executionSlices = normalizeExecutionSlices(changes.executionSlices);
+    if (changes.todos !== undefined) next.todos = normalizeTodos(changes.todos);
+    if (changes.actionDetail !== undefined) next.actionDetail = normalizeActionDetail(changes.actionDetail);
     if (changes.imageCleanup !== undefined) next.imageCleanup = normalizeImageCleanup(changes.imageCleanup);
     if (changes.planDate !== undefined) next.planDate = normalizeDate(changes.planDate);
     if (changes.deadline !== undefined) next.deadline = normalizeDate(changes.deadline);
@@ -284,10 +314,15 @@ function nextRevision(store: InternalWorkItemStore, items: WorkItem[], now: numb
     };
 }
 
-function normalizeWorkItem(value: unknown): WorkItem | null {
+export function normalizeStoredWorkItem(value: unknown, now = Date.now()): WorkItem | null {
+    return normalizeWorkItem(value, now);
+}
+
+function normalizeWorkItem(value: unknown, now = Date.now()): WorkItem | null {
     if (!value || typeof value !== "object") return null;
     const item = value as Partial<WorkItem>;
     if (typeof item.id !== "string" || !item.id || typeof item.title !== "string" || !item.title.trim()) return null;
+    const currentAction = stringValue(item.currentAction);
     return {
         id: item.id,
         rowId: typeof item.rowId === "string" && item.rowId ? item.rowId : item.id,
@@ -296,7 +331,7 @@ function normalizeWorkItem(value: unknown): WorkItem | null {
         detached: Boolean(item.detached),
         type: stringValue(item.type),
         status: stringValue(item.status),
-        currentAction: stringValue(item.currentAction),
+        currentAction,
         nextAction: stringValue(item.nextAction),
         parentIds: normalizeIds(item.parentIds),
         topProjectIds: normalizeIds(item.topProjectIds),
@@ -305,6 +340,15 @@ function normalizeWorkItem(value: unknown): WorkItem | null {
         completedDates: normalizeDateKeys(item.completedDates),
         sliceTargetCount: normalizeSliceTarget(item.sliceTargetCount),
         executionSlices: normalizeExecutionSlices(item.executionSlices),
+        todos: normalizeTodos(item.todos),
+        /*
+         * 旧数据没有结构化细则：把单块文本迁进「行动指导与想法」。
+         * 只对"完全没有结构化内容"的旧条目执行，已迁移过的条目不会被重复标记时间戳。
+         */
+        actionDetail: (() => {
+            const detail = normalizeActionDetail(item.actionDetail);
+            return hasActionDetailContent(detail) ? detail : migrateLegacyActionText(detail, currentAction, now);
+        })(),
         imageCleanup: normalizeImageCleanup(item.imageCleanup),
         planDate: nullableNumber(item.planDate),
         deadline: nullableNumber(item.deadline),
@@ -325,6 +369,8 @@ function cloneWorkItem(item: WorkItem): WorkItem {
         softPrerequisiteIds: [...(item.softPrerequisiteIds ?? [])],
         completedDates: [...(item.completedDates ?? [])],
         executionSlices: normalizeExecutionSlices(item.executionSlices),
+        todos: normalizeTodos(item.todos),
+        actionDetail: normalizeActionDetail(item.actionDetail),
         imageCleanup: item.imageCleanup ? { startedAt: item.imageCleanup.startedAt, paths: [...item.imageCleanup.paths] } : null,
     };
 }
@@ -333,7 +379,8 @@ function internalFields(): WorkItemData["fields"] {
     const field = (id: string, name: string, type: string, options: WorkItemField["options"] = []): WorkItemField => ({ id, name, type, options });
     return {
         title: field("title", "工作项", "block"),
-        type: field("type", "工作项类型", "select", ["项目", "长期领域", "任务", "事务", "想法"].map((name) => ({ name }))),
+        // 「任务」不再出现在新建选项里；存量任务会在类型下拉里以「任务（旧类型）」单独显示。
+        type: field("type", "工作项类型", "select", ["项目", "长期领域", "事务", "想法"].map((name) => ({ name }))),
         status: field("status", "状态", "select"),
         currentAction: field("currentAction", "本次行动细则", "text"),
         nextAction: field("nextAction", "下一步行动", "text"),

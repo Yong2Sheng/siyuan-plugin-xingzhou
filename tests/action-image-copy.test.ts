@@ -1,6 +1,7 @@
 import { tick } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import XingzhouApp from "../src/XingzhouApp.svelte";
+import { createEmptyActionDetail } from "../src/action-detail";
 import type { ActionImageCopyTarget } from "../src/image-clipboard";
 import type { WorkItem, WorkItemData } from "../src/work-items";
 
@@ -47,6 +48,13 @@ function rightClick(element: Element, x = 120, y = 160): MouseEvent {
     return event;
 }
 
+
+/** 测试数据等价于真实存储层：旧数据没有 actionDetail，读取时由 currentAction 迁移而来。 */
+function withLegacyDetail(item: WorkItem): WorkItem {
+    if (item.actionDetail) return item;
+    return { ...item, actionDetail: { ...createEmptyActionDetail(), currentState: item.currentAction } };
+}
+
 describe("细则图片的右键复制入口", () => {
     let component: XingzhouApp | undefined;
 
@@ -68,7 +76,7 @@ describe("细则图片的右键复制入口", () => {
             props: {
                 load: vi.fn().mockResolvedValue({
                     attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
-                    items, missingFields: [], fields: IMAGE_FIELDS,
+                    items: items.map(withLegacyDetail), missingFields: [], fields: IMAGE_FIELDS,
                 } as WorkItemData),
                 captureInbox: vi.fn(), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
                 openImageMenu,
@@ -77,9 +85,13 @@ describe("细则图片的右键复制入口", () => {
         return { openImageMenu, calls };
     }
 
+    /** 打开行动细则里「当前状态」字段的大编辑窗口（结构化后这里的旧入口没了）。 */
     async function enterEditing() {
-        await vi.waitFor(() => expect(document.querySelector(".xz-action-card")).not.toBeNull(), { timeout: 4000 });
-        (document.querySelector(".xz-action-card") as HTMLElement).click();
+        await vi.waitFor(() => expect(document.querySelector(".xz-plan-field")).not.toBeNull(), { timeout: 4000 });
+        [...document.querySelectorAll<HTMLElement>(".xz-plan-field")]
+            .find((field) => field.querySelector("h4")?.textContent === "当前状态")!
+            .querySelector<HTMLButtonElement>("button")!
+            .click();
         await vi.waitFor(() => expect(document.querySelector(".xz-action-editor-window__input")).not.toBeNull(), { timeout: 4000 });
     }
 
@@ -141,7 +153,7 @@ describe("细则图片的右键复制入口", () => {
 
     it("没有图片的条目上右键不触发图片菜单", async () => {
         const { openImageMenu } = mount([transactionItem({ currentAction: "只有文字，没有截图" })]);
-        await vi.waitFor(() => expect(document.querySelector(".xz-action-card")).not.toBeNull(), { timeout: 4000 });
+        await vi.waitFor(() => expect(document.querySelector(".xz-plan-field")).not.toBeNull(), { timeout: 4000 });
 
         rightClick(document.querySelector(".xz-detail") as HTMLElement);
 

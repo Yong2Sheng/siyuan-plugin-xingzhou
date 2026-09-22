@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import XingzhouApp from "../src/XingzhouApp.svelte";
 import type { CaptureDialogRequest } from "../src/capture-dialog";
 import type { WorkItem, WorkItemChanges, WorkItemData } from "../src/work-items";
+import { createEmptyActionDetail } from "../src/action-detail";
 
 function localDateKey(date: Date): string {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -145,7 +146,9 @@ describe("XingzhouApp", () => {
         expect(document.querySelector(".xz-tree-row.selected")?.textContent).toContain("世界观构建");
         expect(document.querySelector('.xz-tree-row.selected .xz-role-badge[data-role="subproject"]')?.textContent).toBe("子项目");
         expect(document.querySelector('.xz-detail-role-row .xz-role-badge[data-role="subproject"]')?.textContent).toBe("子项目");
-        expect(document.querySelectorAll(".xz-role-legend .xz-role-badge")).toHaveLength(6);
+        // 「任务」已退役，图例只列 长期领域／顶层项目／子项目／事务／想法
+        const legend = [...document.querySelectorAll(".xz-role-legend .xz-role-badge")].map((badge) => badge.textContent?.trim());
+        expect(legend).toEqual(["长期领域", "顶层项目", "子项目", "事务", "想法"]);
         expect(document.querySelector(".xz-type-dot")).toBeNull();
     });
 
@@ -576,10 +579,12 @@ describe("XingzhouApp", () => {
         expect([...statusSelect.options].map((option) => option.value)).not.toContain("规划中");
 
         expect([...document.querySelectorAll("button")].find((button) => button.textContent?.includes("编辑行动内容"))).toBeUndefined();
-        expect(document.body.textContent).toContain("内部字段暂不可用");
-        const nextActionCard = [...document.querySelectorAll<HTMLElement>(".xz-action-card")]
-            .find((card) => card.querySelector("h3")?.textContent === "下一步行动") as HTMLElement;
-        nextActionCard.click();
+        // 内部字段齐备时不再提示"字段不可用"，行动细则卡直接可用
+        expect(document.querySelector(".xz-plan-card")).not.toBeNull();
+        expect(document.querySelector(".xz-plan-card")?.textContent).toContain("当前状态");
+        const nextActionCard = [...document.querySelectorAll<HTMLElement>(".xz-plan-field")]
+            .find((card) => card.querySelector("h4")?.textContent === "下一步行动") as HTMLElement;
+        nextActionCard.querySelector<HTMLButtonElement>("button")!.click();
         await tick();
         let actionEditor = document.querySelector('textarea[aria-label="下一步行动"]') as HTMLTextAreaElement;
         expect(actionEditor).toBeInstanceOf(HTMLTextAreaElement);
@@ -593,7 +598,7 @@ describe("XingzhouApp", () => {
         expect(document.querySelector('textarea[aria-label="下一步行动"]')).toBeNull();
         expect(saveItem).not.toHaveBeenCalled();
 
-        nextActionCard.click();
+        nextActionCard.querySelector<HTMLButtonElement>("button")!.click();
         await tick();
         actionEditor = document.querySelector('textarea[aria-label="下一步行动"]') as HTMLTextAreaElement;
         actionEditor.value = "把垃圾装袋并带到楼下";
@@ -604,7 +609,7 @@ describe("XingzhouApp", () => {
         expect(saveItem.mock.calls[0][2]).toEqual({ nextAction: "把垃圾装袋并带到楼下" });
 
         saveItem.mockClear();
-        ([...document.querySelectorAll<HTMLElement>(".xz-action-card")].find((card) => card.querySelector("h3")?.textContent === "下一步行动") as HTMLElement).click();
+        ([...document.querySelectorAll<HTMLElement>(".xz-plan-field")].find((card) => card.querySelector("h4")?.textContent === "下一步行动") as HTMLElement).querySelector<HTMLButtonElement>("button")!.click();
         await tick();
         actionEditor = document.querySelector('textarea[aria-label="下一步行动"]') as HTMLTextAreaElement;
         actionEditor.value = "快捷键保存的下一步";
@@ -1285,6 +1290,8 @@ describe("XingzhouApp", () => {
             const item: WorkItem = {
                 id: "tx-long", rowId: "tx-long", title: "整理 Hardness ratio 笔记", documentId: null, detached: true,
                 type: "事务", status: "进行中", currentAction: longNote, nextAction: "",
+                // 结构化细则的当前状态承接旧的长文，测试的编辑对象就是它
+                actionDetail: { ...createEmptyActionDetail(), currentState: longNote },
                 parentIds: [], topProjectIds: [], hardPrerequisiteIds: [], softPrerequisiteIds: [],
                 planDate: null, deadline: null, noDeadline: false, durationMinutes: 30, energy: "", updatedAt: now,
                 executionSlices: [],
@@ -1329,14 +1336,25 @@ describe("XingzhouApp", () => {
             await tick();
         };
 
-        /** 打开行动卡片并返回 textarea（与用户点击卡片进入编辑一致）。 */
-        async function openEditor(): Promise<HTMLTextAreaElement> {
-            await vi.waitFor(() => expect(document.querySelector(".xz-action-card--primary")).not.toBeNull());
-            document.querySelector<HTMLElement>(".xz-action-card--primary")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        /** 打开行动细则卡里某个字段的大编辑窗口（与用户点字段上的「编辑」一致）。 */
+        async function openFieldEditor(label: string): Promise<HTMLTextAreaElement> {
+            await vi.waitFor(() => expect(document.querySelector(".xz-plan-card")).not.toBeNull());
+            const field = [...document.querySelectorAll<HTMLElement>(".xz-plan-field")]
+                .find((candidate) => candidate.querySelector("h4")?.textContent === label);
+            expect(field, `没有找到字段「${label}」`).not.toBeUndefined();
+            const button = [...field!.querySelectorAll<HTMLButtonElement>("button")]
+                .find((candidate) => candidate.textContent?.trim() === "编辑");
+            expect(button).not.toBeUndefined();
+            button!.click();
             await tick();
             const node = editor();
             expect(node).not.toBeNull();
             return node!;
+        }
+
+        /** 默认打开「当前状态」字段，绝大多数用例编辑的就是它。 */
+        async function openEditor(): Promise<HTMLTextAreaElement> {
+            return openFieldEditor("当前状态");
         }
 
         /**
@@ -1446,16 +1464,15 @@ describe("XingzhouApp", () => {
 
         it("打开后立刻关闭（保存或点窗口外）不留悬挂回调", async () => {
             mountFixture();
-            await vi.waitFor(() => expect(document.querySelector(".xz-action-card--primary")).not.toBeNull());
-            // 点卡片打开窗口，紧接着立刻关闭：定位光标安排在下一帧，那一帧窗口已经没了
-            document.querySelector<HTMLElement>(".xz-action-card--primary")!.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
-            await tick();
+            await vi.waitFor(() => expect(document.querySelector(".xz-plan-card")).not.toBeNull());
+            // 打开窗口，紧接着立刻关闭：定位光标安排在下一帧，那一帧窗口已经没了
+            const node = await openEditor();
+            expect(node).not.toBeNull();
             (document.querySelector(".b3-dialog__close") as HTMLButtonElement).click();
             await tick();
             // 让被安排的那一帧真正执行：不得抛错（此前这里会读已销毁节点的布局）
             await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(null))));
             expect(editor()).toBeNull();
-            expect(document.querySelector(".xz-action-card--primary")?.textContent ?? "").toContain("点击编辑");
         });
 
         it("窗口编辑框不做自动高度测量：输入过程零强制重排", async () => {
@@ -1502,13 +1519,11 @@ describe("XingzhouApp", () => {
             // 模拟思源「点窗口外关闭」：宿主销毁对话框，插件应据此保存并复位编辑态
             (document.querySelector(".b3-dialog__close") as HTMLButtonElement).click();
             await vi.waitFor(() => expect(saveSpy.mock.calls.length).toBe(1));
-            expect((saveSpy.mock.calls[0][2] as { currentAction?: string }).currentAction).toContain("临时输入");
+            expect((saveSpy.mock.calls[0][2] as { actionDetail?: { currentState?: string } }).actionDetail?.currentState).toContain("临时输入");
             await tick();
 
             expect(editor()).toBeNull();
-            const card = document.querySelector<HTMLElement>(".xz-action-card--primary")!;
-            expect(card.textContent).not.toContain("正在大编辑窗口中编辑");
-            expect(card.textContent).toContain("点击编辑");
+            expect(document.querySelector(".xz-plan-card")).not.toBeNull();
 
             // 还能再次打开，不再出现"点了没反应"
             const reopened = await openEditor();
@@ -1521,8 +1536,9 @@ describe("XingzhouApp", () => {
             await typeInto(node, "不能丢的内容", 0);
             const value = node.value;
             (document.querySelector(".b3-dialog__close") as HTMLButtonElement).click();
-            await vi.waitFor(() => expect(document.querySelector(".xz-action-card--primary")?.textContent ?? "").toContain("思源写入被拒绝"));
-            // 重新打开：内容还在
+            await vi.waitFor(() => expect(document.querySelector(".xz-save-error")?.textContent ?? "").toContain("思源写入被拒绝"));
+            // 窗口已关闭，但内容没有丢：重新打开时从草稿快照里恢复出来
+            await vi.waitFor(() => expect(editor()).toBeNull());
             const reopened = await openEditor();
             expect(reopened.value).toBe(value);
         });
@@ -1540,7 +1556,7 @@ describe("XingzhouApp", () => {
 
             await saveWindow();
             expect(saveItem).toHaveBeenCalledTimes(1);
-            expect((saveItem.mock.calls[0][2] as { currentAction?: string }).currentAction).toContain("第一段输入");
+            expect((saveItem.mock.calls[0][2] as { actionDetail?: { currentState?: string } }).actionDetail?.currentState).toContain("第一段输入");
             // 写入期间窗口仍在、输入框可用：没有 disabled 输入框吞掉按键
             expect(editor()).toBe(node);
             expect(editor()!.disabled).toBe(false);
@@ -1583,10 +1599,14 @@ describe("XingzhouApp", () => {
 
         it("进入／退出编辑态时详情面板的滚动位置不被改动", async () => {
             mountFixture();
-            await vi.waitFor(() => expect(document.querySelector(".xz-action-card--primary")).not.toBeNull());
+            await vi.waitFor(() => expect(document.querySelector(".xz-plan-card")).not.toBeNull());
             const detail = document.querySelector<HTMLElement>(".xz-detail")!;
             detail.scrollTop = 720;
-            document.querySelector<HTMLElement>(".xz-action-card--primary")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            const fieldButton = [...document.querySelectorAll<HTMLElement>(".xz-plan-field")]
+                .find((candidate) => candidate.querySelector("h4")?.textContent === "当前状态")!
+                .querySelector<HTMLButtonElement>("button")!;
+            fieldButton.click();
+            await tick();
             await tick();
             // 进入编辑：面板不能被拉到顶部
             expect(detail.scrollTop).toBe(720);

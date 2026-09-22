@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createEmptyActionDetail } from "../src/action-detail";
 import {
     addStoredWorkItem,
     backupFileForRevision,
@@ -144,6 +145,42 @@ describe("行舟内部工作项仓库", () => {
     });
 });
 
+describe("结构化细则与待办", () => {
+    it("旧条目的单块细则在解析时迁进行动指导与想法，且只迁一次", () => {
+        const legacy = {
+            version: 2, revision: 3, createdAt: 1, updatedAt: 1,
+            items: [{
+                id: "legacy", rowId: "legacy", title: "旧事务", type: "事务", status: "进行中",
+                currentAction: "旧的一整块细则", nextAction: "下一步动作",
+                parentIds: [], topProjectIds: [],
+            }],
+        };
+        const store = parseInternalStore(legacy)!;
+        const item = store.items[0];
+        expect(item.actionDetail?.guidance).toBe("旧的一整块细则");
+        expect(item.actionDetail?.currentState).toContain("旧版细则已迁移");
+        expect(item.actionDetail?.migratedFromCurrentActionAt).toBeGreaterThan(0);
+
+        // 第二次解析不能重复标记：迁移时间戳保持不变
+        const again = parseInternalStore(JSON.parse(JSON.stringify(store)))!;
+        expect(again.items[0].actionDetail?.migratedFromCurrentActionAt).toBe(item.actionDetail?.migratedFromCurrentActionAt);
+        expect(again.items[0].actionDetail?.guidance).toBe("旧的一整块细则");
+    });
+
+    it("待办与结构化细则经过序列化后保持一致，新建对象显式带上默认值", () => {
+        const store = addStoredWorkItem(createEmptyInternalStore(1000), "事务", "item-1", { type: "事务" }, 2000);
+        expect(store.items[0].todos).toEqual([]);
+        expect(store.items[0].actionDetail).toEqual(createEmptyActionDetail());
+
+        const updated = updateStoredWorkItem(store, "item-1", {
+            todos: [{ id: "todo-1", text: "写测试", status: "open", note: "", links: [], createdAt: 3000, updatedAt: 3000, completedOn: null, droppedReason: "" }],
+        }, 3000);
+        const roundTrip = parseInternalStore(JSON.parse(JSON.stringify(updated)))!;
+        expect(storesMatch(updated, roundTrip)).toBe(true);
+        expect(roundTrip.items[0].todos).toHaveLength(1);
+    });
+});
+
 describe("写后复核：新建与修改对象必须与重新解析的结果一致", () => {
     it("新建条目后序列化再解析完全一致（新增字段不能只加在解析器上）", () => {
         const store = addStoredWorkItem(createEmptyInternalStore(1000), "测试图片清理", "item-new", { type: "事务", parentId: "parent" }, 2000);
@@ -157,10 +194,12 @@ describe("写后复核：新建与修改对象必须与重新解析的结果一�
 
     it("修改条目（含图片登记）后序列化再解析完全一致", () => {
         const store = addStoredWorkItem(createEmptyInternalStore(1000), "条目", "item-1", { type: "事务" }, 2000);
+        // 细则文本走新链路：结构化细则变化时由 withLegacyActionText 生成兼容的 currentAction。
         const updated = updateStoredWorkItem(store, "item-1", {
-            currentAction: "看这张\n![](assets/xz-a.png)",
+            actionDetail: { ...createEmptyActionDetail(), currentState: "看这张\n![](assets/xz-a.png)" },
             imageCleanup: { startedAt: 5000, paths: ["assets/xz-a.png"] },
         }, 3000);
+        expect(updated.items[0].currentAction).toContain("assets/xz-a.png");
         const roundTrip = parseInternalStore(JSON.parse(JSON.stringify(updated)));
         expect(storesMatch(updated, roundTrip!)).toBe(true);
 

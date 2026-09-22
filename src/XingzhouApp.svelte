@@ -32,7 +32,9 @@
         cleanupParentChain,
         cleanupRemainingDays,
         isCleanupDue,
+        itemImageTexts,
         keptPathsOf,
+        listItemImages,
         referencingActiveItems,
         listPendingImageCleanup,
         removablePathsOf,
@@ -40,6 +42,49 @@
         type ImageCleanupTextUpdate,
     } from "./action-image-cleanup";
     import { listUnusedAssetPaths, readAssetLibrarySize, readAssetSizes, removeUnusedAsset, uploadActionImage, type AssetRemovalResult } from "./asset-upload";
+    import {
+        ACTION_DETAIL_FIELDS,
+        actionDetailMissing,
+        addOutcome,
+        createEmptyActionDetail,
+        migrateLegacyActionText,
+        normalizeActionDetail,
+        outcomesForDisplay,
+        removeOutcome,
+        setActionDetailField,
+        updateOutcome,
+        type ActionDetail,
+        type ActionDetailField,
+    } from "./action-detail";
+    import { completionBlockers, completionReasonLine, type CompletionDisposition } from "./completion";
+    import {
+        addTodo,
+        createTodo,
+        dropOpenTodos,
+        dropTodos,
+        findTodo,
+        hasUnfinishedTodos,
+        normalizeTodos,
+        removeTodo,
+        todoProgress,
+        toggleTodoDone,
+        toggleTodoDropped,
+        updateTodoLinks,
+        updateTodoNote,
+        updateTodoText,
+        type Todo,
+    } from "./todos";
+    import ActionDetailCard from "./ActionDetailCard.svelte";
+    import {
+        applyActionTemplate as fillDetailFromTemplate,
+        isTemplateEmpty,
+        templateFromDetail,
+        templateNames as templateNamesOf,
+        upsertActionTemplate,
+        type ActionTemplate,
+    } from "./action-templates";
+    import CompletionDialog from "./CompletionDialog.svelte";
+    import TodoListCard from "./TodoListCard.svelte";
     import type { CaptureDialogMode, CaptureDialogRequest, CaptureDialogValues } from "./capture-dialog";
     import { prerequisiteIds, validateDependencyUpdate, type DependencyKind } from "./dependencies";
     import type { ActionImageCopyTarget } from "./image-clipboard";
@@ -78,6 +123,26 @@
     import { deriveTopProjectId, getWorkItemProfile, needsDeadlineDecision, WORK_ITEM_ROLE_LEGEND } from "./work-item-role";
     import type { InboxCaptureOptions, WorkItem, WorkItemChanges, WorkItemData, WorkItemViewState } from "./work-items";
 
+
+    /** 所有可在大编辑窗口里编辑的字段。 */
+    const EDITOR_DETAIL_FIELDS: Array<`detail:${ActionDetailField}` | "detail:nextAction"> = [
+        "detail:currentState", "detail:background", "detail:prompt", "detail:guidance", "detail:definition", "detail:nextAction",
+    ];
+    const EDITOR_FIELDS: EditorField[] = ["currentAction", "nextAction", ...EDITOR_DETAIL_FIELDS];
+
+    /** 每个字段一份的状态表：必须覆盖全部编辑字段，否则细则字段会读到 undefined。 */
+    function editorRecord<T>(value: (field: EditorField) => T): Record<EditorField, T> {
+        return Object.fromEntries(EDITOR_FIELDS.map((field) => [field, value(field)])) as Record<EditorField, T>;
+    }
+
+    function emptyEditorErrors(): Record<EditorField, string> {
+        return editorRecord(() => "");
+    }
+
+    function emptyEditorRecord<T>(value: T): Record<EditorField, T> {
+        return editorRecord(() => value);
+    }
+
     export let load: () => Promise<WorkItemData>;
     export let captureInbox: (title: string, options?: InboxCaptureOptions) => Promise<WorkItemData>;
     export let saveItem: (data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData>;
@@ -101,11 +166,19 @@
     export let loadSavedViewState: (() => Promise<WorkItemViewState | null>) | null = null;
     /** 打开日志面板：由 index.ts 提供（面板是命令式对话框，不在组件里再建一套生命周期）。 */
     export let openLog: () => void = () => undefined;
+    /** 行动细则模板：非关键 UI 数据，读取失败时为空列表。 */
+    export let loadActionTemplates: () => Promise<ActionTemplate[]> = async () => [];
+    export let saveActionTemplates: (templates: ActionTemplate[]) => Promise<void> = async () => undefined;
 
     type MainPage = "week" | "all" | "review" | "graph" | "cleanup";
     type ItemFilter = "all" | "today" | "active" | "future" | "closed";
     type WeekDay = { timestamp: number; key: string; label: string; dateLabel: string; isToday: boolean };
     type ActionField = "currentAction" | "nextAction";
+    /**
+     * 大编辑窗口能编辑的全部字段：两张旧的行动字段 + 结构化细则的每个字段。
+     * 统一成一套身份后，草稿兜底、光标落点、图片上传这些已验证过的链路可以原样复用。
+     */
+    type EditorField = ActionField | `detail:${ActionDetailField}` | "detail:nextAction";
     type ActionImageUpload = {
         uploadId: string;
         name: string;
@@ -113,7 +186,7 @@
         status: "uploading" | "done" | "failed";
         src: string;
         error: string;
-        field: ActionField;
+        field: EditorField;
         /** 上传发起时的条目与字段标识，用于丢弃过期结果。 */
         draftKey: string;
     };
@@ -175,41 +248,64 @@
     let weekStart = startOfWeek(Date.now());
     let weekSavingIds = new Set<string>();
     let weekError = "";
-    let editingAction: ActionField | null = null;
-    let savingAction: ActionField | null = null;
+    let editingAction: EditorField | null = null;
+    let savingAction: EditorField | null = null;
     let savingInline: string | null = null;
     let savingSlices = false;
     let completionUndo: CompletionUndo | null = null;
     let completionUndoTimer: ReturnType<typeof setTimeout> | null = null;
+    /** 完成门槛：有未完成切片／待办时先弹处置层，用户选完才真正完成。 */
+    let completionDialog: {
+        rowId: string;
+        title: string;
+        blockers: ReturnType<typeof completionBlockers>;
+    } | null = null;
+    let completionDialogError = "";
+    let completionBusy = false;
+    /** 细则大编辑窗口（复用已有 ActionEditorWindow）当前编辑的字段。 */
+    let detailEditingField: ActionDetailField | "nextAction" | null = null;
+    /**
+     * 细则字段保存失败时的提示：常驻在详情面板上，直到重新打开该字段或保存成功。
+     * 不用 inlineError 的原因：它会在条目刷新、草稿重置等路径上被清空，用户会看不到错误。
+     */
+    let fieldSaveError = "";
+    /** 行动细则模板（非关键 UI 数据，读取失败为空列表）。 */
+    let actionTemplates: ActionTemplate[] = [];
+    $: actionTemplateNames = templateNamesOf(actionTemplates);
+    /*
+     * 模板里不能用 TypeScript 的非空断言（`selected!`），Svelte 的模板解析会直接报语法错误。
+     * 这里把选中项接一层：详情面板整体在 `{#if selected}` 内，运行时始终有值。
+     */
+    $: currentItem = selected as WorkItem;
     let temporalRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     let undoingCompletion = false;
-    let actionErrors: Record<ActionField, string> = { currentAction: "", nextAction: "" };
-    let actionCursor: Record<ActionField, number> = { currentAction: 0, nextAction: 0 };
+    let actionErrors: Record<EditorField, string> = emptyEditorErrors();
+    let actionCursor: Record<EditorField, number> = emptyEditorRecord(0);
     /**
      * 点卡片进入编辑态时记下的鼠标位置：编辑器挂载后用它在文本里定位光标。
      * 这样"点哪一行就在哪一行开始输入"对「点卡片进入」这条路径也成立，
      * 而不是像以前那样把光标放到全文末尾。
      */
-    let pendingActionCaretPoint: { field: ActionField; x: number; y: number } | null = null;
+    let pendingActionCaretPoint: { field: EditorField; x: number; y: number } | null = null;
     /** 进入编辑前锁定的「点击位置对应的字符位置」：挂载后版面会变，必须提前算好。 */
     /** 上一次同步给窗口的 props：用于跳过没变化的重设。 */
     let actionWindowProps: Record<string, unknown> = {};
     /** 大编辑窗口：内容组件实例与对话框。 */
     let actionWindow: ActionEditorWindow | null = null;
     let actionWindowDialog: Dialog | null = null;
-    let actionWindowField: ActionField | null = null;
+    let actionWindowField: EditorField | null = null;
     /** 打开窗口前算好的光标落点（用窗口宽度排版量出来，不受卡片重排影响）。 */
     let actionWindowCaret: number | null = null;
     /** 正在按用户视角校正详情面板滚动时，不要再被自己的写入再次触发。 */
     let restoringDetailScroll = false;
     /** 输入法合成状态：合成期间任何程序化回写都会打散候选串，必须完全避开。 */
-    let actionComposing: Record<ActionField, boolean> = { currentAction: false, nextAction: false };
+    let actionComposing: Record<EditorField, boolean> = emptyEditorRecord(false);
     /** 草稿兜底：本地快照，用于系统级输入异常（输入法／系统升级）导致整段丢失后的恢复。 */
-    let actionRestoredNotice: Record<ActionField, string> = { currentAction: "", nextAction: "" };
-    let actionImageUploads: Record<ActionField, ActionImageUpload[]> = { currentAction: [], nextAction: [] };
-    let actionImageSizes: Record<ActionField, Record<string, number | null>> = { currentAction: {}, nextAction: {} };
-    let savedActionValues: Record<ActionField, string> = { currentAction: "", nextAction: "" };
-    let actionDragging: ActionField | null = null;
+    let actionRestoredNotice: Record<EditorField, string> = emptyEditorErrors();
+    let actionImageUploads: Record<EditorField, ActionImageUpload[]> = editorRecord(() => []);
+    let actionImageSizes: Record<EditorField, Record<string, number | null>> = editorRecord(() => ({}));
+    let savedActionValues: Record<EditorField, string> = emptyEditorErrors();
+    let actionDragging: EditorField | null = null;
     let actionPreviewDialog: Dialog | null = null;
     let inlineError = "";
     let deleteTarget: WorkItem | null = null;
@@ -390,16 +486,17 @@
      * 大编辑窗口是命令式创建的，这里把「与它相关的外部状态」持续同步进去：
      * 图片上传进度、错误信息、保存中、拖拽高亮、字数。
      */
-    $: if (actionWindow && editingAction) {
+    $: if (actionWindow && editingAction && detailDraft) {
         const field = editingAction;
         const next = {
             saving: savingAction === field,
             error: actionErrors[field],
             restoredNotice: actionRestoredNotice[field],
             dragging: actionDragging === field,
-            imageRows: field === "currentAction" ? currentActionImageRows : nextActionImageRows,
-            imageTotal: field === "currentAction" ? currentActionImageTotal : nextActionImageTotal,
-            pendingUploads: listPendingActionImages(detailDraft[field]).length,
+            // 图片行按字段推导：结构化细则的每个字段都能贴图，不能再按字段名二选一
+            imageRows: buildActionImageRows(field, draftOf(field), actionImageUploads[field], actionImageSizes[field]),
+            imageTotal: buildActionImageTotal(draftOf(field), actionImageUploads[field]),
+            pendingUploads: listPendingActionImages(draftOf(field)).length,
         };
         // 只在真的变化时同步：这个块每次按键都会跑到，无条件 $set 会让窗口白重渲染一次
         const changed: Partial<typeof next> = {};
@@ -425,6 +522,11 @@
             includeClosed = false;
         }
         scheduleTemporalRefresh();
+        void loadActionTemplates().then((templates) => {
+            actionTemplates = templates;
+        }).catch(() => {
+            actionTemplates = [];
+        });
         return () => {
             clearCompletionUndo();
             if (temporalRefreshTimer) clearTimeout(temporalRefreshTimer);
@@ -783,7 +885,11 @@
     }
 
     function emptyDetailDraft() {
-        return { title: "", type: "", status: "", parent: "", topProject: "", planDate: "", deadline: "", deadlineMode: "pending", duration: "", energy: "", currentAction: "", nextAction: "" };
+        return {
+            title: "", type: "", status: "", parent: "", topProject: "", planDate: "", deadline: "",
+            deadlineMode: "pending", duration: "", energy: "", currentAction: "", nextAction: "",
+            detail: { currentState: "", background: "", prompt: "", guidance: "", definition: "" },
+        };
     }
 
     function resetDetailDraft(item: WorkItem) {
@@ -800,21 +906,67 @@
             energy: item.energy,
             currentAction: item.currentAction,
             nextAction: item.nextAction,
+            detail: {
+                currentState: itemActionDetail(item).currentState,
+                background: itemActionDetail(item).background,
+                prompt: itemActionDetail(item).prompt,
+                guidance: itemActionDetail(item).guidance,
+                definition: itemActionDetail(item).definition,
+            },
         };
         draftSourceId = item.id;
         editingAction = null;
         savingAction = null;
-        actionErrors = { currentAction: "", nextAction: "" };
-        actionCursor = { currentAction: 0, nextAction: 0 };
-        actionComposing = { currentAction: false, nextAction: false };
-        actionRestoredNotice = { currentAction: "", nextAction: "" };
-        savedActionValues = { currentAction: item.currentAction, nextAction: item.nextAction };
+        actionErrors = emptyEditorErrors();
+        actionCursor = emptyEditorRecord(0);
+        actionComposing = emptyEditorRecord(false);
+        actionRestoredNotice = emptyEditorErrors();
+        savedActionValues = editorRecord((field) => savedValueOf(field, item));
         resetActionImages();
         inlineError = "";
     }
 
-    function actionDraftStorageKey(field: ActionField): string {
-        return `siyuan-plugin-xingzhou:action-draft:${draftSourceId ?? ""}:${field}`;
+    function isDetailField(field: EditorField): field is `detail:${ActionDetailField}` | "detail:nextAction" {
+        return field.startsWith("detail:");
+    }
+
+    /** 细则字段在状态表里的键：点号改成不冲突的前缀形式。 */
+    function editorFieldKey(field: EditorField): string {
+        return isDetailField(field) ? field.replace(":", ".") : field;
+    }
+
+    function editorFieldLabel(field: EditorField): string {
+        if (!isDetailField(field)) return field === "currentAction" ? fieldLabel(selected as WorkItem) : "下一步行动";
+        const name = field.slice("detail:".length);
+        if (name === "nextAction") return "下一步行动";
+        return ACTION_DETAIL_FIELDS.find((entry) => entry.key === name)?.label ?? name;
+    }
+
+    /** 读取当前草稿值：旧的行动字段在顶层，细则字段在 detail 子对象里。 */
+    function draftOf(field: EditorField): string {
+        if (!isDetailField(field)) return draftOf(field);
+        return detailDraft.detail[field.slice("detail:".length) as ActionDetailField];
+    }
+
+    function setDraftOf(field: EditorField, value: string): void {
+        if (!isDetailField(field)) {
+            detailDraft = { ...detailDraft, [field]: value };
+            return;
+        }
+        const name = field.slice("detail:".length) as ActionDetailField;
+        detailDraft = { ...detailDraft, detail: { ...detailDraft.detail, [name]: value } };
+    }
+
+    /** 条目里已保存的值：用于判断"有没有改动"。 */
+    function savedValueOf(field: EditorField, item: WorkItem): string {
+        if (!isDetailField(field)) return item[field];
+        const name = field.slice("detail:".length);
+        if (name === "nextAction") return item.nextAction;
+        return itemActionDetail(item)[name as ActionDetailField];
+    }
+
+    function actionDraftStorageKey(field: EditorField): string {
+        return `siyuan-plugin-xingzhou:action-draft:${draftSourceId ?? ""}:${editorFieldKey(field)}`;
     }
 
     /**
@@ -822,7 +974,7 @@
      * 这不是保存（正式内容仍在点击外部／⌘Enter 时写入插件数据），只用于
      * 「刚打的字整段消失」这种系统级输入异常后的找回。
      */
-    function rememberActionDraft(field: ActionField, value: string) {
+    function rememberActionDraft(field: EditorField, value: string) {
         try {
             sessionStorage.setItem(actionDraftStorageKey(field), value);
         } catch {
@@ -830,7 +982,7 @@
         }
     }
 
-    function clearActionDraft(field: ActionField) {
+    function clearActionDraft(field: EditorField) {
         try {
             sessionStorage.removeItem(actionDraftStorageKey(field));
         } catch {
@@ -838,7 +990,7 @@
         }
     }
 
-    function readActionDraft(field: ActionField): string {
+    function readActionDraft(field: EditorField): string {
         try {
             return sessionStorage.getItem(actionDraftStorageKey(field)) ?? "";
         } catch {
@@ -846,18 +998,21 @@
         }
     }
 
-    function startActionEditing(field: ActionField, point?: { x: number; y: number }) {
-        const fieldAvailable = field === "currentAction" ? data?.fields.currentAction : data?.fields.nextAction;
+    function startActionEditing(field: EditorField, point?: { x: number; y: number }) {
+        const fieldAvailable = field === "currentAction" ? data?.fields.currentAction
+            : isDetailField(field) ? true
+                : data?.fields.nextAction;
         if (!selected || !fieldAvailable) return;
         // 窗口已经打开：不要用条目里的旧值重置草稿，否则点一下卡片就会吞掉刚输入的内容
         if (editingAction === field) return;
-        const saved = selected[field];
+        const saved = savedValueOf(field, selected);
         const draft = readActionDraft(field);
         const recovering = draft !== "" && draft !== saved;
         const value = recovering ? draft : saved;
-        detailDraft = { ...detailDraft, [field]: value };
+        setDraftOf(field, value);
         actionRestoredNotice = { ...actionRestoredNotice, [field]: recovering ? "已恢复上次未保存的草稿（本地快照）" : "" };
         actionErrors = { ...actionErrors, [field]: "" };
+        fieldSaveError = "";
         actionCursor = { ...actionCursor, [field]: value.length };
         // 只记坐标；真正的落点在窗口打开后用它自己的编辑框换算（落点因此不再受卡片重排影响）
         actionWindowCaret = null;
@@ -867,7 +1022,7 @@
         const panel = detailElement;
         const panelTop = panel?.scrollTop ?? null;
         const panelMax = panel ? panel.scrollHeight - panel.clientHeight : null;
-        openActionEditorWindow(field, value);
+        openEditorWindow(field, value);
         if (panel && panelTop !== null) {
             /**
              * 浮层打开不应改变面板位置。只在「面板可滚动范围没变」时校正：
@@ -922,7 +1077,8 @@
      * 打开大编辑窗口。卡片本身不动，编辑框位置稳定，因此不会再有"进入编辑时跳一下"，
      * 落点也不受卡片重排影响。
      */
-    function openActionEditorWindow(field: ActionField, value: string) {
+    /** 打开大编辑窗口。旧的行动字段与结构化细则字段共用这一条链路（草稿、光标、图片、保存都复用）。 */
+    function openEditorWindow(field: EditorField, value: string) {
         actionWindowDialog?.destroy();
         actionWindowField = field;
         log.info("editor", "editor.window.open", { field, length: value.length, itemId: selected?.id ?? null });
@@ -938,16 +1094,15 @@
                 saving: savingAction === field,
                 error: actionErrors[field],
                 dragging: actionDragging === field,
-                imageRows: field === "currentAction" ? currentActionImageRows : nextActionImageRows,
-                imageTotal: field === "currentAction" ? currentActionImageTotal : nextActionImageTotal,
-                pendingUploads: listPendingActionImages(detailDraft[field]).length,
+                imageRows: buildActionImageRows(field, draftOf(field), actionImageUploads[field], actionImageSizes[field]),
+                imageTotal: buildActionImageTotal(draftOf(field), actionImageUploads[field]),
+                pendingUploads: listPendingActionImages(draftOf(field)).length,
                 onInput: (next: string, _selectionStart: number, composing: boolean) => {
                     // 列表编号只做最小就地替换；合成期间完全不碰 DOM
                     const editorNode = actionWindowNode();
                     const value = composing || !editorNode ? next : applyOrderedListNormalization(editorNode);
-                    detailDraft = { ...detailDraft, [field]: value };
-                    actionCursor = { ...actionCursor, [field]: actionWindow?.currentCaret() ?? value.length };
-                    if (!composing) rememberActionDraft(field, value);
+                    applyActionDraft(field, value, actionWindow?.currentCaret() ?? value.length);
+                    void composing;
                 },
                 onKeydown: (event: KeyboardEvent) => handleActionKeydown(event, field),
                 onPaste: (event: ClipboardEvent) => handleActionPaste(event, field),
@@ -1008,6 +1163,17 @@
      * 窗口里的实际编辑框节点；窗口可能已经被关掉（保存、取消、点窗口外），因此返回可空。
      * 不能在这里用 `as` 断言成非空：调用点如果发生在下一帧，窗口早已销毁。
      */
+    /**
+     * 打开细则字段的大编辑窗口。
+     * 走和旧行动字段完全相同的链路：草稿兜底、光标落点、图片上传、保存与取消都复用。
+     */
+    function openDetailEditorWindow(field: ActionDetailField | "nextAction") {
+        if (!selected) return;
+        const editorField = (field === "nextAction" ? "detail:nextAction" : `detail:${field}`) as EditorField;
+        detailEditingField = null;
+        startActionEditing(editorField);
+    }
+
     function actionWindowNode(): HTMLTextAreaElement | null {
         const host = actionWindowDialog?.element.querySelector<HTMLTextAreaElement>(".xz-action-editor-window__input");
         if (host) return host;
@@ -1053,33 +1219,34 @@
         // 与卡片内联编辑时的规则保持一致：点到外面 = 保存。
         // 内容已经在 detailDraft 里（每次 input 都同步），所以先把编辑态收干净，
         // 再走统一保存流程；保存失败会写明错误并保留草稿兜底，不会静默丢内容。
-        actionErrors = { ...actionErrors, [field]: "" };
+        actionErrors = { ...actionErrors, [editorFieldKey(field) as EditorField]: "" };
         editingAction = null;
         actionWindowCaret = null;
         void saveAction(field);
     }
 
     /** 编辑结束：先卸下编辑器，再让异步结果决定草稿与保存状态。 */
-    function finishActionEditing(field: ActionField) {
+    function finishActionEditing(field: EditorField) {
         if (editingAction !== field) return;
         closeActionEditorWindow();
         editingAction = null;
         actionWindowCaret = null;
     }
 
-    function cancelActionEditing(field: ActionField) {
+    function cancelActionEditing(field: EditorField) {
         if (!selected) return;
-        detailDraft = { ...detailDraft, [field]: selected[field] };
-        actionErrors = { ...actionErrors, [field]: "" };
-        actionRestoredNotice = { ...actionRestoredNotice, [field]: "" };
+        setDraftOf(field, savedValueOf(field, selected));
+        actionErrors = { ...actionErrors, [editorFieldKey(field) as EditorField]: "" };
+        actionRestoredNotice = { ...actionRestoredNotice, [editorFieldKey(field) as EditorField]: "" };
         clearActionDraft(field);
         resetActionImages(field);
         finishActionEditing(field);
     }
 
     /** 输入链路写入草稿：光标由浏览器维护，这里只记录位置并留一份本地快照。 */
-    function applyActionDraft(field: ActionField, value: string, cursor: number) {
-        detailDraft = { ...detailDraft, [field]: value };
+    function applyActionDraft(field: EditorField, value: string, cursor: number) {
+        setDraftOf(field, value);
+        
         actionCursor = { ...actionCursor, [field]: cursor };
         rememberActionDraft(field, value);
     }
@@ -1088,22 +1255,34 @@
      * 程序化改动草稿（插入图片、回填、移除图片）：编辑中要同步到 DOM，已收起时只改草稿。
      * 提前写入 actionSyncedValues 可让紧随其后的响应式同步跳过，从而保留光标位置。
      */
-    function writeActionDraft(field: ActionField, value: string, cursor: number) {
+    function writeActionDraft(field: EditorField, value: string, cursor: number) {
         // 编辑中：程序化变更（插入图片、移除图片、上传回填）直接写进窗口里的编辑框
         if (editingAction === field) actionWindow?.applyValue(value, cursor);
         actionCursor = { ...actionCursor, [field]: cursor };
-        detailDraft = { ...detailDraft, [field]: value };
+        setDraftOf(field, value);
         rememberActionDraft(field, value);
     }
 
     /** 保存前取值：窗口里的编辑框是唯一真源（输入法合成中的内容也在里面）。 */
-    function actionValueForSave(field: ActionField): string {
+    /**
+     * 编辑结果 → 可写入的变更。
+     * 旧的行动字段直接写同名字段；细则字段要落到结构化对象上（必要时连带更新下一步行动）。
+     */
+    function detailChangesFor(field: EditorField, value: string): WorkItemChanges {
+        if (!selected) return {};
+        if (!isDetailField(field)) return { [field]: value };
+        const name = field.slice("detail:".length);
+        if (name === "nextAction") return { nextAction: value };
+        return { actionDetail: setActionDetailField(itemActionDetail(selected), name as ActionDetailField, value) };
+    }
+
+    function actionValueForSave(field: EditorField): string {
         if (editingAction === field && actionWindow) return actionWindow.currentValue();
-        return detailDraft[field];
+        return draftOf(field);
     }
 
     /** 保存返回后草稿是否已被更新的编辑接管；接管后绝不能用旧快照覆盖。 */
-    async function saveAction(field: ActionField) {
+    async function saveAction(field: EditorField) {
         if (!data || !selected || savingAction) return;
         // 草稿必须属于当前选中条目，否则条目切换中的失焦会把内容写进错误的条目
         if (draftSourceId !== selected.id) return;
@@ -1111,15 +1290,15 @@
             // 图片还在上传：先留在编辑态，上传流程结束后会补一次保存；
             // 不写入半成品后仍可能被其它流程触发保存，这里退化为移除未完成的占位符。
             const cleaned = markdownForStorage(reconcileActionUploads(field, actionValueForSave(field)));
-            detailDraft = { ...detailDraft, [field]: cleaned };
-            actionImageUploads = { ...actionImageUploads, [field]: [] };
+            setDraftOf(field, cleaned);
+            actionImageUploads = { ...actionImageUploads, [editorFieldKey(field) as EditorField]: [] };
             resetActionImages(field);
             return;
         }
         const value = markdownForStorage(reconcileActionUploads(field, actionValueForSave(field)));
-        if (value === selected[field]) {
-            actionImageUploads = { ...actionImageUploads, [field]: [] };
-            savedActionValues = { ...savedActionValues, [field]: value };
+        if (value === savedValueOf(field, selected)) {
+            actionImageUploads = { ...actionImageUploads, [editorFieldKey(field) as EditorField]: [] };
+            savedActionValues = { ...savedActionValues, [editorFieldKey(field) as EditorField]: value };
             clearActionDraft(field);
             finishActionEditing(field);
             return;
@@ -1128,30 +1307,34 @@
         const sourceRowId = selected.rowId;
         log.info("editor", "editor.action.save.start", { field, length: value.length, images: countActionImages(value), itemId: sourceId });
         savingAction = field;
-        actionErrors = { ...actionErrors, [field]: "" };
+        actionErrors = { ...actionErrors, [editorFieldKey(field) as EditorField]: "" };
         try {
-            applyData(await saveItem(data, selected, { [field]: value }));
+            applyData(await saveItem(data, selected, detailChangesFor(field, value)));
             const updated = data?.items.find((item) => item.rowId === sourceRowId);
-            const savedValue = updated?.[field] ?? value;
-            detailDraft = { ...detailDraft, [field]: savedValue };
+            const savedValue = updated ? savedValueOf(field, updated) : value;
+            setDraftOf(field, savedValue);
             if (updated && selectedId === sourceId) draftSourceId = updated.id;
-            actionImageUploads = { ...actionImageUploads, [field]: [] };
-            savedActionValues = { ...savedActionValues, [field]: savedValue };
+            fieldSaveError = "";
+            actionImageUploads = { ...actionImageUploads, [editorFieldKey(field) as EditorField]: [] };
+            savedActionValues = { ...savedActionValues, [editorFieldKey(field) as EditorField]: savedValue };
             clearActionDraft(field);
             finishActionEditing(field);
             log.info("editor", "editor.action.save.ok", { field, length: savedValue.length, itemId: sourceId });
         } catch (caught) {
-            // 写入失败：内容留在草稿与窗口里，绝不静默丢掉
-            detailDraft = { ...detailDraft, [field]: value };
+            // 写入失败：内容留在草稿与窗口里，绝不静默丢掉；详情面板也显示错误，
+            // 否则窗口一关错误就看不见了（窗口按 Esc／点外面关闭后不再存在）。
+            setDraftOf(field, value);
             rememberActionDraft(field, value);
-            actionErrors = { ...actionErrors, [field]: caught instanceof Error ? caught.message : String(caught) };
-            log.error("editor", "editor.action.save.failed", { field, length: value.length, itemId: sourceId, err: actionErrors[field] });
+            const message = caught instanceof Error ? caught.message : String(caught);
+            actionErrors = { ...actionErrors, [field]: message };
+            fieldSaveError = message;
+            log.error("editor", "editor.action.save.failed", { field, length: value.length, itemId: sourceId, err: message });
         } finally {
             savingAction = null;
         }
     }
 
-    function handleActionKeydown(event: KeyboardEvent, field: ActionField) {
+    function handleActionKeydown(event: KeyboardEvent, field: EditorField) {
         if (event.key === "Escape") {
             event.preventDefault();
             cancelActionEditing(field);
@@ -1175,11 +1358,11 @@
         }
     }
 
-    function handleActionInput(event: Event, field: ActionField) {
+    function handleActionInput(event: Event, field: EditorField) {
         if (!(event.target instanceof HTMLTextAreaElement)) return;
         if ((event as InputEvent).isComposing) {
             // 输入法合成期间不回写 DOM，也不在这里做规范化：那会把候选串打散
-            detailDraft = { ...detailDraft, [field]: event.target.value };
+            setDraftOf(field, event.target.value);
             return;
         }
         // 列表编号只做最小就地替换；不需要替换时完全不碰 DOM，浏览器自带的撤销与光标不受影响
@@ -1194,7 +1377,7 @@
      */
     function finishActionComposition(field: ActionField) {
         window.setTimeout(() => {
-            actionComposing = { ...actionComposing, [field]: false };
+            actionComposing = { ...actionComposing, [editorFieldKey(field) as EditorField]: false };
         }, 0);
     }
 
@@ -1235,6 +1418,14 @@
         if (normalized === currentValue) return;
 
         const changes: WorkItemChanges = { [role]: normalized };
+        /*
+         * 完成门槛：状态改成「已完成」但还有未完成切片／待办时，先打开处置层。
+         * 这里和「标记为完成」按钮共用同一个入口，避免两条路径给出不同规则。
+         */
+        if (role === "status" && normalized === "已完成" && requestCompletion(selected)) {
+            resetDetailDraft(selected);
+            return;
+        }
         if (role === "status" || role === "type") {
             // 进入终态时登记待清理图片；由终态改回进行中时清除登记
             const nextStatus = String(changes.status ?? normalized ?? "");
@@ -1329,11 +1520,316 @@
         }
     }
 
+    /* ── 本次行动细则：结构化字段与待办 ───────────────────────────────── */
+
+    /** 细则内容（读取时补齐默认值，旧数据在存储层已完成迁移）。 */
+    function itemActionDetail(item: WorkItem): ActionDetail {
+        return item.actionDetail ?? createEmptyActionDetail();
+    }
+
+    function itemTodos(item: WorkItem): Todo[] {
+        return item.todos ?? [];
+    }
+
+    /** 当前状态的自动行：只放系统知道的事实，不让人手抄一遍。 */
+    function itemAutoFacts(item: WorkItem): string[] {
+        const facts: string[] = [];
+        const todos = itemTodos(item);
+        if (todos.length > 0) {
+            const progress = todoProgress(todos);
+            facts.push(`待办 ${progress.done}/${progress.denominator}`);
+        }
+        if (item.type === "事务" && (item.sliceTargetCount ?? 0) > 0) {
+            facts.push(`切片 ${completedSliceCount(item)}/${item.sliceTargetCount}`);
+        }
+        if (item.updatedAt) facts.push(`最近更新${relativeDayLabel(item.updatedAt)}`);
+        if (item.deadline) {
+            const days = Math.ceil((startOfLocalDay(item.deadline) - startOfLocalDay(Date.now())) / 86400000);
+            facts.push(days >= 0 ? `${formatDate(item.deadline)} 截止（剩 ${days} 天）` : `${formatDate(item.deadline)} 已逾期 ${Math.abs(days)} 天`);
+        }
+        return facts;
+    }
+
+    /** 保存细则：结构化字段变化时由存储层同步生成兼容文本；这里只负责把新值交出去。 */
+    async function saveActionDetail(item: WorkItem, nextDetail: ActionDetail, extra: WorkItemChanges = {}) {
+        if (!data || savingInline || savingSlices) return;
+        savingInline = "actionDetail";
+        inlineError = "";
+        try {
+            applyData(await saveItem(data, item, { actionDetail: nextDetail, ...extra }));
+            const updated = data?.items.find((candidate) => candidate.rowId === item.rowId);
+            if (updated) {
+                selectedId = updated.id;
+                resetDetailDraft(updated);
+            }
+        } catch (caught) {
+            inlineError = caught instanceof Error ? caught.message : String(caught);
+            log.error("ui", "ui.actionDetail.failed", { itemId: item.id, err: inlineError });
+        } finally {
+            savingInline = null;
+        }
+    }
+
+    async function saveTodos(item: WorkItem, todos: Todo[]) {
+        if (!data || savingInline || savingSlices) return;
+        savingInline = "todos";
+        inlineError = "";
+        try {
+            applyData(await saveItem(data, item, { todos: normalizeTodos(todos) }));
+            const updated = data?.items.find((candidate) => candidate.rowId === item.rowId);
+            if (updated) {
+                selectedId = updated.id;
+                resetDetailDraft(updated);
+            }
+        } catch (caught) {
+            inlineError = caught instanceof Error ? caught.message : String(caught);
+            log.error("ui", "ui.todos.failed", { itemId: item.id, err: inlineError });
+        } finally {
+            savingInline = null;
+        }
+    }
+
+    async function handleTodoAdd(item: WorkItem, text: string) {
+        await saveTodos(item, addTodo(itemTodos(item), text));
+    }
+
+    async function handleTodoText(item: WorkItem, id: string, text: string) {
+        const todos = itemTodos(item);
+        if (findTodo(todos, id)?.text === text.trim()) return;
+        await saveTodos(item, updateTodoText(todos, id, text));
+    }
+
+    async function handleTodoDetail(item: WorkItem, id: string, note: string, links: string[]) {
+        const todos = itemTodos(item);
+        const current = findTodo(todos, id);
+        if (!current) return;
+        let next = todos;
+        if (current.note !== note) next = updateTodoNote(next, id, note);
+        if (current.links.join("\n") !== links.join("\n")) next = updateTodoLinks(next, id, links);
+        if (next === todos) return;
+        await saveTodos(item, next);
+    }
+
+    async function handleTodoDone(item: WorkItem, id: string) {
+        const todos = toggleTodoDone(itemTodos(item), id, localDateKey());
+        await saveTodos(item, todos);
+    }
+
+    async function handleTodoDropped(item: WorkItem, id: string) {
+        await saveTodos(item, toggleTodoDropped(itemTodos(item), id));
+    }
+
+    async function handleTodoRestore(item: WorkItem, id: string) {
+        await saveTodos(item, toggleTodoDropped(itemTodos(item), id));
+    }
+
+    async function handleTodoRemove(item: WorkItem, id: string) {
+        await saveTodos(item, removeTodo(itemTodos(item), id));
+    }
+
+    /**
+     * 把待办放进今天这一片：只补今天的执行切片，不动待办本身。
+     * 已有安排、目标数不够或日期不合法时按 scheduleSlice 的规则报错，不静默失败。
+     */
+    async function handleTodosToToday(item: WorkItem, ids: string[]) {
+        if (!data || savingInline || savingSlices) return;
+        if (item.type !== "事务") {
+            inlineError = "只有事务可以安排执行切片；待办会留在清单里。";
+            return;
+        }
+        const today = localDateKey();
+        if ((item.executionSlices ?? []).some((slice) => slice.scheduledDate === today)) {
+            inlineError = "今天已经为这个事务安排过一片了，先把那一片做完或取消。";
+            return;
+        }
+        savingSlices = true;
+        inlineError = "";
+        try {
+            applyData(await saveItem(data, item, withAutomaticSliceStatus(item, { executionSlices: scheduleSlice(item, today) })));
+            const updated = data?.items.find((candidate) => candidate.rowId === item.rowId);
+            if (updated) {
+                selectedId = updated.id;
+                resetDetailDraft(updated);
+            }
+        } catch (caught) {
+            inlineError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            savingSlices = false;
+        }
+    }
+
+    function handleOutcomeAdd(item: WorkItem, text: string) {
+        const detail = addOutcome(itemActionDetail(item), text);
+        return saveActionDetail(item, detail);
+    }
+
+    function handleOutcomeText(item: WorkItem, id: string, text: string) {
+        const detail = itemActionDetail(item);
+        const current = outcomesForDisplay(detail).find((outcome) => outcome.id === id);
+        if (current?.text === text.trim()) return Promise.resolve();
+        return saveActionDetail(item, updateOutcome(detail, id, text));
+    }
+
+    function handleOutcomeRemove(item: WorkItem, id: string) {
+        return saveActionDetail(item, removeOutcome(itemActionDetail(item), id));
+    }
+
+    function handleDetailFieldSave(item: WorkItem, field: ActionDetailField, value: string) {
+        return saveActionDetail(item, setActionDetailField(itemActionDetail(item), field, value));
+    }
+
+    function handleNextActionSave(item: WorkItem, value: string) {
+        const nextAction = value.trim();
+        if (nextAction === item.nextAction.trim()) return Promise.resolve();
+        // 下一步行动是独立字段，但兼容文本由它开头，所以要把结构一起带上重新生成。
+        return saveActionDetail(item, itemActionDetail(item), { nextAction });
+    }
+
+    async function copyPrompt(item: WorkItem) {
+        const prompt = itemActionDetail(item).prompt.trim();
+        if (!prompt) return;
+        try {
+            await navigator.clipboard.writeText(prompt);
+            showMessage("已复制 Prompt");
+        } catch {
+            showMessage("复制失败，请手动选中复制");
+        }
+    }
+
+    /** 套用模板：只补空字段，已写内容不覆盖；没有可补的字段时明确说一句，不静默无反应。 */
+    async function applyActionTemplate(item: WorkItem, name: string) {
+        const template = actionTemplates.find((candidate) => candidate.name === name);
+        if (!template) {
+            inlineError = `没有找到模板「${name}」。`;
+            return;
+        }
+        const before = itemActionDetail(item);
+        const after = fillDetailFromTemplate(before, template);
+        const filled = (["currentState", "background", "prompt", "guidance", "definition"] as ActionDetailField[])
+            .filter((field) => !before[field].trim() && after[field].trim());
+        if (filled.length === 0) {
+            showMessage(`模板「${name}」没有可填的空字段（已写的内容不会被覆盖）`, 4000);
+            return;
+        }
+        await saveActionDetail(item, after);
+        showMessage(`已套用模板「${name}」，补上了 ${filled.length} 个空字段`, 4000);
+    }
+
+    /**
+     * 把当前细则存为模板（只存结构，不含成果条目）。
+     * 名字由卡片里的输入框给出：Electron 渲染进程不支持 window.prompt，之前用它会导致
+     * 「点了没反应」——这里不再依赖任何浏览器弹窗。
+     */
+    async function saveActionTemplate(item: WorkItem, name: string) {
+        const detail = itemActionDetail(item);
+        let template: ActionTemplate;
+        try {
+            template = templateFromDetail(name, detail);
+        } catch (caught) {
+            inlineError = caught instanceof Error ? caught.message : String(caught);
+            return;
+        }
+        if (isTemplateEmpty(template)) {
+            inlineError = "这份细则还是空的，没有可保存的内容。";
+            return;
+        }
+        actionTemplates = upsertActionTemplate(actionTemplates, template);
+        await saveActionTemplates(actionTemplates);
+        showMessage(`已保存模板「${template.name}」`);
+    }
+
+    /* ── 完成门槛：未完成项必须显式处置 ─────────────────────────────── */
+
+    /** 完成事务时若有未完成切片／待办，先打开处置层；否则直接完成。 */
+    function requestCompletion(item: WorkItem): boolean {
+        const blockers = completionBlockers(item.executionSlices ?? [], itemTodos(item), localDateKey());
+        if (!blockers.needsDisposition) return false;
+        completionDialogError = "";
+        completionDialog = { rowId: item.rowId, title: item.title, blockers };
+        return true;
+    }
+
+    /** 处置层的三个选项：全部放弃 / 原样保留 / 记录原因。 */
+    async function confirmCompletion(disposition: CompletionDisposition, reason: string) {
+        if (!data || !completionDialog || completionBusy) return;
+        const rowId = completionDialog.rowId;
+        const item = data.items.find((candidate) => candidate.rowId === rowId);
+        if (!item) {
+            completionDialog = null;
+            return;
+        }
+        const blockers = completionDialog.blockers;
+        const extra: WorkItemChanges = {};
+        if (disposition === "drop-unfinished") {
+            extra.todos = dropOpenTodos(itemTodos(item));
+            extra.executionSlices = abandonUnfinishedSlices(item);
+        } else if (disposition === "keep-outstanding") {
+            extra.actionDetail = withCompletionNote(item, `（结束时有 ${blockers.summary}未完成，已保留为遗留项。）`);
+        } else {
+            const line = completionReasonLine(reason) || `（${localDateKey()} 结束事务。）`;
+            extra.actionDetail = withCompletionNote(item, line);
+        }
+        completionBusy = true;
+        completionDialogError = "";
+        try {
+            await performCompletion(item, extra);
+            completionDialog = null;
+            log.info("ui", "ui.item.complete.disposition", { itemId: item.id, disposition, remaining: blockers.items.length });
+        } catch (caught) {
+            completionDialogError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            completionBusy = false;
+        }
+    }
+
+    /** 把未完成的切片记为放弃，而不是删除：历史保留，且不再占用待安排名额。 */
+    function abandonUnfinishedSlices(item: WorkItem): ExecutionSlice[] {
+        const now = Date.now();
+        return (item.executionSlices ?? []).map((slice) => slice.status === "scheduled" || slice.status === "missed"
+            ? { ...slice, status: "abandoned" as const, completedAt: null, updatedAt: now }
+            : slice);
+    }
+
+    /** 在当前状态里追加一行说明（结束原因、遗留项数量）。 */
+    function withCompletionNote(item: WorkItem, line: string): ActionDetail {
+        const detail = itemActionDetail(item);
+        const current = detail.currentState.trim();
+        return setActionDetailField(detail, "currentState", current ? `${current}\n${line}` : line);
+    }
+
     async function markSelectedComplete() {
         if (!selected || savingInline || savingSlices) return;
-        const previous = { rowId: selected.rowId, title: selected.title, status: selected.status };
-        await saveInline("status", "已完成");
-        const updated = data?.items.find((item) => item.rowId === previous.rowId);
+        if (requestCompletion(selected)) return;
+        await performCompletion(selected);
+    }
+
+    /**
+     * 真正完成：写状态（可带处置产生的附带变更），并维护撤销入口。
+     * 失败时把错误抛给调用方：处置层要留在屏幕上并显示原因，不能静默吞掉。
+     */
+    async function performCompletion(item: WorkItem, extra: WorkItemChanges = {}) {
+        if (!data) return;
+        if (!data.fields.status) {
+            await saveInline("status", "已完成");
+            return;
+        }
+        const previous = { rowId: item.rowId, title: item.title, status: item.status };
+        savingInline = "status";
+        inlineError = "";
+        try {
+            const cleanup = cleanupForStatusChange(item, "已完成", data.items);
+            applyData(await saveItem(data, item, {
+                ...extra,
+                status: "已完成",
+                ...(cleanup ? { imageCleanup: cleanup } : {}),
+            }));
+        } catch (caught) {
+            inlineError = caught instanceof Error ? caught.message : String(caught);
+            throw caught instanceof Error ? caught : new Error(inlineError);
+        } finally {
+            savingInline = null;
+        }
+        const updated = data?.items.find((candidate) => candidate.rowId === previous.rowId);
         if (updated?.status !== "已完成") return;
         if (filter !== "closed" && !(filter === "all" && includeClosed)) {
             if (scope === updated.id) scope = "all";
@@ -1636,7 +2132,10 @@
         if (!data?.fields.currentAction) return [];
         const actionableStatuses = new Set(["待开始", "进行中", "阻塞"]);
         return items
-            .filter((item) => !higherPriorityIds.has(item.id) && (item.type === "事务" || item.type === "想法") && actionableStatuses.has(displayStatus(item.status)) && !item.currentAction.trim())
+            // 判据换成结构化细则 + 下一步行动：只要写过任意一处就不再提示补细则
+            .filter((item) => !higherPriorityIds.has(item.id) && (item.type === "事务" || item.type === "想法")
+                && actionableStatuses.has(displayStatus(item.status))
+                && actionDetailMissing(itemActionDetail(item), item.nextAction))
             .sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
     }
 
@@ -1666,8 +2165,8 @@
             if (candidate.id === item.id || descendants.has(candidate.id)) return false;
             if (candidate.id === currentParentId) return true;
             if (item.type === "项目") return candidate.type === "长期领域" || candidate.type === "项目";
-            if (item.type === "任务") return candidate.type === "项目";
-            if (item.type === "事务" || item.type === "想法") return candidate.type === "项目" || candidate.type === "任务";
+            // 「任务」已退役：执行层（事务／想法）只挂在项目下，层级简化为 领域 → 项目 → 事务／想法。
+            if (item.type === "事务" || item.type === "想法") return candidate.type === "项目";
             return true;
         });
     }
@@ -1816,6 +2315,23 @@
 
     function collapseAll() {
         expandedIds = new Set();
+    }
+
+    /** 「3 天前」这类相对说法；同一天统一说「今天」。 */
+    function relativeDayLabel(timestamp: number | null): string {
+        if (!timestamp) return "";
+        const days = Math.floor((startOfLocalDay(Date.now()) - startOfLocalDay(timestamp)) / 86400000);
+        if (days <= 0) return "今天";
+        if (days === 1) return "昨天";
+        if (days < 30) return `${days} 天前`;
+        const months = Math.floor(days / 30);
+        return months < 12 ? `${months} 个月前` : `${Math.floor(months / 12)} 年前`;
+    }
+
+    function startOfLocalDay(timestamp: number): number {
+        const date = new Date(timestamp);
+        date.setHours(0, 0, 0, 0);
+        return date.getTime();
     }
 
     function formatDate(timestamp: number | null): string {
@@ -2054,7 +2570,7 @@
         assetStatsError = "";
         try {
             const paths = [...new Set((data?.items ?? []).flatMap((item) =>
-                [...listActionImages(item.currentAction), ...listActionImages(item.nextAction)]
+                listItemImages(item)
                     .map((image) => image.src)
                     .filter((src): src is string => Boolean(src) && src.startsWith("assets/"))))];
             const sizes = await readAssetSizes(paths);
@@ -2159,7 +2675,7 @@
         if (event.target instanceof HTMLTextAreaElement) actionCursor[field] = event.target.selectionStart ?? 0;
     }
 
-    function resetActionImages(field?: ActionField) {
+    function resetActionImages(field?: EditorField) {
         const target = field ? [field] : (["currentAction", "nextAction"] as ActionField[]);
         const uploads = { ...actionImageUploads };
         const sizes = { ...actionImageSizes };
@@ -2171,7 +2687,7 @@
         actionImageSizes = sizes;
     }
 
-    function applyDetailEdit(field: ActionField, edit: ActionEdit) {
+    function applyDetailEdit(field: EditorField, edit: ActionEdit) {
         writeActionDraft(field, edit.value, edit.cursor);
     }
 
@@ -2179,26 +2695,26 @@
     function markdownForStorage(value: string): string {
         return compactImageSpacing(value).replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n").trim();
     }
-    function pendingUploadCount(field: ActionField): number {
-        return listPendingActionImages(detailDraft[field]).length;
+    function pendingUploadCount(field: EditorField): number {
+        return listPendingActionImages(draftOf(field)).length;
     }
 
-    function actionDraftKey(field: ActionField): string {
+    function actionDraftKey(field: EditorField): string {
         return `${selected?.id ?? ""}:${field}`;
     }
 
-    function queueUpload(field: ActionField, record: ActionImageUpload) {
+    function queueUpload(field: EditorField, record: ActionImageUpload) {
         actionImageUploads = { ...actionImageUploads, [field]: [...actionImageUploads[field], record] };
     }
 
-    function patchUpload(field: ActionField, uploadId: string, changes: Partial<ActionImageUpload>) {
+    function patchUpload(field: EditorField, uploadId: string, changes: Partial<ActionImageUpload>) {
         actionImageUploads = {
             ...actionImageUploads,
             [field]: actionImageUploads[field].map((entry) => (entry.uploadId === uploadId ? { ...entry, ...changes } : entry)),
         };
     }
 
-    function setImageSize(field: ActionField, src: string, bytes: number | null) {
+    function setImageSize(field: EditorField, src: string, bytes: number | null) {
         actionImageSizes = { ...actionImageSizes, [field]: { ...actionImageSizes[field], [src]: bytes } };
     }
 
@@ -2206,14 +2722,14 @@
         return fileNameFromSource(src) || src;
     }
 
-    function handleActionPaste(event: ClipboardEvent, field: ActionField) {
+    function handleActionPaste(event: ClipboardEvent, field: EditorField) {
         const images = extractClipboardImages(event.clipboardData);
         if (images.length === 0) return;
         event.preventDefault();
         void uploadActionImages(field, images);
     }
 
-    function handleActionDragOver(event: DragEvent, field: ActionField) {
+    function handleActionDragOver(event: DragEvent, field: EditorField) {
         const types = event.dataTransfer ? Array.from(event.dataTransfer.types) : [];
         if (!types.includes("Files")) return;
         event.preventDefault();
@@ -2221,13 +2737,13 @@
         actionDragging = field;
     }
 
-    function handleActionDragLeave(event: DragEvent, field: ActionField) {
+    function handleActionDragLeave(event: DragEvent, field: EditorField) {
         const next = event.relatedTarget;
         if (next instanceof Node && event.currentTarget instanceof Node && event.currentTarget.contains(next)) return;
         if (actionDragging === field) actionDragging = null;
     }
 
-    function handleActionDrop(event: DragEvent, field: ActionField) {
+    function handleActionDrop(event: DragEvent, field: EditorField) {
         const images = extractDroppedImages(event.dataTransfer);
         actionDragging = null;
         if (images.length === 0) return;
@@ -2235,7 +2751,7 @@
         void uploadActionImages(field, images);
     }
 
-    function handleActionImageClick(event: MouseEvent, field: ActionField) {
+    function handleActionImageClick(event: MouseEvent, field: EditorField) {
         const target = event.target;
         if (!(target instanceof HTMLImageElement)) return;
         const src = target.currentSrc || target.src;
@@ -2263,7 +2779,7 @@
         });
     }
 
-    function openActionImagePreview(field: ActionField, src: string) {
+    function openActionImagePreview(field: EditorField, src: string) {
         actionPreviewDialog?.destroy();
         const name = imageLabel(src);
         const known = actionImageSizes[field][src];
@@ -2282,11 +2798,11 @@
     }
 
     /** 草稿是否仍属于发起操作时的那条条目；用于丢弃条目切换后的迟到结果。 */
-    function isStaleActionDraft(field: ActionField, draftKey: string, sourceItemId: string): boolean {
+    function isStaleActionDraft(field: EditorField, draftKey: string, sourceItemId: string): boolean {
         return draftKey !== `${sourceItemId}:${field}` || actionDraftKey(field) !== draftKey;
     }
 
-    async function uploadActionImages(field: ActionField, files: File[]) {
+    async function uploadActionImages(field: EditorField, files: File[]) {
         const draftKey = actionDraftKey(field);
         const sourceItemId = selected?.id ?? "";
         const staleUpload = () => isStaleActionDraft(field, draftKey, sourceItemId);
@@ -2295,17 +2811,17 @@
             try {
                 hash = await hashImageFile(file);
             } catch (caught) {
-                actionErrors = { ...actionErrors, [field]: caught instanceof Error ? caught.message : String(caught) };
+                actionErrors = { ...actionErrors, [editorFieldKey(field)]: caught instanceof Error ? caught.message : String(caught) };
                 return;
             }
             const uploadId = placeholderIdFor(hash);
-            if (findPlaceholderSyntax(detailDraft[field], uploadId)) {
+            if (findPlaceholderSyntax(draftOf(field), uploadId)) {
                 showMessage(`这张图片已经插入过：${imageFileNameFor(hash, file)}`, 4000);
                 continue;
             }
 
             const cursor = actionCursor[field];
-            const inserted = insertImageSyntax(detailDraft[field], cursor, cursor, uploadPlaceholderSyntax(uploadId, file.name));
+            const inserted = insertImageSyntax(draftOf(field), cursor, cursor, uploadPlaceholderSyntax(uploadId, file.name));
             writeActionDraft(field, inserted.value, inserted.cursor);
             const upload: ActionImageUpload = {
                 uploadId,
@@ -2325,11 +2841,11 @@
                 const done = { status: "done" as const, src: result.path, bytes: result.bytes ?? upload.bytes, name: result.name || upload.name };
                 patchUpload(field, uploadId, done);
                 setImageSize(field, result.path, result.bytes ?? upload.bytes);
-                const placeholder = findPlaceholderSyntax(detailDraft[field], uploadId);
+                const placeholder = findPlaceholderSyntax(draftOf(field), uploadId);
                 if (placeholder) {
                     const replacement = markdownImageSyntax(result.path);
-                    const cursor = shiftCursorForReplacement(detailDraft[field].indexOf(placeholder), placeholder.length, replacement.length, actionCursor[field]);
-                    writeActionDraft(field, detailDraft[field].replace(placeholder, replacement), cursor);
+                    const cursor = shiftCursorForReplacement(draftOf(field).indexOf(placeholder), placeholder.length, replacement.length, actionCursor[field]);
+                    writeActionDraft(field, draftOf(field).replace(placeholder, replacement), cursor);
                 }
             } catch (caught) {
                 if (staleUpload()) continue;
@@ -2337,15 +2853,15 @@
                 patchUpload(field, uploadId, { status: "failed", error: message });
                 actionErrors = { ...actionErrors, [field]: message };
                 // 失败后不能把占位符留在内容里：整行移除，用户可重新粘贴。
-                const placeholder = findPlaceholderSyntax(detailDraft[field], uploadId);
-                if (placeholder) writeActionDraft(field, removeImageLine(detailDraft[field], placeholder), actionCursor[field]);
+                const placeholder = findPlaceholderSyntax(draftOf(field), uploadId);
+                if (placeholder) writeActionDraft(field, removeImageLine(draftOf(field), placeholder), actionCursor[field]);
             }
         }
         await flushActionImages(field, draftKey, sourceItemId);
     }
 
     /** 上传完成后把占位符换回真实路径；失败或中止的占位符不会写进条目。 */
-    function reconcileActionUploads(field: ActionField, saved: string) {
+    function reconcileActionUploads(field: EditorField, saved: string) {
         const uploads = actionImageUploads[field];
         if (uploads.length === 0) return saved;
         let next = saved;
@@ -2364,21 +2880,21 @@
     }
 
     /** 上传结束后按需补一次保存；占位符未就绪或草稿已失效时不写入。 */
-    async function flushActionImages(field: ActionField, draftKey: string, sourceItemId: string) {
+    async function flushActionImages(field: EditorField, draftKey: string, sourceItemId: string) {
         if (!selected || savingAction) return;
         if (isStaleActionDraft(field, draftKey, sourceItemId)) return;
         if (pendingUploadCount(field) > 0) return;
-        if (detailDraft[field] === savedActionValues[field]) return;
+        if (draftOf(field) === savedActionValues[field]) return;
         await saveAction(field);
     }
 
-    function removeDraftImage(field: ActionField, syntax: string) {
-        applyDetailEdit(field, { value: removeImageLine(detailDraft[field], syntax), cursor: actionCursor[field] });
+    function removeDraftImage(field: EditorField, syntax: string) {
+        applyDetailEdit(field, { value: removeImageLine(draftOf(field), syntax), cursor: actionCursor[field] });
     }
 
     /** 缩略图行始终由当前内容推导：从内容里删掉的图片不会从上传统计里"复活"。 */
     function buildActionImageRows(
-        field: ActionField,
+        field: EditorField,
         draft: string,
         uploads: ActionImageUpload[],
         sizes: Record<string, number | null>,
@@ -2417,10 +2933,10 @@
         return countActionImages(draft) + uploads.filter((upload) => upload.status !== "failed").length;
     }
 
-    function retryActionUpload(field: ActionField, uploadId: string) {
+    function retryActionUpload(field: EditorField, uploadId: string) {
         const upload = actionImageUploads[field].find((entry) => entry.uploadId === uploadId);
         if (!upload) return;
-        removeDraftImage(field, findPlaceholderSyntax(detailDraft[field], uploadId) ?? "");
+        removeDraftImage(field, findPlaceholderSyntax(draftOf(field), uploadId) ?? "");
         actionImageUploads = { ...actionImageUploads, [field]: actionImageUploads[field].filter((entry) => entry.uploadId !== uploadId) };
         showMessage("请重新粘贴这张图片", 4000);
     }
@@ -3008,7 +3524,7 @@
                     </div>
 
                     <div class="xz-meta-grid xz-meta-grid--editable">
-                        <label><span>工作项类型</span><select class="b3-select xz-meta-type-select" aria-label="工作项类型" bind:value={detailDraft.type} disabled={Boolean(savingInline)} on:change={() => void saveInline("type", detailDraft.type)}><option value="">未分类</option>{#each data.fields.type?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
+                        <label><span>工作项类型</span><select class="b3-select xz-meta-type-select" aria-label="工作项类型" bind:value={detailDraft.type} disabled={Boolean(savingInline)} on:change={() => void saveInline("type", detailDraft.type)}><option value="">未分类</option>{#if detailDraft.type && !(data.fields.type?.options ?? []).some((option) => option.name === detailDraft.type)}<option value={detailDraft.type}>{detailDraft.type}（旧类型）</option>{/if}{#each data.fields.type?.options ?? [] as option}<option value={option.name}>{option.name}</option>{/each}</select></label>
                         <label><span>{selectedProfile?.statusLabel ?? "状态"} {#if selected.type !== "长期领域" && hasOngoingDescendant(selected.id, tree) && selected.status !== "进行中" && selected.status !== "活跃" && selected.status !== "收件箱" && selected.status !== "待开始" && selected.status !== "已计划"}<em class="xz-date-hint xz-date-hint--pending">下级仍在进行</em>{/if}</span><select class="b3-select xz-meta-status-select" aria-label={selectedProfile?.statusLabel ?? "状态"} bind:value={detailDraft.status} disabled={Boolean(savingInline)} on:change={() => void saveInline("status", detailDraft.status)}><option value="">未设置</option>{#if detailDraft.status && !selectedProfile?.statuses.includes(detailDraft.status)}<option value={detailDraft.status}>{detailDraft.status}{legacyStatuses.has(detailDraft.status) ? "（旧状态）" : "（当前值）"}</option>{/if}{#each selectedProfile?.statuses ?? [] as status}<option value={status}>{status}</option>{/each}</select></label>
                         {#if selectedProfile?.showParent}
                             <label><span>{selectedProfile.parentLabel}</span><select class="b3-select" bind:value={detailDraft.parent} disabled={Boolean(savingInline)} on:change={() => void saveInline("parent", detailDraft.parent)}><option value="">—</option>{#each parentCandidates as item}<option value={item.id}>{item.title}</option>{/each}</select></label>
@@ -3030,6 +3546,7 @@
                     {#if selectedProfile?.showDeadline && !data.fields.noDeadline}<p class="xz-missing-field"><strong>内部字段暂不可用</strong><span>请重新加载插件后再设置“无截止日期”。</span></p>{/if}
                     {#if savingInline}<p class="xz-inline-feedback">正在保存并复核……</p>{/if}
                     {#if inlineError}<p class="xz-save-error" role="alert">{inlineError}</p>{/if}
+                    {#if fieldSaveError}<p class="xz-save-error" role="alert">{fieldSaveError}</p>{/if}
 
                     {#if selected.type === "事务"}
                         <ExecutionSlicePlanner item={selected} items={data.items} disabled={Boolean(savingInline)} save={saveSelectedSlices} saveUndo={(changes) => saveSelectedSlices(changes, { sliceUndo: true })} complete={() => markSelectedComplete()} />
@@ -3069,69 +3586,43 @@
                         {/if}
                     </section>
 
-                    {#if data.fields.currentAction}
-                        <section
-                            class:xz-action-card--editing={editingAction === "currentAction"}
-                            class:xz-action-card--drop={actionDragging === "currentAction"}
-                            class="xz-action-card xz-action-card--primary xz-action-card--editable"
-                            role="button"
-                            tabindex="0"
-                            on:click={(event) => startActionEditing("currentAction", { x: event.clientX, y: event.clientY })}
-                            on:keydown={(event) => handleActionCardKeydown(event, "currentAction")}
-                            on:dragover={(event) => handleActionDragOver(event, "currentAction")}
-                            on:dragleave={(event) => handleActionDragLeave(event, "currentAction")}
-                            on:drop={(event) => handleActionDrop(event, "currentAction")}
-                        >
-                            <header>
-                                <h3>{fieldLabel(selected)}</h3>
-                                <span class="xz-action-actions">
-                                    {#if selectedCleanupBadge}
-                                        <button class="xz-cleanup-badge" type="button" title="条目已结束，这些图片在宽限期后可以清理" on:mousedown|preventDefault on:click|stopPropagation={() => openCleanupPage()}>{selectedCleanupBadge}</button>
-                                    {/if}
-                                    <span>{savingAction === "currentAction" ? "正在保存并复核…" : editingAction === "currentAction" ? "在大编辑窗口中编辑 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span>
-                                </span>
-                            </header>
-                            {#if editingAction === "currentAction"}
-                                <p class="xz-action-hint xz-action-hint--window">正在大编辑窗口中编辑「{fieldLabel(selected)}」；保存或取消后回到这里。</p>
-                            {:else if selected.currentAction}
-                                <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-                                <div class="xz-markdown-preview" on:click={(event) => handleActionImageClick(event, "currentAction")} on:contextmenu={handleImageContextMenu}>{@html renderActionMarkdown(selected.currentAction)}</div>
-                            {:else}
-                                <p class="xz-action-empty">尚未填写。</p>
-                            {/if}
-                            {#if actionErrors.currentAction}<p class="xz-action-error" role="alert">{actionErrors.currentAction}</p>{/if}
-                        </section>
-                    {:else}
-                        <section class="xz-action-card xz-action-card--primary xz-action-card--missing">
-                            <header><h3>{fieldLabel(selected)}</h3></header>
-                            <p>内部字段暂不可用，请重新加载插件。</p>
-                        </section>
+                    {#if selected.type === "事务" || selected.type === "想法"}
+                        <TodoListCard
+                            todos={itemTodos(selected)}
+                            disabled={Boolean(savingInline || savingSlices)}
+                            relativeDay={relativeDayLabel}
+                            on:add={(event) => void handleTodoAdd(currentItem, event.detail.text)}
+                            on:text={(event) => void handleTodoText(currentItem, event.detail.id, event.detail.text)}
+                            on:detail={(event) => void handleTodoDetail(currentItem, event.detail.id, event.detail.note, event.detail.links)}
+                            on:done={(event) => void handleTodoDone(currentItem, event.detail.id)}
+                            on:dropped={(event) => void handleTodoDropped(currentItem, event.detail.id)}
+                            on:restore={(event) => void handleTodoRestore(currentItem, event.detail.id)}
+                            on:remove={(event) => void handleTodoRemove(currentItem, event.detail.id)}
+                            on:today={(event) => void handleTodosToToday(currentItem, event.detail.ids)}
+                        />
                     {/if}
-                    {#if selectedProfile?.showNextAction}
-                        <section
-                            class:xz-action-card--editing={editingAction === "nextAction"}
-                            class:xz-action-card--drop={actionDragging === "nextAction"}
-                            class="xz-action-card xz-action-card--editable"
-                            role="button"
-                            tabindex="0"
-                            on:click={(event) => startActionEditing("nextAction", { x: event.clientX, y: event.clientY })}
-                            on:keydown={(event) => handleActionCardKeydown(event, "nextAction")}
-                            on:dragover={(event) => handleActionDragOver(event, "nextAction")}
-                            on:dragleave={(event) => handleActionDragLeave(event, "nextAction")}
-                            on:drop={(event) => handleActionDrop(event, "nextAction")}
-                        >
-                            <header><h3>下一步行动</h3><span>{savingAction === "nextAction" ? "正在保存并复核…" : editingAction === "nextAction" ? "在大编辑窗口中编辑 · ⌘/Ctrl+Enter 保存" : "点击编辑"}</span></header>
-                            {#if editingAction === "nextAction"}
-                                <p class="xz-action-hint xz-action-hint--window">正在大编辑窗口中编辑「下一步行动」；保存或取消后回到这里。</p>
-                                                        {:else if selected.nextAction}
-                                <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-                                <div class="xz-markdown-preview" on:click={(event) => handleActionImageClick(event, "nextAction")} on:contextmenu={handleImageContextMenu}>{@html renderActionMarkdown(selected.nextAction)}</div>
-                            {:else}
-                                <p class="xz-action-empty">尚未填写明确的下一步行动。</p>
-                            {/if}
-                            {#if actionErrors.nextAction}<p class="xz-action-error" role="alert">{actionErrors.nextAction}</p>{/if}
-                        </section>
-                    {/if}
+
+                    <ActionDetailCard
+                        title={selectedProfile?.actionLabel ?? "本次行动细则"}
+                        detail={itemActionDetail(selected)}
+                        nextAction={selected.nextAction}
+                        autoFacts={itemAutoFacts(selected)}
+                        disabled={Boolean(savingInline || savingSlices)}
+                        templateNames={actionTemplateNames}
+                        fieldNotice={data.fields.currentAction || data.fields.nextAction ? "" : "内部字段暂不可用，请重新加载插件。"}
+                        cleanupBadge={selectedCleanupBadge ?? ""}
+                        onCleanupBadge={openCleanupPage}
+                        onImageClick={(event, field) => handleActionImageClick(event, field === "nextAction" ? "nextAction" : `detail:${field}`)}
+                        onImageContextMenu={handleImageContextMenu}
+                        on:edit={(event) => openDetailEditorWindow(event.detail.field)}
+                        on:nextAction={() => openDetailEditorWindow("nextAction")}
+                        on:addOutcome={(event) => void handleOutcomeAdd(currentItem, event.detail.text)}
+                        on:outcomeText={(event) => void handleOutcomeText(currentItem, event.detail.id, event.detail.text)}
+                        on:removeOutcome={(event) => void handleOutcomeRemove(currentItem, event.detail.id)}
+                        on:copyPrompt={() => void copyPrompt(currentItem)}
+                        on:applyTemplate={(event) => void applyActionTemplate(currentItem, event.detail.name)}
+                                        on:saveTemplate={(event) => void saveActionTemplate(currentItem, event.detail.name)}
+                    />
 
                     {#if selectedIssues.length > 0}
                         <section class="xz-issues"><h3>关系提示</h3>{#each selectedIssues as issue}<p>{issue.message}</p>{/each}</section>
@@ -3144,12 +3635,23 @@
                     {:else}
                         <p class="xz-detached-note">这是行舟内部工作项，当前没有关联思源文档。</p>
                     {/if}
-                    <p class="xz-detail-note">点击行动卡片可从点击处开始编辑；点到别处即保存，Esc 取消，⌘/Ctrl+Enter 立即保存。修改会写入插件内部数据并重新读取复核。</p>
+                    <p class="xz-detail-note">待办勾选与打叉即时保存；细则字段点「编辑 / 大窗口编辑」打开编辑窗口，⌘/Ctrl+Enter 保存、Esc 取消。修改会写入插件内部数据并重新读取复核。</p>
                 {:else}
                     <div class="xz-empty"><p>选择一个工作项查看详情。</p></div>
                 {/if}
             </aside>
         </main>
+    {/if}
+
+    {#if completionDialog}
+        <CompletionDialog
+            title={completionDialog.title}
+            blockers={completionDialog.blockers}
+            disabled={completionBusy}
+            error={completionDialogError}
+            on:confirm={(event) => void confirmCompletion(event.detail.disposition, event.detail.reason)}
+            on:cancel={() => { completionDialog = null; completionDialogError = ""; }}
+        />
     {/if}
 
     {#if completionUndo}

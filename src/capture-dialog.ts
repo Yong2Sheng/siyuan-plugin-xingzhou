@@ -106,7 +106,8 @@ export function showCaptureDialog(options: NativeCaptureDialogOptions): Dialog {
 
     if (options.mode === "child") {
         show(typeRow);
-        setOptions(typeSelect, ["项目", "任务", "事务", "想法"]);
+        // 「任务」已退役：层级简化为 长期领域 → 项目 → 事务／想法；存量任务仍能正常显示与改写类型。
+        setOptions(typeSelect, ["项目", "事务", "想法"]);
         typeSelect.value = options.parent?.type === "长期领域" ? "项目" : "事务";
         show(parentRow);
         parentValue.textContent = options.parent?.title ?? "未指定";

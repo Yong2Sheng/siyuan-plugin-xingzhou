@@ -65,6 +65,7 @@ import {
 import { loadWorkItems, type InboxCaptureOptions, type WorkItem, type WorkItemChanges, type WorkItemData, type WorkItemViewState } from "./work-items";
 import { UI_STATE_FILE, parseViewStateFile, wrapViewStateFile } from "./ui-state";
 import { TREND_VIEW_FILE, parseTrendViewFile, wrapTrendViewFile } from "./trend-view";
+import { ACTION_TEMPLATE_FILE, parseActionTemplates, wrapActionTemplates, type ActionTemplate } from "./action-templates";
 import type { TrendViewSettings } from "./trend-metrics";
 import { requestSiYuan } from "./siyuan-api";
 import "./index.scss";
@@ -100,6 +101,7 @@ export default class XingzhouPlugin extends Plugin {
     private mutationQueue: Promise<void> = Promise.resolve();
     private viewStateSaveQueue: Promise<void> = Promise.resolve();
     private trendViewSaveQueue: Promise<void> = Promise.resolve();
+    private actionTemplateSaveQueue: Promise<void> = Promise.resolve();
     private logPanel?: LogPanelHandle;
     /** 思源内核版本：导出日志时带上，便于按版本比对行为。 */
     private kernelVersion = "";
@@ -330,6 +332,8 @@ export default class XingzhouPlugin extends Plugin {
                             saveProjectViewState: (state: WorkItemViewState) => plugin.saveProjectViewState(state),
                             loadTrendViewState: () => plugin.loadTrendViewState(),
                             saveTrendViewState: (state: TrendViewSettings) => plugin.saveTrendViewState(state),
+                            loadActionTemplates: () => plugin.loadActionTemplates(),
+                            saveActionTemplates: (templates: ActionTemplate[]) => plugin.saveActionTemplates(templates),
                             openLog: () => plugin.openLog(),
                         },
                     });
@@ -1020,6 +1024,33 @@ export default class XingzhouPlugin extends Plugin {
             log.verbose("ui", "ui.trendView.load", { usable: false, err: describeError(error) });
             return null;
         }
+    }
+
+    /** 行动细则模板（非关键 UI 数据）：独立文件，损坏时回落为空列表。 */
+    private async loadActionTemplates(): Promise<ActionTemplate[]> {
+        try {
+            await this.actionTemplateSaveQueue;
+            const raw: unknown = await this.loadData(ACTION_TEMPLATE_FILE);
+            const templates = parseActionTemplates(raw);
+            log.verbose("ui", "ui.actionTemplates.load", { count: templates.length });
+            return templates;
+        } catch (error) {
+            log.verbose("ui", "ui.actionTemplates.load", { count: 0, err: describeError(error) });
+            return [];
+        }
+    }
+
+    private async saveActionTemplates(templates: ActionTemplate[]): Promise<void> {
+        this.actionTemplateSaveQueue = this.actionTemplateSaveQueue.then(async () => {
+            try {
+                await this.saveData(ACTION_TEMPLATE_FILE, wrapActionTemplates(templates));
+                log.verbose("ui", "ui.actionTemplates.save", { count: templates.length });
+            } catch (error) {
+                // 非关键数据：失败只留痕，不影响任何正式数据写入
+                log.verbose("ui", "ui.actionTemplates.save.failed", { err: describeError(error) });
+            }
+        }).catch(() => undefined);
+        return this.actionTemplateSaveQueue;
     }
 
     private async saveTrendViewState(state: TrendViewSettings): Promise<void> {
