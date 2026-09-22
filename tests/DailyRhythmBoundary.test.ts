@@ -1,5 +1,5 @@
 import { tick } from "svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DailyRhythm from "../src/DailyRhythm.svelte";
 import { createEmptyDailyStore, createDailyRecord, upsertDailyRecord, type DailyRecord } from "../src/daily-records";
 import { boundaryKeyFor, cloneChecklistStore, createDefaultChecklistStore, reminderIdFor, type ChecklistStore } from "../src/checklist";
@@ -20,8 +20,19 @@ function todayDayType(): string {
 }
 
 /**
+ * 把"现在"钉在本地时间 14:00（见 beforeEach），两条提醒就是固定的 −32 / +28 分钟：
+ * 既不会跨午夜，也不会落进「整天开始后 3 小时内的过去时刻算今天」那条兼容分支。
+ *
+ * 之前直接用真实时钟摆放（`clock(-32)` / `clock(28)`），23:32 之后 +28 会跨到第二天，
+ * 而面板按当天判断会正确地排除它——断言于是在午夜窗口必然失败，与产品行为无关。
+ */
+const FIXED_NOW = new Date(2026, 8, 21, 14, 0, 0, 0);
+const OVERDUE_MINUTES = -32;
+const SOON_MINUTES = 28;
+
+/**
  * 只保留两条自己造的边界提醒，时间相对「现在」摆放，保证任何时刻、任何星期、任何时区运行都成立：
- * 一条已过 32 分钟（逾期），一条 28 分钟后（即将到来）。用空模板而不是默认模板，
+ * 一条已过（逾期），一条即将到来（同一天内）。用空模板而不是默认模板，
  * 是为了彻底避免与默认边界时间（鱼油 08:45／12:10／18:00 等）在时钟上撞车。
  */
 function checklistWithBoundaries(): { store: ChecklistStore; overdueKey: string; soonKey: string } {
@@ -43,18 +54,28 @@ function checklistWithBoundaries(): { store: ChecklistStore; overdueKey: string;
             boundaries: { [boundaryKeyFor(id, reminderIdFor(id, index))]: clock(minutesFromNow) },
         };
     };
-    const overdue = reminder("bd-overdue", "下班收尾仪式", 0, -32, "提醒响起立即停，不做“最后一点”");
-    const soon = reminder("bd-soon", "准备明天", 1, 28, "平光镜放进书包");
+    const overdue = reminder("bd-overdue", "下班收尾仪式", 0, OVERDUE_MINUTES, "提醒响起立即停，不做“最后一点”");
+    const soon = reminder("bd-soon", "准备明天", 1, SOON_MINUTES, "平光镜放进书包");
     store.templates = store.templates.map((candidate) => candidate.id === templateId
         ? { ...candidate, subtitle: "仅用于边界提醒测试", entries: [overdue, soon] }
         : { ...candidate, entries: candidate.entries.map(({ boundaries: _boundaries, ...rest }) => rest) });
-    return { store, overdueKey: boundaryKeyFor("bd-overdue", reminderIdFor("bd-overdue", 0)), soonKey: boundaryKeyFor("bd-soon", reminderIdFor("bd-soon", 1)) };
+    return {
+        store,
+        overdueKey: boundaryKeyFor("bd-overdue", reminderIdFor("bd-overdue", 0)),
+        soonKey: boundaryKeyFor("bd-soon", reminderIdFor("bd-soon", 1)),
+    };
 }
 
 describe("今日记录里的边界提醒", () => {
     let component: { $destroy(): void } | undefined;
 
+    beforeEach(() => {
+        // 只改"现在几点"，不接管定时器：Svelte 的 tick 与 waitFor 仍需真实时间
+        vi.setSystemTime(FIXED_NOW);
+    });
+
     afterEach(() => {
+        vi.useRealTimers();
         component?.$destroy();
         component = undefined;
         document.body.replaceChildren();
@@ -102,7 +123,7 @@ describe("今日记录里的边界提醒", () => {
         expect(saved.dayStates.find((state) => state.date === localDateKey())?.reminderStates).toMatchObject({ [fixture.overdueKey]: "completed" });
         expect(saved.revision).toBeGreaterThan(1);
         await tick();
-        // 确认后该项从「待确认」移到「已完成」，标题随之减少一件
+        // 确认后该项从「待确认」移到「已完成」，标题随之减少一件（此时只剩那条"即将到来"）
         await vi.waitFor(() => expect(document.querySelector(".xz-daily-boundary-panel > header strong")?.textContent).toBe("现在要确认的 1 件事"));
         expect(document.querySelector(".xz-boundary-item.is-done")?.textContent).toContain("下班收尾仪式");
         expect(document.querySelector(".xz-boundary-item.is-done")?.textContent).toContain("✓ 已确认");
