@@ -1285,7 +1285,8 @@ describe("XingzhouApp", () => {
     describe("行动长文编辑", () => {
         const longNote = Array.from({ length: 40 }, (_, index) => `第 ${index + 1} 行：用 SN taxonomy 举例，这一段要足够长以便撑出滚动。`).join("\n");
 
-        function actionFixture() {
+        /** itemOverrides 用来构造「多个细则字段都有内容」的条目，例如验证窗口标题与字段是否对得上。 */
+        function actionFixture(itemOverrides: Partial<WorkItem> = {}) {
             const now = Date.now();
             const item: WorkItem = {
                 id: "tx-long", rowId: "tx-long", title: "整理 Hardness ratio 笔记", documentId: null, detached: true,
@@ -1295,6 +1296,7 @@ describe("XingzhouApp", () => {
                 parentIds: [], topProjectIds: [], hardPrerequisiteIds: [], softPrerequisiteIds: [],
                 planDate: null, deadline: null, noDeadline: false, durationMinutes: 30, energy: "", updatedAt: now,
                 executionSlices: [],
+                ...itemOverrides,
             };
             const buildData = (items: WorkItem[]): WorkItemData => ({
                 attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
@@ -1307,8 +1309,8 @@ describe("XingzhouApp", () => {
             return { item, buildData };
         }
 
-        function mountFixture(overrides: { saveItem?: (data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData> } = {}) {
-            const { item, buildData } = actionFixture();
+        function mountFixture(overrides: { saveItem?: (data: WorkItemData, item: WorkItem, changes: WorkItemChanges) => Promise<WorkItemData>; item?: Partial<WorkItem> } = {}) {
+            const { item, buildData } = actionFixture(overrides.item);
             const saveItem = overrides.saveItem ?? vi.fn(async (currentData: WorkItemData, currentItem: WorkItem, changes: WorkItemChanges) => buildData(
                 currentData.items.map((entry): WorkItem => entry.id === currentItem.id ? { ...entry, ...changes } as WorkItem : entry),
             ));
@@ -1381,6 +1383,53 @@ describe("XingzhouApp", () => {
             expect(node.selectionStart).toBeLessThanOrEqual(node.value.length);
             const detail = document.querySelector<HTMLElement>(".xz-detail")!;
             expect(detail.scrollTop).toBe(0);
+        });
+
+        /**
+         * 回归：细则字段的编辑窗口必须显示**当前字段**的名字。
+         * 曾经 openEditorWindow 把除 currentAction 以外的字段一律标成「下一步行动」，
+         * 于是点「Prompt」的编辑会跳出一个标题写着「下一步行动」的窗口，看起来像开错了字段。
+         */
+        it("细则字段的编辑窗口显示自己的字段名，内容也来自该字段", async () => {
+            const prompt = "请把这段笔记按 SN taxonomy 重写一遍";
+            const background = "课题组要求三个月内交出初稿";
+            const nextAction = "把垃圾装袋并带到楼下";
+            const { saveItem } = mountFixture({
+                item: {
+                    nextAction,
+                    actionDetail: { ...createEmptyActionDetail(), currentState: longNote, prompt, background },
+                },
+            });
+            const saveSpy = saveItem as unknown as { mock: { calls: Array<[WorkItemData, WorkItem, WorkItemChanges]> } };
+            const dialogTitle = () => document.querySelector(".b3-dialog__header span")?.textContent ?? "";
+
+            // 点 Prompt 上的「编辑」：窗口标题、无障碍名与内容都必须属于 Prompt
+            const node = await openFieldEditor("Prompt");
+            expect(node.value).toBe(prompt);
+            expect(node.getAttribute("aria-label")).toBe("Prompt");
+            expect(document.querySelector(".xz-action-editor-window__head strong")?.textContent).toBe("Prompt");
+            expect(dialogTitle()).toBe("Prompt");
+
+            // 保存后写回 prompt 字段，不碰独立的下一步行动字段
+            await typeInto(node, "（补一句约束）", node.value.length);
+            await saveWindow();
+            await vi.waitFor(() => expect(editor()).toBeNull());
+            expect(saveSpy.mock.calls).toHaveLength(1);
+            const changes = saveSpy.mock.calls[0][2] as { actionDetail?: { prompt?: string; background?: string }; nextAction?: string };
+            expect(changes.actionDetail?.prompt).toContain("请把这段笔记按 SN taxonomy 重写一遍");
+            expect(changes.actionDetail?.background).toBe(background);
+            expect(changes.nextAction).toBeUndefined();
+
+            // 相邻字段同样各开各的窗口，不再被串到同一个标题上
+            const backgroundEditor = await openFieldEditor("背景与约束");
+            expect(backgroundEditor.value).toBe(background);
+            expect(dialogTitle()).toBe("背景与约束");
+            backgroundEditor.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+            await vi.waitFor(() => expect(editor()).toBeNull());
+
+            const nextEditor = await openFieldEditor("下一步行动");
+            expect(nextEditor.value).toBe(nextAction);
+            expect(dialogTitle()).toBe("下一步行动");
         });
 
         it("连续输入期间不改写 DOM 值与选区", async () => {

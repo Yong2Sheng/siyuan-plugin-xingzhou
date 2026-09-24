@@ -2,6 +2,12 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## Unreleased
+
+### Fixed
+
+- **Every detail field editor was titled "Next Action"**: opening the editor from Prompt, Background & constraints or any other detail field showed a window titled Next Action, which looked like the wrong field had opened (the text and the saved field were always correct). The window title, accessible name and content now all name the field being edited, and only Next Action reads "Next Action".
+
 ## 4.1.0 - 2026-09-21
 
 Current Action Details is now a set of structured fields, and Transactions gained an item-level to-do list.

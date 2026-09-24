@@ -1087,7 +1087,8 @@
         const component = new ActionEditorWindow({
             target: host,
             props: {
-                label: field === "currentAction" ? fieldLabel(selected!) : "下一步行动",
+                // 标题必须取当前编辑的字段：细则字段曾一律显示「下一步行动」，看起来像开错了字段
+                label: editorFieldLabel(field),
                 initialValue: value,
                 caretOffset: actionWindowCaret,
                 restoredNotice: actionRestoredNotice[field],
@@ -1119,7 +1120,8 @@
         actionWindow = component;
         actionWindowProps = {};
         const dialog = new Dialog({
-            title: field === "currentAction" ? fieldLabel(selected!) : "下一步行动",
+            // 与窗口内标题同源：细则字段显示自己的字段名，不再统一写「下一步行动」
+            title: editorFieldLabel(field),
             width: "82vw",
             height: "82vh",
             // 思源 Dialog 只接受字符串内容：先占位，再把组件挂进去
