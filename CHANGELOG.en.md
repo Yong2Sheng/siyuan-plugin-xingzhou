@@ -7,6 +7,7 @@ This file records notable changes to Xingzhou. The default changelog is Chinese;
 ### Fixed
 
 - **Every detail field editor was titled "Next Action"**: opening the editor from Prompt, Background & constraints or any other detail field showed a window titled Next Action, which looked like the wrong field had opened (the text and the saved field were always correct). The window title, accessible name and content now all name the field being edited, and only Next Action reads "Next Action".
+- **Switching work items left the previous item's Current Action Details on screen**: the field cards read their content through `isFilled(fieldName)` / `preview(fieldName)`, and Svelte only re-renders a piece of DOM when a variable appearing in its expression changes — `actionDetail` was not one of them, so after selecting another transaction the labels, one-line previews and expanded text of Guidance & ideas and the other fields still belonged to the previous item (Current State showing "Fill in" next to written content had the same cause). Field values now come straight from `actionDetail`, so every field follows the selection. Two same-root annoyances went with it: switching work items no longer carries over the previous item's staged-result draft, template name, or open template panel.
 
 ## 4.1.0 - 2026-09-21
 

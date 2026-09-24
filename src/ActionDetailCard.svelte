@@ -19,6 +19,11 @@
     } from "./action-detail";
 
     export let detail: ActionDetail;
+    /**
+     * 当前条目的标识：卡片内的临时输入（成果草稿、模板名、模板面板）按它复位。
+     * 没有它时切换条目会把上一条的草稿和模板面板一起带过来。
+     */
+    export let itemId = "";
     /** 标题按工作项角色变化：事务是「本次行动细则」，项目是「项目目标／当前阶段」等。 */
     export let title = "本次行动细则";
     /** 下一步行动；仍是独立字段，只在这里渲染。 */
@@ -55,10 +60,23 @@
     /** 模板面板：保存模板时在这里输入名字（不用 window.prompt——Electron 渲染进程不支持它）。 */
     let templateNameDraft = "";
     let savingTemplate = false;
+    /** 已同步的条目标识：换条目时用它判断要不要复位临时状态。 */
+    let sourceId = itemId;
 
     $: outcomes = outcomesForDisplay(detail);
     $: fields = ACTION_DETAIL_FIELDS.filter((field) => field.key !== "currentState");
     $: filledCount = ACTION_DETAIL_FIELDS.filter((field) => (detail[field.key] ?? "").trim()).length;
+
+    /*
+     * 换条目就复位只属于上一条的临时输入；expanded 有意保留——
+     * 它表达的是「我想看哪个字段」，不是某一条的内容。
+     */
+    $: if (itemId !== sourceId) {
+        sourceId = itemId;
+        outcomeDraft = "";
+        templateNameDraft = "";
+        templateOpen = false;
+    }
 
     function toggle(field: ActionDetailField) {
         const next = new Set(expanded);
@@ -86,13 +104,18 @@
         outcomeDraft = "";
     }
 
-    function fieldValue(field: ActionDetailField): string {
-        return detail[field] ?? "";
+    /*
+     * 下面三个工具收「字段的值」而不是「字段名」：Svelte 在编译期按表达式里出现的变量决定
+     * 要不要重算这段 DOM，写成 isFilled(field.key) 时 detail 不在依赖里，切换工作项后
+     * 卡片会一直显示上一条的内容。所以模板里一律传 detail[field.key]，函数体只做纯文本处理。
+     */
+    function fieldText(value: string | undefined): string {
+        return value ?? "";
     }
 
     /** 预览：压成单行、去掉 Markdown 记号，只用来判断"写了什么"。 */
-    function preview(field: ActionDetailField): string {
-        const text = fieldValue(field)
+    function preview(value: string | undefined): string {
+        const text = fieldText(value)
             .replace(/!\[[^\]]*\]\([^)]*\)/g, "［图片］")
             .replace(/[#>*`]/g, "")
             .replace(/\s+/g, " ")
@@ -100,8 +123,8 @@
         return text.length > 96 ? `${text.slice(0, 96)}…` : text;
     }
 
-    function isFilled(field: ActionDetailField): boolean {
-        return Boolean(fieldValue(field).trim());
+    function isFilled(value: string | undefined): boolean {
+        return Boolean(fieldText(value).trim());
     }
 </script>
 
@@ -158,7 +181,7 @@
             <div class="xz-plan-field__head">
                 <h4>当前状态</h4>
                 <button class="xz-plan-field__edit" type="button" disabled={disabled} on:click={() => openField("currentState")}>
-                    {isFilled("currentState") ? "编辑" : "填写"}
+                    {isFilled(detail.currentState) ? "编辑" : "填写"}
                 </button>
             </div>
             {#if autoFacts.length > 0}
@@ -183,25 +206,25 @@
                     <button class="xz-plan-field__toggle" type="button" aria-expanded={expanded.has(field.key)} on:click={() => toggle(field.key)} title={field.hint}>
                         <h4>{field.label}</h4>
                     </button>
-                    {#if field.key === "prompt" && isFilled("prompt")}
+                    {#if field.key === "prompt" && isFilled(detail.prompt)}
                         <button class="xz-plan-card__link" type="button" on:click={() => dispatch("copyPrompt", {})}>复制</button>
                     {/if}
                     <button class="xz-plan-field__edit" type="button" disabled={disabled} on:click={() => openField(field.key)}>
-                        {isFilled(field.key) ? "编辑" : "填写"}
+                        {isFilled(detail[field.key]) ? "编辑" : "填写"}
                     </button>
                     <button class="xz-plan-field__caret" type="button" aria-label={`${expanded.has(field.key) ? "收起" : "展开"}${field.label}`} title={expanded.has(field.key) ? "收起" : "展开全文"} on:click={() => toggle(field.key)}>{expanded.has(field.key) ? "⌃" : "⌄"}</button>
                 </div>
                 {#if expanded.has(field.key)}
                     <div class="xz-plan-field__body">
-                        {#if isFilled(field.key)}
+                        {#if isFilled(detail[field.key])}
                             <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-                            <div class="xz-markdown-preview xz-plan-field__text" on:click={(event) => onImageClick(event, field.key)} on:contextmenu={onImageContextMenu}>{@html renderActionMarkdown(fieldValue(field.key))}</div>
+                            <div class="xz-markdown-preview xz-plan-field__text" on:click={(event) => onImageClick(event, field.key)} on:contextmenu={onImageContextMenu}>{@html renderActionMarkdown(fieldText(detail[field.key]))}</div>
                         {:else}
                             <button class="xz-plan-empty xz-plan-empty--inline" type="button" disabled={disabled} on:click={() => openField(field.key)}>还没写，点这里开始。</button>
                         {/if}
                     </div>
-                {:else if isFilled(field.key)}
-                    <button class="xz-plan-field__preview" type="button" on:click={() => toggle(field.key)}>{preview(field.key)}</button>
+                {:else if isFilled(detail[field.key])}
+                    <button class="xz-plan-field__preview" type="button" on:click={() => toggle(field.key)}>{preview(detail[field.key])}</button>
                 {/if}
             </article>
         {/each}

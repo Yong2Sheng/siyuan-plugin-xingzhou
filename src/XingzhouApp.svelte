@@ -3607,6 +3607,7 @@
                     <ActionDetailCard
                         title={selectedProfile?.actionLabel ?? "本次行动细则"}
                         detail={itemActionDetail(selected)}
+                        itemId={selected.id}
                         nextAction={selected.nextAction}
                         autoFacts={itemAutoFacts(selected)}
                         disabled={Boolean(savingInline || savingSlices)}

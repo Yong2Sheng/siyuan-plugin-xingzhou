@@ -1679,6 +1679,93 @@ describe("XingzhouApp", () => {
     });
 });
 
+/**
+ * 回归：用户报告「先选中 A 事务，再切到 B 事务，右侧行动指导与想法还是 A 的」。
+ * 原因是卡片在模板里用 isFilled(field.key) / preview(field.key) 取值，detail 不在依赖里，
+ * 切换选中项后这些字段的 DOM 不重算。这里按真实点击路径覆盖标签、预览与展开正文。
+ */
+describe("切换选中项后本次行动细则跟着换", () => {
+    let component: XingzhouApp | undefined;
+
+    afterEach(() => {
+        component?.$destroy();
+        component = undefined;
+        document.body.replaceChildren();
+    });
+
+    function detailField(label: string): HTMLElement {
+        const article = [...document.querySelectorAll(".xz-plan-field")]
+            .find((node) => node.querySelector("h4")?.textContent?.trim() === label);
+        if (!article) throw new Error(`没有找到字段卡片：${label}`);
+        return article as HTMLElement;
+    }
+
+    const textOf = (node: Element | null | undefined) => (node?.textContent ?? "").replace(/\s+/g, " ").trim();
+
+    it("从 AI 超分 pipeline 切到第五章：五个字段都不再显示上一条的内容", async () => {
+        const base = {
+            documentId: null, detached: true, parentIds: [] as string[], topProjectIds: [] as string[],
+            planDate: null, deadline: null, noDeadline: false, durationMinutes: null, energy: "", nextAction: "",
+        };
+        const aiTx: WorkItem = {
+            ...base, id: "ai-tx", rowId: "ai-tx", title: "AI 超分 pipeline", type: "事务", status: "待开始",
+            currentAction: "", updatedAt: Date.now(),
+            actionDetail: {
+                ...createEmptyActionDetail(),
+                currentState: "上一条的当前状态",
+                guidance: "To-do 上一条的行动指导内容，足够长，长到折叠时只显示一行预览。",
+            },
+        };
+        const fifthTx: WorkItem = {
+            ...base, id: "fifth-tx", rowId: "fifth-tx", title: "第五章", type: "事务", status: "进行中",
+            currentAction: "", updatedAt: Date.now(),
+            actionDetail: { ...createEmptyActionDetail(), guidance: "按照下面的三步走：第一遍基础修改" },
+        };
+        const workItemData: WorkItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [aiTx, fifthTx], missingFields: [],
+            fields: { currentAction: { id: "currentAction", name: "本次行动细则", type: "text", options: [] } },
+        };
+
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn().mockResolvedValue(workItemData), captureInbox: vi.fn(), saveItem: vi.fn(),
+                deleteItem: vi.fn(), openDocument: vi.fn(),
+                initialViewState: {
+                    page: "all", filter: "all", includeClosed: false, scope: "all", selectedId: "ai-tx",
+                    expandedIds: [], weekStart: Date.now(), sidebarScrollTop: 0, treeScrollTop: 0, detailScrollTop: 0,
+                },
+            },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-plan-card"), document.body.innerHTML).not.toBeNull());
+        await tick();
+
+        // 用户正展开读着上一条的「行动指导与想法」
+        detailField("行动指导与想法").querySelector<HTMLButtonElement>(".xz-plan-field__toggle")!.click();
+        await tick();
+        expect(textOf(document.querySelector(".xz-plan-card"))).toContain("上一条的行动指导内容");
+
+        selectTreeRow("fifth-tx");
+        await tick();
+        await tick();
+
+        expect((document.querySelector(".xz-detail-title-row input") as HTMLInputElement | null)?.value).toBe("第五章");
+        expect(textOf(document.querySelector(".xz-plan-card__count"))).toBe("已填 1/5");
+        // 展开着的字段必须换成新条目正文
+        expect(textOf(detailField("行动指导与想法"))).toContain("按照下面的三步走");
+        // 当前状态：新条目没写，标签要回到「填写」，正文换成空状态提示
+        expect(textOf(detailField("当前状态").querySelector(".xz-plan-field__edit"))).toBe("填写");
+        expect(textOf(detailField("当前状态"))).toContain("写一句「上次做到 / 卡在哪」。");
+        // 背景与约束 / Prompt / 完成定义：不再是上一条的标签与预览
+        for (const label of ["背景与约束", "Prompt", "完成定义"]) {
+            expect(textOf(detailField(label).querySelector(".xz-plan-field__edit"))).toBe("填写");
+            expect(detailField(label).querySelector(".xz-plan-field__preview")).toBeNull();
+        }
+        expect(textOf(document.querySelector(".xz-plan-card"))).not.toContain("上一条的");
+    });
+});
+
 /** 点树里某一行的主体按钮选中它（与用户点击行为一致）。 */
 function selectTreeRow(id: string) {
     document.querySelector<HTMLButtonElement>(`[data-work-item-id="${id}"] > .xz-tree-row .xz-tree-main`)?.click();
