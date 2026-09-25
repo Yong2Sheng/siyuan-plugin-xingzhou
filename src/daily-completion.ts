@@ -1,4 +1,10 @@
-import type { DailyRecord, DailyRecordFields } from "./daily-records";
+import {
+    deriveLightsOffAdherence,
+    lightsOffNightInput,
+    plannedLightsOffReference,
+    type DailyRecord,
+    type DailyRecordFields,
+} from "./daily-records";
 
 export type DailyCompletionStage = "morning" | "learning" | "boundary" | "after-work" | "recovery" | "evening";
 export type DailyCompletionState = "not-started" | "incomplete" | "complete" | "not-applicable";
@@ -26,14 +32,18 @@ export type DailyCompletion = {
 
 type Check = Omit<DailyMissingItem, "stage"> & { filled: boolean };
 
-export function calculateDailyCompletion(record: DailyRecord): DailyCompletion {
+/**
+ * 计算一天各阶段的完成度。`previousRecord` 是前一天的记录：昨晚是否按计划熄灯的结论需要
+ * 「前一天登记的计划 + 本记录里的实际熄灯」两半，缺了它只能按「不适用」处理。
+ */
+export function calculateDailyCompletion(record: DailyRecord, previousRecord: DailyRecord | null = null): DailyCompletion {
     const fields = record.fields;
     const saturday = record.dayType === "saturday-reset";
     const conference = record.dayType === "conference-day";
     const holiday = record.dayType === "holiday";
     const stages: DailyStageCompletion[] = [];
 
-    stages.push(stageResult("morning", "早晨", morningChecks(record), morningTouched(fields, holiday, saturday, conference)));
+    stages.push(stageResult("morning", "早晨", morningChecks(record, previousRecord), morningTouched(fields, holiday, saturday, conference)));
 
     if (holiday) {
         stages.push(stageResult("recovery", "恢复", recoveryChecks(fields), touched(fields, [
@@ -72,15 +82,26 @@ export function calculateDailyCompletion(record: DailyRecord): DailyCompletion {
     };
 }
 
-function morningChecks(record: DailyRecord): Check[] {
+/**
+ * 昨晚熄灯的完成口径：只有「前晚登记了计划」的夜晚才需要给出结论。
+ * 有计划时，结论要么由实际熄灯自动推出，要么由用户在早晨回答一次；
+ * 没有计划、或根本没记录计划的夜晚视为不适用，不再占着待补清单。
+ */
+function lightsOffAdherenceSatisfied(record: DailyRecord, previousRecord: DailyRecord | null): boolean {
+    if (!previousRecord || !plannedLightsOffReference(previousRecord)) return true;
+    return deriveLightsOffAdherence(lightsOffNightInput(previousRecord, record)).status !== "unanswered";
+}
+
+function morningChecks(record: DailyRecord, previousRecord: DailyRecord | null): Check[] {
     const fields = record.fields;
     const checks = [
-        check("lights-off", "昨晚熄灯", "昨晚熄灯", text(fields.lightsOffTime) || fields.lightsOffBand === "after-midnight"),
+        check("lights-off", "昨晚熄灯", "昨晚熄灯", lightsOffAdherenceSatisfied(record, previousRecord)),
         check("wake-time", "今日起床", "今日起床", text(fields.wakeTime)),
         check("sleep-duration", "睡眠时长", "睡眠时长", number(fields.sleepDurationMinutes)),
         check("watch-sleep-score-decision", "是否有手表睡眠评分", "今天是否有手表睡眠评分", text(fields.hasWatchSleepScore)),
     ];
     if (fields.hasWatchSleepScore === "yes") checks.push(check("watch-sleep-score", "手表睡眠评分", "手表睡眠评分", number(fields.watchSleepScore)));
+    if (fields.hasWatchSleepOnset === "yes") checks.push(check("watch-sleep-onset", "手表入睡时间", "手表入睡时间", text(fields.watchSleepOnsetTime)));
     checks.push(
         check("subjective-sleep", "主观睡眠质量", "主观睡眠质量", number(fields.subjectiveSleepQuality)),
         check("morning-weight-decision", "是否测量晨起体重", "今天是否测量晨起体重", text(fields.hasMorningWeight)),
@@ -195,7 +216,8 @@ function eveningChecks(record: DailyRecord): Check[] {
 
 function morningTouched(fields: DailyRecordFields, holiday: boolean, saturday: boolean, conference: boolean): boolean {
     const keys: Array<keyof DailyRecordFields> = [
-        "lightsOffTime", "lightsOffBand", "wakeTime", "sleepDurationMinutes", "hasWatchSleepScore", "watchSleepScore", "subjectiveSleepQuality",
+        "lightsOffTime", "lightsOffBand", "wakeTime", "sleepDurationMinutes", "hasWatchSleepScore", "watchSleepScore",
+        "hasWatchSleepOnset", "watchSleepOnsetTime", "subjectiveSleepQuality",
         "hasMorningWeight", "morningWeight",
         "hasDayAdjustments", "dayAdjustments", "trainingCompleted", "trainingPlan",
     ];

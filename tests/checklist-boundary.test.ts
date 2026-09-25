@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { boundaryKeyFor, createDefaultChecklistStore, reminderIdFor, type ChecklistEntry, type ChecklistStore, type ChecklistTemplate } from "../src/checklist";
-import { BOUNDARY_MAX_VISIBLE, boundaryAttention, boundaryRelativeLabel, boundarySummary, boundaryTemplateId } from "../src/checklist-boundary";
+import { BOUNDARY_MAX_VISIBLE, boundaryAttention, boundaryHeadlineParts, boundaryRelativeLabel, boundarySummary, boundaryTemplateId } from "../src/checklist-boundary";
 
 /** 2026-03-12 是星期四 → 工作日模板。 */
 const DATE = "2026-03-12";
@@ -46,6 +46,39 @@ describe("边界提醒窗口", () => {
         // 当天更晚的 20:00 酪蛋白、20:15 平光镜，以及当天更早的 08:45／12:10 都属于「稍后」
         expect(result.later.map((item) => item.at)).toEqual(["08:45", "12:10", "20:00", "20:15"]);
         expect(boundarySummary(result)).toBe("现在要确认的 2 件事");
+    });
+
+    it("标题写具体事项、阶段名退到补充行：同一条目下的多张卡不能再长得一样", () => {
+        // 用户实际反馈：12:10「午饭」那条勾掉后挪到已确认区，抬头还是「午饭」，
+        // 看不出勾掉的到底是哪一条。标题位必须写提醒原文里的具体事项。
+        const result = attention(at(13, 30), { "wd-lunch::wd-lunch:1": "completed" });
+        const lunch = result.doneKeys.find((item) => item.entryId === "wd-lunch");
+        expect(lunch).toMatchObject({
+            entryTitle: "午饭",
+            headline: "随餐鱼油 1 粒",
+            detail: "不边吃边工作",
+            reminder: "随餐鱼油 1 粒；不边吃边工作",
+        });
+        // 早餐那条的提醒原文是「玉米、红薯、鸡蛋；随餐鱼油 1 粒」，标题取第一个分句
+        const breakfast = result.later.find((item) => item.entryId === "wd-breakfast");
+        expect(breakfast).toMatchObject({ headline: "玉米、红薯、鸡蛋", detail: "随餐鱼油 1 粒" });
+    });
+
+    it("提醒原文拆句：第一分句进标题，其余进补充行；单句时补充行为空", () => {
+        expect(boundaryHeadlineParts("随餐鱼油 1 粒；不边吃边工作", "午饭")).toEqual({ headline: "随餐鱼油 1 粒", detail: "不边吃边工作" });
+        expect(boundaryHeadlineParts("离开办公桌；蛋白质＋水果＋适量主食", "午饭")).toEqual({ headline: "离开办公桌", detail: "蛋白质＋水果＋适量主食" });
+        // 只有一句：整句当标题，补充行留空，避免标题与补充行说同一句话
+        expect(boundaryHeadlineParts("仅在全天蛋白质不足或晚上容易饥饿时饮用", "酪蛋白｜按需")).toEqual({ headline: "仅在全天蛋白质不足或晚上容易饥饿时饮用", detail: "" });
+        // 半角分号同样识别
+        expect(boundaryHeadlineParts("平光镜放进书包; 净水器加满水", "准备明天")).toEqual({ headline: "平光镜放进书包", detail: "净水器加满水" });
+        // 多个分号：第一段进标题，后面的分句全部留在补充行
+        expect(boundaryHeadlineParts("拖地；擦桌子；通风", "打扫")).toEqual({ headline: "拖地", detail: "擦桌子；通风" });
+        // 原文缺失或首段为空：退回条目标题，不产生空标题
+        expect(boundaryHeadlineParts("", "午饭")).toEqual({ headline: "午饭", detail: "" });
+        expect(boundaryHeadlineParts("   ", "午饭")).toEqual({ headline: "午饭", detail: "" });
+        expect(boundaryHeadlineParts("；不边吃边工作", "午饭")).toEqual({ headline: "；不边吃边工作", detail: "" });
+        // 首段只有空白也算空首段
+        expect(boundaryHeadlineParts(" ；不边吃边工作", "午饭")).toEqual({ headline: "；不边吃边工作", detail: "" });
     });
 
     it("已确认的边界项不再催办，但仍计入完成数", () => {

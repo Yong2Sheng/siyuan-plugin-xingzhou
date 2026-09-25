@@ -23,9 +23,20 @@ export type ChecklistBoundaryItem = {
     /** 与 reminderStates 共用的稳定 key。 */
     key: string;
     entryId: string;
-    /** 条目标题：面板上「该做什么」的主文案。 */
+    /**
+     * 条目标题（checklist 里的阶段名，如「午饭」「准备明天」）。
+     * 它只回答「这是哪一段流程」，因此退到补充行做定位信息，不占标题位。
+     */
     entryTitle: string;
-    /** 提醒原文：面板上的补充说明（例如「随餐鱼油 1 粒」）。 */
+    /**
+     * 面板标题：提醒原文的第一分句（具体事项，如「随餐鱼油 1 粒」）。
+     * 标题位必须写「要做什么」——同一条目下的多张卡标题都一样时，
+     * 勾选后挪到已确认区就看不出哪一条变了。
+     */
+    headline: string;
+    /** 提醒原文剩余分句（如「不边吃边工作」）；原文只有一句时为空。 */
+    detail: string;
+    /** 提醒原文：悬停提示用全文（例如「随餐鱼油 1 粒；不边吃边工作」）。 */
     reminder: string;
     /** 面板上显示在左侧的时刻。 */
     at: string;
@@ -75,6 +86,24 @@ function parseClock(value: string, nowMinutes: number): { atMinutes: number; min
     return { atMinutes, minutesFromNow };
 }
 
+/**
+ * 把提醒原文拆成「标题」与「剩余说明」两段，标题取第一个分句。
+ *
+ * 提醒原文常常是一句行动 + 若干补充：「随餐鱼油 1 粒；不边吃边工作」。
+ * 第一分句才是到点要照做的那件事，后半分句是补充条件，因此第一段进标题、其余留在补充行。
+ * 只有一句时整句就是标题，剩余说明留空——避免标题与补充行重复同一句话。
+ * 原文为空、或第一分句只有标点时退回整句，不产生空标题。
+ */
+export function boundaryHeadlineParts(reminder: string, fallback: string): { headline: string; detail: string } {
+    const text = reminder.trim();
+    if (!text) return { headline: fallback.trim(), detail: "" };
+    const separator = /[;；]/.exec(text);
+    if (!separator) return { headline: text, detail: "" };
+    const first = text.slice(0, separator.index).trim();
+    const rest = text.slice(separator.index + separator[0].length).trim();
+    return first ? { headline: first, detail: rest } : { headline: text, detail: "" };
+}
+
 /** 与 DailyChecklist 相同的模板选取规则：开会日优先，其余按星期。 */
 export function boundaryTemplateId(date: string, dayType?: string | null): ChecklistTemplate["id"] {
     if (dayType === "conference-day") return "conference";
@@ -113,12 +142,14 @@ export function boundaryAttention(
                 if (!at) return;
                 const clock = parseClock(at, nowMinutes);
                 if (!clock) return;
-                const text = reminder.text || entry.title;
+                const parts = boundaryHeadlineParts(reminder.text, entry.title);
                 const base: ChecklistBoundaryItem = {
                     key,
                     entryId: entry.id,
                     entryTitle: entry.title,
-                    reminder: text,
+                    headline: parts.headline,
+                    detail: parts.detail,
+                    reminder: reminder.text || entry.title,
                     at,
                     atMinutes: clock.atMinutes,
                     minutesFromNow: clock.minutesFromNow,
@@ -161,7 +192,7 @@ export function boundaryAttention(
     const done = isToday ? [...doneKeys].sort((left, right) => left.atMinutes - right.atMinutes) : [];
     const pending = later.filter((item) => item.minutesFromNow < 0);
     const laterPreviewHeadline = pending.length
-        ? `接下来是 ${pending[0].at} 的${pending[0].entryTitle}`
+        ? `接下来是 ${pending[0].at} 的${pending[0].headline}`
         : later.length
             ? `今天还有 ${later.length} 项边界提醒`
             : "";

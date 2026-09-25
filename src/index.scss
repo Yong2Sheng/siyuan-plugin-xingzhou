@@ -1223,27 +1223,113 @@
 .xz-daily-decision-column { min-width: 0; display: grid; align-content: start; gap: 10px; }
 .xz-daily-decision-column > label { min-width: 0; display: grid; align-content: start; gap: 6px; color: var(--xingzhou-muted); font-size: 14px; }
 .xz-daily-field-note { margin: 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.5; }
-.xz-daily-lights-off-inline { min-width: 0; display: grid; grid-template-columns: minmax(150px, .9fr) minmax(210px, 1.1fr); align-items: center; gap: 8px; }
-.xz-daily-lights-off-inline > .xz-daily-time-select { width: 100%; }
-/* 昨晚熄灯：时段（12 点前 / 12 点后·熬夜）放在标签行，控制行保持原高度。
-   三条对齐约束（都由设计稿自检量化校验）：
-   1) 标签行是 flex，空间不足时中文会被压成一个字一行，因此 nowrap + flex-wrap：放不下时下拉整体换行；
-   2) 用 flex-start + 负 margin-top，而不是 baseline：baseline 会让 28px 高的下拉把本字段标签顶低 3px，
-      与同一栅格行的「今日起床」「睡眠时长」错位；负 margin 让下拉在文字两侧对称探出，文字仍在自然行位；
-   3) 下拉紧跟标签，不用 margin-left:auto：右对齐会让它贴到相邻字段标签旁边，看起来像别人的控件。 */
-.xz-daily-label-with-note:has(> select.xz-daily-sleep-band) { align-items: flex-start; flex-wrap: wrap; row-gap: 4px; white-space: nowrap; }
-.xz-daily-label-with-note > select.xz-daily-sleep-band {
-    width: auto; flex: 0 0 auto; min-height: 28px; margin: -4px 0 0 3px; padding: 0 4px;
-    border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius);
-    color: var(--xingzhou-muted); background: var(--xingzhou-bg); font-size: 13px;
+/* ===== 睡眠与身体（v2：断点重排 + 控件成组 + 行距分层）=====
+   三条设计约束，来自 v1 的实际渲染问题：
+   1) 断点 620 / 1100，中等宽度不再落到「控件被拉满行」的单列里；
+   2) 窄控件有上限宽度，控件之间是关系而不是空白；
+   3) 手表三行成组，窄屏也能看出「熄灯 → 入睡 → 实际睡了多久」是一条链。
+   抗重叠：任何断点下每格都是普通流内的块级元素，显式落位只出现在宽屏断点里。 */
+.xz-daily-fields.xz-sleep { display: grid; gap: 16px; }
+
+/* 回顾横条：只读事实。有实测时「实际」是纯文字 + 「改」，不与输入框混淆 */
+.xz-daily-review {
+    min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+    padding: 9px 12px; border: 1px solid var(--xingzhou-border); border-left: 3px solid var(--xingzhou-primary);
+    border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel-subtle);
 }
-.xz-daily-label-with-note > select.xz-daily-sleep-band.after-midnight {
-    border-color: color-mix(in srgb, var(--xingzhou-primary) 55%, transparent);
-    color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 600;
+.xz-daily-review.is-met { border-left-color: var(--b3-theme-success); }
+.xz-daily-review.is-missed { border-left-color: var(--xingzhou-danger); }
+.xz-daily-review.is-none { border-left-color: var(--xingzhou-muted); }
+.xz-daily-review__plan { display: flex; align-items: baseline; gap: 6px; color: var(--xingzhou-muted); font-size: 13px; }
+.xz-daily-review__plan strong { color: var(--xingzhou-text); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.xz-daily-review__verdict { display: flex; align-items: baseline; gap: 6px; color: var(--xingzhou-muted); font-size: 13px; }
+.xz-daily-review__verdict strong { font-size: 15px; font-weight: 600; }
+.xz-daily-review.is-met .xz-daily-review__verdict strong { color: var(--b3-theme-success); }
+.xz-daily-review.is-missed .xz-daily-review__verdict strong { color: var(--xingzhou-danger); }
+.xz-daily-review__verdict small,
+.xz-daily-review__plan small { color: var(--xingzhou-muted); font-size: 12px; }
+.xz-daily-review__actual { display: flex; align-items: center; gap: 6px; margin-left: auto; color: var(--xingzhou-muted); font-size: 13px; }
+.xz-daily-review__actual > strong { color: var(--xingzhou-text); font-size: 15px; font-variant-numeric: tabular-nums; }
+.xz-daily-review__edit {
+    padding: 2px 8px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius);
+    color: var(--xingzhou-primary); background: var(--xingzhou-bg); cursor: pointer; font-size: 12px;
 }
-.xz-daily-label-with-note > select.xz-daily-sleep-band option:disabled { color: var(--xingzhou-muted); }
-.xz-daily-sleep-control { min-width: 0; display: grid; align-content: start; }
-/* 12 点后（熬夜）且不记具体时间：静态标记 + 可选入口，宽度与时间行一致 */
+.xz-daily-review__edit:hover { border-color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
+
+/* 需要你回答 / 需要补记：整行，但与回顾横条同族 */
+.xz-daily-adherence-row {
+    min-width: 0; display: grid; gap: 8px; padding: 12px;
+    border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-bg);
+}
+.xz-daily-adherence-row > .xz-daily-lights-off-skip,
+.xz-daily-adherence-row > .xz-daily-time-row { width: min(100%, 300px); }
+.xz-daily-adherence { width: min(100%, 300px); min-height: 42px; }
+.xz-daily-adherence-reason { min-width: 0; display: grid; gap: 4px; color: var(--xingzhou-muted); font-size: 14px; }
+.xz-daily-adherence-reason > textarea { min-height: 64px; max-width: 620px; }
+.xz-daily-adherence-reason > span b { color: var(--xingzhou-danger); font-weight: 600; }
+
+/* 填写栅格：<620px 单列 · ≥620px 两列 · ≥1100px 三列 */
+.xz-daily-sleep-fill { min-width: 0; display: grid; gap: 16px 18px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+/* 窄控件不撑满整行，避免「控件之间是空白而不是关系」 */
+/*
+ * 宽度上限：睡眠区里所有直接控件统一 ≤ 320px。
+ * 之前只给了「时间/时长选择器」上限，漏掉普通 select / input，于是「今天是否有手表睡眠数据」
+ * 和「手表睡眠评分」被拉满整列——控件宽度必须一致，否则一列里宽窄混杂就是乱。
+ * 用 min(100%, N) 而不是「固定宽度 + max-width:100%」：栅格项里百分比 max-width 解析不到轨道宽度，
+ * 固定 300px 会在窄列（620px 时手表栏只有 248px）直接溢出。
+ */
+.xz-daily-sleep-fill > .xz-daily-field > select,
+.xz-daily-sleep-fill > .xz-daily-field > input,
+.xz-daily-sleep-fill > .xz-daily-field > .xz-daily-time-select,
+.xz-daily-sleep-fill > .xz-daily-field > .xz-daily-duration-select,
+.xz-daily-sleep-fill > .xz-daily-decision-column > select,
+.xz-daily-sleep-fill > .xz-daily-decision-column > input,
+.xz-daily-sleep-fill > .xz-daily-decision-column > .xz-daily-time-select,
+.xz-daily-sleep-fill > .xz-daily-decision-column > .xz-daily-duration-select,
+.xz-daily-sleep-fill > .xz-daily-decision-column > label > select,
+.xz-daily-sleep-fill > .xz-daily-decision-column > label > input,
+.xz-daily-sleep-fill > .xz-daily-decision-column > label > .xz-daily-inline,
+.xz-daily-sleep-fill > .xz-daily-decision-column > .xz-daily-field > select,
+.xz-daily-sleep-fill > .xz-daily-decision-column > .xz-daily-field > input,
+.xz-daily-sleep-fill > .xz-daily-decision-column > .xz-daily-field > .xz-daily-time-select,
+.xz-daily-sleep-fill > .xz-daily-decision-column > .xz-daily-field > .xz-daily-duration-select { width: min(100%, 320px); }
+.xz-daily-sleep-fill .xz-daily-inline { width: min(100%, 320px); }
+.xz-daily-sleep-fill > .xz-daily-score > .xz-daily-score-buttons { width: min(100%, 320px); }
+.xz-daily-sleep-fill > .xz-daily-score > .xz-daily-score-buttons { width: 320px; max-width: 100%; }
+/* 行距分层：字段内贴紧、字段间拉开 */
+.xz-daily-sleep-fill > .xz-daily-field,
+.xz-daily-sleep-fill > .xz-daily-decision-column,
+.xz-daily-sleep-fill > .xz-daily-score { gap: 4px; }
+.xz-daily-sleep-fill > .xz-daily-decision-column > label { gap: 4px; }
+.xz-daily-sleep-fill > .xz-daily-watch-group { gap: 12px; }
+.xz-daily-sleep-fill > .xz-daily-watch-group > label { gap: 4px; }
+.xz-daily-sleep-fill > .xz-daily-watch-group .xz-daily-field { gap: 4px; }
+
+/* 手表成组：可见边界 + 组标题 */
+.xz-daily-watch-group {
+    min-width: 0; display: grid; align-content: start;
+    padding: 12px; border: 1px solid var(--xingzhou-border); border-left: 3px solid var(--b3-theme-primary);
+    border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel-subtle);
+}
+.xz-daily-watch-group > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.xz-daily-watch-group > header strong { font-size: 13px; }
+.xz-daily-watch-group > header span { color: var(--xingzhou-muted); font-size: 11px; }
+.xz-daily-watch-group > .xz-daily-time-select,
+.xz-daily-watch-group > .xz-daily-duration-select { width: min(100%, 300px); }
+
+@media (min-width: 620px) {
+    .xz-daily-sleep-fill { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .xz-daily-sleep-fill > .xz-sleep-quality { grid-column: 1 / -1; }
+    .xz-daily-sleep-fill > .xz-sleep-watch { grid-column: 2; grid-row: 1 / span 3; }
+}
+@media (min-width: 1100px) {
+    .xz-daily-sleep-fill { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .xz-daily-sleep-fill > .xz-sleep-wake { grid-column: 1; grid-row: 1; }
+    .xz-daily-sleep-fill > .xz-sleep-weight { grid-column: 1; grid-row: 2; }
+    .xz-daily-sleep-fill > .xz-sleep-quality { grid-column: 1; grid-row: 3; }
+    .xz-daily-sleep-fill > .xz-sleep-watch { grid-column: 2 / 4; grid-row: 1 / span 3; }
+}
+
 .xz-daily-lights-off-skip { width: min(100%, var(--xz-daily-structured-width)); min-height: 42px; display: flex; align-items: center; gap: 8px; }
 .xz-daily-lights-off-skip > span {
     flex: 1 1 auto; min-width: 0; overflow: hidden; padding: 0 10px;
@@ -1262,10 +1348,13 @@
 /* 历史列表里的熬夜标记：与熄灯时段同源，不用红色告警 */
 .xz-daily-night-owl { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-size: 11px; font-style: normal; font-weight: 600; vertical-align: 1px; }
 @media (any-pointer: coarse) {
-    .xz-daily-label-with-note > select.xz-daily-sleep-band { min-height: 36px; }
     /* 触屏上「今日个人安排」的完成／放弃／取消安排都按可点区域加高。 */
     .xz-daily-slice-actions button { min-height: 32px; }
 }
+/* 入睡时间与「躺下后多久睡着」：刻意用中性灰、不加红绿，
+   因为入睡不受意志直接控制，被评价的只有熄灯。 */
+.xz-daily-onset-note { display: grid; gap: 3px; margin: 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.5; }
+.xz-daily-onset-note em { color: color-mix(in srgb, var(--xingzhou-muted) 88%, transparent); font-size: 11px; font-style: normal; }
 .xz-daily-bedtime-note { box-sizing: border-box; min-height: 42px; display: flex; align-items: center; margin: 22px 0 0; padding: 8px 10px; border-left: 3px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; }
 .xz-daily-personal-project-row { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 /* 个人事务区：左列是「是否有补充说明」判断和它展开的输入框，右列是「今日个人安排」，避免触发控件与结果分离。 */
@@ -1598,6 +1687,10 @@
     .xz-daily-completion-summary > span { justify-content: flex-start; }
     .xz-daily-completion-summary button { min-height: 36px; }
     .xz-daily-missing-panel > div { grid-template-columns: 1fr; }
+    /* 窄屏上「此刻熄灯」整行宽：临睡前单手操作，按钮不能挤在时间选择器旁边。 */
+    .xz-daily-actual-row { flex-wrap: wrap; }
+    .xz-daily-lights-off-button { width: 100%; }
+    .xz-daily-review__actual { margin-left: 0; width: 100%; }
     .xz-daily-progress, .xz-daily-progress.holiday, .xz-daily-fields.two, .xz-daily-fields.three, .xz-daily-fields.xz-daily-flow-columns { grid-template-columns: 1fr; }
     .xz-daily-fields.xz-daily-flow-columns > .xz-daily-flow-column { display: contents; }
     .xz-daily-time-pair { display: contents; }
@@ -2350,15 +2443,18 @@
 .xz-boundary-item.is-soon::before { background: var(--xingzhou-primary); }
 .xz-boundary-item.is-later::before { background: color-mix(in srgb, var(--xingzhou-muted) 45%, transparent); }
 .xz-boundary-item.is-later { background: var(--xingzhou-panel-subtle); }
-.xz-boundary-item.is-later .xz-boundary-item__body strong { color: var(--xingzhou-muted); font-weight: 500; }
+/* 「还没到点」整卡已经用底色与左条降级过一次；标题再降一级就看不出这条要做什么 */
+.xz-boundary-item.is-later .xz-boundary-item__body strong { color: var(--xingzhou-text); font-weight: 600; }
 .xz-boundary-item.is-done { opacity: 0.6; }
 .xz-boundary-item__time { color: var(--xingzhou-muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .xz-boundary-item.is-soon .xz-boundary-item__time { color: var(--xingzhou-primary); font-weight: 600; }
 .xz-boundary-item.is-overdue .xz-boundary-item__time { color: var(--xingzhou-danger); font-weight: 600; }
 .xz-boundary-item__body { min-width: 0; display: grid; gap: 1px; }
-.xz-boundary-item__body strong { overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+/* 标题＝具体事项（要照做的那一句），是这张卡的主文案，不再是 12px/500 的弱化文字 */
+.xz-boundary-item__body strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .xz-boundary-item.is-done .xz-boundary-item__body strong { text-decoration: line-through; }
-.xz-boundary-item__body small { overflow: hidden; color: var(--xingzhou-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+/* 补充行＝阶段名 + 状态／相对时间 + 原文剩余分句 */
+.xz-boundary-item__body small { overflow: hidden; color: var(--xingzhou-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .xz-boundary-item.is-overdue .xz-boundary-item__body small { color: var(--xingzhou-danger); }
 .xz-boundary-item__done { flex: 0 0 auto; min-width: 40px; min-height: 40px; padding: 5px 8px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel); cursor: pointer; font-size: 12px; white-space: nowrap; }
 .xz-boundary-item__done:hover { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); }
@@ -2404,6 +2500,16 @@
 
 @media (max-width: 980px) {
     .xz-boundary-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /*
+     * 两列时每张卡只剩半行宽，若仍按「时刻列 + 正文列 + 按钮列」排，
+     * 正文列被两侧挤到约 150px，具体事项写不到十来个字就要截断。
+     * 因此把时刻与标题合到同一列（时刻仍在左上角，标题左缩进与它对齐），
+     * 标题拿到整行宽度；按钮纵向跨两行、固定在右侧。
+     */
+    .xz-boundary-item { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; row-gap: 3px; }
+    .xz-boundary-item__time { grid-area: 1 / 1; font-size: 12px; }
+    .xz-boundary-item__body { grid-area: 1 / 1; padding-left: 46px; }
+    .xz-boundary-item__done { grid-area: 1 / 2; grid-row: 1 / span 2; align-self: start; }
 }
 
 @media (max-width: 620px) {

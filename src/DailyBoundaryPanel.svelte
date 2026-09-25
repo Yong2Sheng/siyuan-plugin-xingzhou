@@ -15,6 +15,11 @@
         return minutesFromNow >= 0 ? `该做了 · ${boundaryRelativeLabel(minutesFromNow)}` : boundaryRelativeLabel(minutesFromNow);
     }
 
+    /** 补充行：阶段名 → 状态／相对时间 → 原文剩余分句；空值自动省略分隔符。 */
+    function itemMeta(parts: Array<string | undefined>): string {
+        return parts.map((part) => (part ?? "").trim()).filter(Boolean).join(" · ");
+    }
+
     function toggle(key: string, completed: boolean) {
         if (saving) return;
         onToggle(key, !completed);
@@ -38,6 +43,10 @@
   边界提醒面板：按时间浮出「成段流程里容易漏掉的离散事件」。
   放在记录卡顶部、待补项目之前——它属于「现在该做什么」，而不是「回头补什么」。
   三类行：逾期／即将到来（可确认）、尚未到点（muted 预览）、已完成（留痕可撤销）。
+
+  标题位固定写「要做什么」（item.headline＝提醒原文第一分句），阶段名与时刻退到补充行：
+  抬头若写阶段名（「午饭」），同一条目下的卡片标题会完全一样，勾选后挪到已确认区
+  就看不出哪一条变了，用户会以为数据没更新。
 -->
 {#if compactEmpty}
     <section class="xz-daily-boundary-panel is-empty" aria-label="边界提醒">
@@ -65,13 +74,14 @@
                 <li class="xz-boundary-item is-{item.status}">
                     <span class="xz-boundary-item__time">{item.at}</span>
                     <span class="xz-boundary-item__body">
-                        <strong title={item.entryTitle}>{item.entryTitle}</strong>
-                        <small>{isToday ? `${statusLabel(item.minutesFromNow)} · ${item.reminder}` : item.reminder}</small>
+                        <strong title={`${item.reminder}（${item.entryTitle}）`}>{item.headline}</strong>
+                        <small title={itemMeta([item.entryTitle, isToday ? statusLabel(item.minutesFromNow) : "", item.detail])}>{itemMeta([item.entryTitle, isToday ? statusLabel(item.minutesFromNow) : "", item.detail])}</small>
                     </span>
                     <button
                         class="xz-boundary-item__done"
                         type="button"
                         aria-pressed="false"
+                        aria-label={`确认已做：${item.entryTitle} · ${item.headline}`}
                         title="确认已做（再点一次可撤销）"
                         disabled={saving}
                         on:click={() => toggle(item.key, false)}
@@ -82,13 +92,14 @@
                 <li class="xz-boundary-item is-later">
                     <span class="xz-boundary-item__time">{item.at}</span>
                     <span class="xz-boundary-item__body">
-                        <strong title={item.entryTitle}>{item.entryTitle}</strong>
-                        <small title={item.reminder}>{isToday ? `还没到点 · ${item.reminder}` : item.reminder}</small>
+                        <strong title={`${item.reminder}（${item.entryTitle}）`}>{item.headline}</strong>
+                        <small title={itemMeta([item.entryTitle, isToday ? "还没到点" : "", item.detail])}>{itemMeta([item.entryTitle, isToday ? "还没到点" : "", item.detail])}</small>
                     </span>
                     <button
                         class="xz-boundary-item__done"
                         type="button"
                         aria-pressed="false"
+                        aria-label={`提前确认已做：${item.entryTitle} · ${item.headline}`}
                         title="提前确认已做"
                         disabled={saving}
                         on:click={() => toggle(item.key, false)}
@@ -96,16 +107,17 @@
                 </li>
             {/each}
             {#each attention.doneKeys as item (item.key)}
-                <li class="xz-boundary-item is-done">
+                <li class="xz-boundary-item is-done" data-boundary-key={item.key}>
                     <span class="xz-boundary-item__time">{item.at}</span>
                     <span class="xz-boundary-item__body">
-                        <strong title={item.entryTitle}>{item.entryTitle}</strong>
-                        <small>已完成</small>
-                    </span>
+                        <strong title={`${item.reminder}（${item.entryTitle}）`}>{item.headline}</strong>
+                        <!-- 抬头就是阶段名时不再重复一次，例如「返回办公室＋早餐＋日评估」 -->
+                        <small>{itemMeta([item.entryTitle === item.headline ? "" : item.entryTitle, "已完成"])}</small>                    </span>
                     <button
                         class="xz-boundary-item__done"
                         type="button"
                         aria-pressed="true"
+                        aria-label={`撤销确认：${item.entryTitle} · ${item.headline}`}
                         title="撤销确认"
                         disabled={saving}
                         on:click={() => toggle(item.key, true)}

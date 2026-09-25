@@ -5,10 +5,15 @@ import {
     createEmptyDailyStore,
     dailyBackupFileForRevision,
     defaultDayType,
+    deriveLightsOffAdherence,
     isWorkMetricApplicable,
+    lightsOffNightInput,
     parseDailyStore,
+    plannedLightsOffReference,
+    plannedLightsOffReferenceFromFields,
     previousDayFirstAction,
     resolveSleepDateTimes,
+    sleepLatencyLabel,
     type DailyRecord,
     upsertDailyRecord,
 } from "../src/daily-records";
@@ -371,8 +376,174 @@ describe("生活节律内部数据库", () => {
         });
     });
 
-    it("保存个人项目稳定引用与历史快照，并在克隆时隔离数组", () => {
+    it("当场记录的实际熄灯归到当晚，凭回忆补记的仍按夜间语义归到前一夜", () => {
+        // 睡前在当晚记录：22:47 就是今晚的熄灯，不能算成昨晚
+        const live = createDailyRecord("2026-09-23", "research-workday", 1000);
+        live.fields.lightsOffTime = "22:47";
+        live.fields.lightsOffTimeSource = "live";
+        expect(resolveSleepDateTimes(live).fields).toMatchObject({ lightsOffAt: "2026-09-23T22:47", lightsOffBand: "after-midnight" });
+
+        // 凌晨当场记录：归日同样是当天，时间轴按 24:20 落在同一夜
+        const liveAfterMidnight = createDailyRecord("2026-09-24", "research-workday", 1000);
+        liveAfterMidnight.fields.lightsOffTime = "00:20";
+        liveAfterMidnight.fields.lightsOffTimeSource = "live";
+        expect(resolveSleepDateTimes(liveAfterMidnight).fields).toMatchObject({ lightsOffAt: "2026-09-24T00:20", lightsOffBand: "after-midnight" });
+
+        // 旧口径不变：第二天早上补记的时刻属于前一夜
+        const recalled = createDailyRecord("2026-09-24", "research-workday", 1000);
+        recalled.fields.lightsOffTime = "22:47";
+        expect(resolveSleepDateTimes(recalled).fields).toMatchObject({ lightsOffAt: "2026-09-23T22:47", lightsOffBand: "before-midnight" });
+
+        // 没有来源标记的存量数据一律按旧口径解析
+        const legacy = createDailyRecord("2026-09-24", "research-workday", 1000);
+        legacy.fields.lightsOffTime = "23:07";
+        expect(upsertDailyRecord(createEmptyDailyStore(900), legacy, 1100).records[0].fields).toMatchObject({
+            lightsOffAt: "2026-09-23T23:07",
+            lightsOffTimeSource: "",
+        });
+    });
+
+    it("熄灯计划达成按 ±15 分钟自动判定，早于计划算守住", () => {
+        const plan = (time: string) => {
+            const record = createDailyRecord("2026-09-03", "research-workday", 1000);
+            record.fields.bedtimePreparation = "yes";
+            record.fields.plannedLightsOffTime = time;
+            return resolveSleepDateTimes(record);
+        };
+        const morning = (lightsOffTime: string, source: "live" | "recalled" = "live") => {
+            const record = createDailyRecord("2026-09-04", "research-workday", 1000);
+            record.fields.lightsOffTime = lightsOffTime;
+            record.fields.lightsOffTimeSource = source;
+            return resolveSleepDateTimes(record);
+        };
+        const derive = (planned: DailyRecord | null, record: DailyRecord) => deriveLightsOffAdherence(lightsOffNightInput(planned, record));
+
+        expect(derive(plan("22:30"), morning("22:45")).status).toBe("met");
+        expect(derive(plan("22:30"), morning("22:46")).status).toBe("missed");
+        expect(derive(plan("22:30"), morning("22:07")).status).toBe("met");
+        // 计划在当晚、实际过了午夜：跨日比较不能变成「早 22 小时」
+        expect(derive(plan("23:45"), morning("00:40")).status).toBe("missed");
+        expect(derive(plan("22:30"), morning("22:30")).status).toBe("met");
+
+        const met = derive(plan("22:30"), morning("22:45"));
+        expect(met).toMatchObject({ source: "measured", evidence: { plannedTime: "22:30", actualTime: "22:45", diffMinutes: 15 } });
+        const missed = derive(plan("22:30"), morning("22:07"));
+        expect(missed).toMatchObject({ source: "measured", evidence: { diffMinutes: -23 } });
+    });
+
+    it("没有实际时刻时用人工回答，没有计划时不追问", () => {
+        const plan = createDailyRecord("2026-09-03", "research-workday", 1000);
+        plan.fields.bedtimePreparation = "yes";
+        plan.fields.plannedLightsOffTime = "22:30";
+        const resolvedPlan = resolveSleepDateTimes(plan);
+
+        const answeredYes = createDailyRecord("2026-09-04", "research-workday", 1000);
+        answeredYes.fields.lightsOffAdherence = "yes";
+        expect(deriveLightsOffAdherence(lightsOffNightInput(resolvedPlan, answeredYes))).toEqual({ status: "met", source: "answered", evidence: null });
+
+        const unanswered = createDailyRecord("2026-09-04", "research-workday", 1000);
+        expect(deriveLightsOffAdherence(lightsOffNightInput(resolvedPlan, unanswered)).status).toBe("unanswered");
+
+        const noPlan = createDailyRecord("2026-09-03", "research-workday", 1000);
+        expect(deriveLightsOffAdherence(lightsOffNightInput(noPlan, unanswered)).status).toBe("unanswered");
+        expect(deriveLightsOffAdherence(lightsOffNightInput(null, unanswered)).status).toBe("unanswered");
+
+        // 自由安排的夜晚不产生计划参照
+        noPlan.fields.bedtimePreparation = "free";
+        expect(plannedLightsOffReference(noPlan)).toBeNull();
+    });
+
+    it("今晚计划可以当场算出，不依赖保存后才回填的派生字段", () => {
+        // 草稿刚选完时间：plannedLightsOffAt 还是空的，界面也要能知道今晚计划落在哪一天
+        const draft = createDailyRecord("2026-09-24", "research-workday", 1000);
+        draft.fields.bedtimePreparation = "yes";
+        draft.fields.plannedLightsOffTime = "22:30";
+        expect(draft.fields.plannedLightsOffAt).toBe("");
+        expect(plannedLightsOffReference(draft)).toBeNull();
+        expect(plannedLightsOffReferenceFromFields(draft.date, draft.fields)).toEqual({
+            plannedAt: "2026-09-24T22:30", time: "22:30", date: "2026-09-24",
+        });
+
+        // 12:00 以前的计划属于次日凌晨，与 resolveSleepDateTimes 的口径一致
+        draft.fields.plannedLightsOffTime = "00:45";
+        expect(plannedLightsOffReferenceFromFields(draft.date, draft.fields)).toEqual({
+            plannedAt: "2026-09-25T00:45", time: "00:45", date: "2026-09-25",
+        });
+        // 显式选了「次日」时以显式选择为准
+        draft.fields.plannedLightsOffDay = "next-day";
+        draft.fields.plannedLightsOffTime = "23:30";
+        expect(plannedLightsOffReferenceFromFields(draft.date, draft.fields)?.plannedAt).toBe("2026-09-25T23:30");
+
+        // 没填时间或自由安排都没有可对照的计划
+        draft.fields.plannedLightsOffTime = "";
+        expect(plannedLightsOffReferenceFromFields(draft.date, draft.fields)).toBeNull();
+        draft.fields.bedtimePreparation = "free";
+        expect(plannedLightsOffReferenceFromFields(draft.date, draft.fields)).toBeNull();
+    });
+
+    it("手表入睡时间只做记录：跨午夜算入睡用时，且不影响熄灯计划判定", () => {
+        const record = createDailyRecord("2026-09-24", "research-workday", 1000);
+        record.fields.lightsOffTime = "23:45";
+        record.fields.lightsOffTimeSource = "live";
+        record.fields.wakeTime = "07:07";
+        record.fields.hasWatchSleepScore = "yes";
+        record.fields.watchSleepScore = 81;
+        record.fields.watchSleepOnsetTime = "00:40";
+        const resolved = resolveSleepDateTimes(record).fields;
+
+        // 入睡时刻归到前一夜，跨午夜的差值不能变成负数
+        expect(resolved.watchSleepOnsetAt).toBe("2026-09-24T00:40");
+        expect(resolved.sleepLatencyMinutes).toBe(55);
+        expect(sleepLatencyLabel(resolved.sleepLatencyMinutes)).toBe("55 分钟");
+
+        // 躺下后很久才睡着也一样只是记录：判定只看熄灯，不因为入睡晚而变成未达成
+        record.fields.watchSleepOnsetTime = "03:10";
+        const lateOnset = resolveSleepDateTimes(record).fields;
+        expect(lateOnset.sleepLatencyMinutes).toBe(205);
+        expect(sleepLatencyLabel(lateOnset.sleepLatencyMinutes)).toBe("3 小时 25 分");
+        expect(deriveLightsOffAdherence(lightsOffNightInput(null, { ...record, fields: lateOnset })).status).toBe("unanswered");
+
+        // 没有熄灯时刻时不给潜伏期，避免凭空造一个数字
+        const noLightsOff = createDailyRecord("2026-09-24", "research-workday", 1000);
+        noLightsOff.fields.watchSleepOnsetTime = "00:40";
+        expect(resolveSleepDateTimes(noLightsOff).fields).toMatchObject({ watchSleepOnsetAt: "2026-09-24T00:40", sleepLatencyMinutes: null });
+
+        // 入睡时刻填了就是有；清空后连同派生值一起消失
+        const cleared = createDailyRecord("2026-09-24", "research-workday", 1000);
+        expect(cleared.fields.hasWatchSleepOnset).toBe("");
+        expect(upsertDailyRecord(createEmptyDailyStore(900), { ...noLightsOff, fields: { ...noLightsOff.fields, watchSleepOnsetTime: "" } }, 1100).records[0].fields)
+            .toMatchObject({ hasWatchSleepOnset: "", watchSleepOnsetTime: "", watchSleepOnsetAt: "", sleepLatencyMinutes: null });
+    });
+
+    it("自由安排会一并清掉人工回答，回答原因只跟着「否」保存", () => {
         const record = createDailyRecord("2026-09-04", "research-workday", 1000);
+        record.fields.bedtimePreparation = "yes";
+        record.fields.plannedLightsOffTime = "22:30";
+        record.fields.lightsOffAdherence = "no";
+        record.fields.lightsOffAdherenceReason = "小说写到一半没停下来";
+
+        const saved = upsertDailyRecord(createEmptyDailyStore(900), record, 1100).records[0];
+        expect(saved.fields).toMatchObject({
+            lightsOffAdherence: "no",
+            lightsOffAdherenceReason: "小说写到一半没停下来",
+        });
+
+        // 改成「是」或自由安排后，原因不再保留
+        const flipped = { ...saved, fields: { ...saved.fields, lightsOffAdherence: "yes" as const } };
+        expect(upsertDailyRecord(createEmptyDailyStore(1200), flipped, 1300).records[0].fields).toMatchObject({
+            lightsOffAdherence: "yes",
+            lightsOffAdherenceReason: "",
+        });
+
+        const free = { ...saved, fields: { ...saved.fields, bedtimePreparation: "free" as const } };
+        expect(upsertDailyRecord(createEmptyDailyStore(1400), free, 1500).records[0].fields).toMatchObject({
+            lightsOffAdherence: "",
+            lightsOffAdherenceReason: "",
+            plannedLightsOffAt: "",
+        });
+    });
+
+    it("保存个人项目稳定引用与历史快照，并在克隆时隔离数组", () => {        const record = createDailyRecord("2026-09-04", "research-workday", 1000);
         record.fields.personalProjectLinks = [{
             workItemId: "project-1",
             titleSnapshot: "完善行舟",

@@ -10,6 +10,18 @@ export type BedtimePreparation = "yes" | "no" | "free" | "";
 export type PlannedLightsOffDay = "same-day" | "next-day" | "";
 /** 就寝时段：12 点前 / 12 点后（熬夜）。有时间时由时间推导，没有时间时可以作为单独的熬夜标记保存。 */
 export type LightsOffBand = "before-midnight" | "after-midnight" | "";
+/**
+ * 实际熄灯时刻的来源：
+ * - `live`：关灯前在「睡前准备」里当场记录（一键「此刻熄灯」），归日就是记录日当晚；
+ * - `recalled`：早期版本在第二天早上凭回忆补记，归日按「晚于起床时刻即属于前一夜」推导。
+ * 两种来源在跨午夜时归日不同（当场记的 22:47 属于今晚，回忆的 22:47 属于昨晚），
+ * 因此必须显式保存，不能靠时刻本身反推。
+ */
+export type LightsOffTimeSource = "live" | "recalled" | "";
+/** 早晨对「昨晚是否按计划熄灯」的人工回答；仅用于系统无法推导时（有计划、但没记实际时刻）。 */
+export type LightsOffAdherence = "yes" | "no" | "";
+/** 熄灯计划达成的容差：比计划晚超过这个分钟数才算「没按计划」；早于计划一律算守住。 */
+export const LIGHTS_OFF_TOLERANCE_MINUTES = 15;
 export type ResultState = "met" | "exceeded" | "missed" | "not-applicable" | "";
 export type ClosureNeed = "needed" | "not-needed" | "";
 
@@ -22,6 +34,9 @@ export type DailyWorkItemLink = {
 
 export type DailyRecordFields = {
     lightsOffTime: string;
+    lightsOffTimeSource: LightsOffTimeSource;
+    lightsOffAdherence: LightsOffAdherence;
+    lightsOffAdherenceReason: string;
     wakeTime: string;
     lightsOffAt: string;
     lightsOffBand: LightsOffBand;
@@ -29,6 +44,12 @@ export type DailyRecordFields = {
     sleepDurationMinutes: number | null;
     hasWatchSleepScore: PresenceState;
     watchSleepScore: number | null;
+    /** 手表记录的入睡时刻。入睡是不可控的（熄灯早也可能翻来覆去），因此只记录、不参与任何达成判定。 */
+    hasWatchSleepOnset: PresenceState;
+    watchSleepOnsetTime: string;
+    watchSleepOnsetAt: string;
+    /** 熄灯 → 入睡的间隔（分钟）：可控的是熄灯，这个数字用来看「躺下后多久睡着」。 */
+    sleepLatencyMinutes: number | null;
     subjectiveSleepQuality: number | null;
     hasMorningWeight: PresenceState;
     morningWeight: number | null;
@@ -208,6 +229,15 @@ export function previousDayFirstAction(records: DailyRecord[], date: string): st
     return record ? (record.fields.tomorrowFirstAction ?? "").trim() : "";
 }
 
+/** 「熄灯 → 入睡」的间隔文案：小时 + 分钟，午睡式的小间隔只报分钟。 */
+export function sleepLatencyLabel(minutes: number | null): string {
+    if (minutes === null || !Number.isFinite(minutes)) return "";
+    if (minutes < 60) return `${Math.round(minutes)} 分钟`;
+    const hours = Math.floor(minutes / 60);
+    const rest = Math.round(minutes % 60);
+    return rest === 0 ? `${hours} 小时` : `${hours} 小时 ${rest} 分`;
+}
+
 export function isWorkMetricApplicable(dayType: DailyDayType): boolean {
     return dayType !== "holiday";
 }
@@ -237,17 +267,137 @@ export function resolveSleepDateTimes(record: DailyRecord): DailyRecord {
     if (!validTime(lightsOffTime)) {
         next.fields.lightsOffAt = "";
         next.fields.lightsOffBand = lightsOffBand(next.fields.lightsOffBand);
+        resolveWatchSleepOnset(next);
         resolvePlannedLightsOff(next);
         return next;
     }
     const lightsOffMinutes = clockMinutes(lightsOffTime);
     const wakeMinutes = validTime(wakeTime) ? clockMinutes(wakeTime) : null;
-    const belongsToPreviousDay = wakeMinutes === null ? lightsOffMinutes >= 12 * 60 : lightsOffMinutes > wakeMinutes;
+    /*
+     * 当场记录（live）：记录时刻就是当晚，归日直接取记录日，不参与「晚于起床即属于前一夜」的推导；
+     * 回忆补记（recalled）：保持旧口径，晚于起床时刻的一律算前一夜。
+     */
+    const isLive = next.fields.lightsOffTimeSource === "live";
+    const belongsToPreviousDay = isLive ? false : wakeMinutes === null ? lightsOffMinutes >= 12 * 60 : lightsOffMinutes > wakeMinutes;
     const date = belongsToPreviousDay ? shiftDateKey(next.date, -1) : next.date;
     next.fields.lightsOffAt = `${date}T${lightsOffTime}`;
     next.fields.lightsOffBand = belongsToPreviousDay ? "before-midnight" : "after-midnight";
+    resolveWatchSleepOnset(next);
     resolvePlannedLightsOff(next);
     return next;
+}
+
+/**
+ * 手表入睡时刻：与熄灯同一套夜间语义（晚于起床时刻即属于前一夜）。
+ * 它只是记录，不参与「是否按计划」的判定——入睡不受意志直接控制，
+ * 拿它来评价会惩罚一件你控制不了的事。真正被评价的只有熄灯。
+ */
+function resolveWatchSleepOnset(record: DailyRecord): void {
+    const fields = record.fields;
+    /*
+     * 只看时间值本身：草稿直接调 resolveSleepDateTimes 时 hasWatchSleepOnset 这个派生开关
+     * 还没被规范化，不能因为它没跟上就丢掉用户刚填的入睡时间。
+     */
+    if (!validTime(fields.watchSleepOnsetTime)) {
+        fields.watchSleepOnsetAt = "";
+        fields.sleepLatencyMinutes = null;
+        return;
+    }
+    const onsetMinutes = clockMinutes(fields.watchSleepOnsetTime);
+    const wakeMinutes = validTime(fields.wakeTime) ? clockMinutes(fields.wakeTime) : null;
+    const belongsToPreviousDay = wakeMinutes === null ? onsetMinutes >= 12 * 60 : onsetMinutes > wakeMinutes;
+    fields.watchSleepOnsetAt = `${belongsToPreviousDay ? shiftDateKey(record.date, -1) : record.date}T${fields.watchSleepOnsetTime}`;
+    fields.sleepLatencyMinutes = sleepLatency(fields.lightsOffAt, fields.watchSleepOnsetAt);
+}
+
+/**
+ * 熄灯到入睡的间隔（分钟）。跨午夜时取模补回一天：23:45 熄灯、00:40 入睡 = 55 分钟，
+ * 而不是负值或 22 小时。熄灯与入睡相差整天时按 1440 分钟处理，不伪造更细的数字。
+ */
+function sleepLatency(lightsOffAt: string, sleepOnsetAt: string): number | null {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(lightsOffAt) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(sleepOnsetAt)) return null;
+    const diff = (Date.parse(sleepOnsetAt) - Date.parse(lightsOffAt)) / 60_000;
+    if (!Number.isFinite(diff)) return null;
+    const rounded = Math.round(diff);
+    const wrapped = ((rounded % 1440) + 1440) % 1440;
+    return wrapped === 0 && rounded !== 0 ? 1440 : wrapped;
+}
+
+/** 计划熄灯时刻：记录日当晚的计划由本记录持有；判定它守没守住要拿次日记录里的实际熄灯。 */
+export function plannedLightsOffReference(record: DailyRecord): { plannedAt: string; time: string; date: string; free: boolean } | null {
+    if (record.fields.bedtimePreparation === "free") return null;
+    const plannedAt = record.fields.plannedLightsOffAt;
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(plannedAt)) return null;
+    return { plannedAt, time: plannedAt.slice(11), date: plannedAt.slice(0, 10), free: false };
+}
+
+/**
+ * 同一口径的「当场计算」版本：`plannedLightsOffAt` 要等保存后才由 resolveSleepDateTimes 补出来，
+ * 界面在用户刚选完时间、还没保存时也需要知道今晚计划落在哪一天，因此这里直接从原始字段算，
+ * 复用同一个归属规则（12:00 以前视为次日凌晨），避免在组件里再抄一份日期推导。
+ */
+export function plannedLightsOffReferenceFromFields(date: string, fields: Pick<DailyRecordFields, "bedtimePreparation" | "plannedLightsOffDay" | "plannedLightsOffTime">): { plannedAt: string; time: string; date: string } | null {
+    if (fields.bedtimePreparation === "free" || !validTime(fields.plannedLightsOffTime)) return null;
+    const day = plannedLightsOffDay(fields.plannedLightsOffDay, fields.plannedLightsOffTime);
+    if (!day) return null;
+    const plannedDate = day === "next-day" ? shiftDateKey(date, 1) : date;
+    return { plannedAt: `${plannedDate}T${fields.plannedLightsOffTime}`, time: fields.plannedLightsOffTime, date: plannedDate };
+}
+
+/**
+ * 熄灯计划达成的推导结果。判定是现算的派生值、不落库，因此历史数据不需要迁移，
+ * 也不会出现「存下来的判定与实测数据互相矛盾」。
+ */
+export type LightsOffAdherenceResult =
+    | { status: "unanswered" }
+    | { status: "met" | "missed"; source: "measured"; evidence: { plannedTime: string; actualTime: string; diffMinutes: number } }
+    | { status: "met" | "missed"; source: "answered"; evidence: null };
+
+/** 一个夜晚的完整判定输入：当晚计划（前一条记录）+ 次日早晨记录里保存的实际熄灯与人工回答。 */
+export type LightsOffNightInput = {
+    plannedAt: string;
+    date: string;
+    time: string;
+    free: boolean;
+    actualTime: string;
+    actualAt: string;
+    answered: LightsOffAdherence;
+};
+
+export function lightsOffNightInput(previousRecord: DailyRecord | null, record: DailyRecord): LightsOffNightInput {
+    const reference = previousRecord ? plannedLightsOffReference(previousRecord) : null;
+    return {
+        plannedAt: reference?.plannedAt ?? "",
+        date: reference?.date ?? "",
+        time: reference?.time ?? "",
+        free: previousRecord?.fields.bedtimePreparation === "free",
+        actualTime: validTime(record.fields.lightsOffTime) ? record.fields.lightsOffTime : "",
+        actualAt: record.fields.lightsOffAt,
+        answered: record.fields.lightsOffAdherence,
+    };
+}
+
+export function deriveLightsOffAdherence(input: LightsOffNightInput): LightsOffAdherenceResult {
+    if (!input.plannedAt) return { status: "unanswered" };
+    if (input.actualTime) {
+        const diffMinutes = lightsOffDiffMinutes(input.actualTime, input.time);
+        if (diffMinutes === null) return { status: "unanswered" };
+        return {
+            status: diffMinutes > LIGHTS_OFF_TOLERANCE_MINUTES ? "missed" : "met",
+            source: "measured",
+            evidence: { plannedTime: input.time, actualTime: input.actualTime, diffMinutes },
+        };
+    }
+    const answered = lightsOffAdherenceState(input.answered);
+    if (answered) return { status: answered === "yes" ? "met" : "missed", source: "answered", evidence: null };
+    return { status: "unanswered" };
+}
+
+function lightsOffDiffMinutes(actualTime: string, plannedTime: string): number | null {
+    if (!validTime(actualTime) || !validTime(plannedTime)) return null;
+    const diff = clockMinutes(actualTime) - clockMinutes(plannedTime);
+    // 熄灯发生在午夜之后（例如计划 23:45、实际 00:40）时，时钟读数更小，要补回一天
+    return diff >= -12 * 60 ? diff : diff + 24 * 60;
 }
 
 function resolvePlannedLightsOff(record: DailyRecord): void {
@@ -256,6 +406,8 @@ function resolvePlannedLightsOff(record: DailyRecord): void {
         fields.plannedLightsOffDay = "";
         fields.plannedLightsOffTime = "";
         fields.plannedLightsOffAt = "";
+        fields.lightsOffAdherence = "";
+        fields.lightsOffAdherenceReason = "";
         return;
     }
     if (!validTime(fields.plannedLightsOffTime)) {
@@ -271,8 +423,9 @@ function resolvePlannedLightsOff(record: DailyRecord): void {
 
 function emptyDailyFields(): DailyRecordFields {
     return {
-        lightsOffTime: "", wakeTime: "", lightsOffAt: "", lightsOffBand: "", wakeAt: "", sleepDurationMinutes: null,
-        hasWatchSleepScore: "", watchSleepScore: null, subjectiveSleepQuality: null,
+        lightsOffTime: "", lightsOffTimeSource: "", lightsOffAdherence: "", lightsOffAdherenceReason: "",
+        wakeTime: "", lightsOffAt: "", lightsOffBand: "", wakeAt: "", sleepDurationMinutes: null,
+        hasWatchSleepScore: "", watchSleepScore: null, hasWatchSleepOnset: "", watchSleepOnsetTime: "", watchSleepOnsetAt: "", sleepLatencyMinutes: null, subjectiveSleepQuality: null,
         hasMorningWeight: "", morningWeight: null, weightUnit: "kg", workStartTime: "",
         plannedWorkEndTime: "", importantWorkPlan: "", saturdayReviewOccurred: "", hasDayAdjustments: "", dayAdjustments: "", trainingPlan: "",
         personalAffairsPlanned: "", personalProjectLinks: [],
@@ -302,6 +455,9 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
     const normalizedAfterHoursWork = presenceState(fields.afterHoursWorkOccurred, fields.afterHoursWorkReason);
     const normalizedAnomaly = presenceState(fields.hasAnomalyOrObservation, fields.anomalyOrObservation);
     const normalizedHasWatchSleepScore = measurementPresenceState(fields.hasWatchSleepScore, fields.watchSleepScore);
+    // 入睡时间的「有无」直接由值决定：填了就是有。评分那栏已经表达了「今天有没有手表数据」，
+    // 再给它一个独立开关只会多一次判断，而且两处开关容易互相矛盾。
+    const normalizedHasWatchSleepOnset: PresenceState = validTime(textValue(fields.watchSleepOnsetTime)) ? "yes" : "";
     const normalizedHasMorningWeight = measurementPresenceState(fields.hasMorningWeight, fields.morningWeight);
     const normalizedPersonalProjectLinks = normalizeWorkItemLinks(fields.personalProjectLinks);
     const normalizedPersonalAffairsPlanned = personalAffairsState(fields, source.dayType, normalizedPersonalProjectLinks);
@@ -317,6 +473,8 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             sleepDurationMinutes: nullableNonnegativeNumber(fields.sleepDurationMinutes),
             hasWatchSleepScore: normalizedHasWatchSleepScore,
             watchSleepScore: normalizedHasWatchSleepScore === "yes" ? nullableBoundedNumber(fields.watchSleepScore, 0, 100) : null,
+            hasWatchSleepOnset: normalizedHasWatchSleepOnset,
+            watchSleepOnsetTime: normalizedHasWatchSleepOnset === "yes" ? textValue(fields.watchSleepOnsetTime) : "",
             subjectiveSleepQuality: nullableScore(fields.subjectiveSleepQuality),
             hasMorningWeight: normalizedHasMorningWeight,
             morningWeight: normalizedHasMorningWeight === "yes" ? nullableNonnegativeNumber(fields.morningWeight) : null,
@@ -357,6 +515,9 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             anomalyOrObservation: normalizedAnomaly === "yes" ? textValue(fields.anomalyOrObservation) : "",
             bedtimePreparation: bedtimePreparation(fields.bedtimePreparation),
             lightsOffBand: lightsOffBand(fields.lightsOffBand),
+            lightsOffTimeSource: lightsOffTimeSource(fields.lightsOffTimeSource),
+            lightsOffAdherence: lightsOffAdherenceState(fields.lightsOffAdherence),
+            lightsOffAdherenceReason: lightsOffAdherenceState(fields.lightsOffAdherence) === "no" ? textValue(fields.lightsOffAdherenceReason) : "",
             plannedLightsOffDay: plannedLightsOffDay(fields.plannedLightsOffDay, fields.plannedLightsOffTime),
         },
     });
@@ -368,6 +529,7 @@ function stringFields(fields: Partial<DailyRecordFields>): Partial<DailyRecordFi
         "trainingPlan", "personalProjectPlan", "personalProjectNoteDraft", "restAndLifePlan", "studyMaterial", "studyTopic", "studyPlan", "studyResult",
         "actualWorkEndTime", "importantWorkResult", "closureObject", "closureNextStep", "personalLifeResult", "bestThing",
         "obstacleOrCost", "afterHoursWorkReason", "tomorrowFirstAction", "anomalyOrObservation", "plannedLightsOffTime", "plannedLightsOffAt",
+        "lightsOffAdherenceReason", "watchSleepOnsetTime", "watchSleepOnsetAt",
     ];
     return Object.fromEntries(keys.map((key) => [key, typeof fields[key] === "string" ? fields[key] : ""])) as Partial<DailyRecordFields>;
 }
@@ -415,6 +577,15 @@ function bedtimePreparation(value: unknown): BedtimePreparation {
 
 function lightsOffBand(value: unknown): LightsOffBand {
     return value === "before-midnight" || value === "after-midnight" ? value : "";
+}
+
+/** 存量记录没有来源标记：一律当作「回忆补记」，也就是旧版本一直以来的口径。 */
+function lightsOffTimeSource(value: unknown): LightsOffTimeSource {
+    return value === "live" || value === "recalled" ? value : "";
+}
+
+function lightsOffAdherenceState(value: unknown): LightsOffAdherence {
+    return value === "yes" || value === "no" ? value : "";
 }
 
 function plannedLightsOffDay(value: unknown, time: unknown): PlannedLightsOffDay {
@@ -511,7 +682,7 @@ function clockMinutes(value: string): number {
     return Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
 }
 
-function shiftDateKey(date: string, days: number): string {
+export function shiftDateKey(date: string, days: number): string {
     const parsed = new Date(`${date}T12:00:00`);
     parsed.setDate(parsed.getDate() + days);
     return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;

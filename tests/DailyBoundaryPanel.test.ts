@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import DailyBoundaryPanel from "../src/DailyBoundaryPanel.svelte";
-import type { ChecklistBoundaryAttention, ChecklistBoundaryItem } from "../src/checklist-boundary";
+import { boundaryHeadlineParts, type ChecklistBoundaryAttention, type ChecklistBoundaryItem } from "../src/checklist-boundary";
 
 describe("边界提醒面板", () => {
     let component: { $destroy(): void } | undefined;
@@ -21,8 +21,8 @@ describe("边界提醒面板", () => {
     it("列出待确认项，并区分「该做了」与「还有多久」", async () => {
         render(attention());
         const items = [...document.querySelectorAll(".xz-boundary-item")];
-        // 2 项需要现在处理 + 2 项尚未到点的预览 + 2 项已完成
-        expect(items).toHaveLength(6);
+        // 2 项需要现在处理 + 2 项尚未到点的预览 + 3 项已完成
+        expect(items).toHaveLength(7);
         expect(document.querySelector(".xz-daily-boundary-panel > header strong")?.textContent).toBe("现在要确认的 2 件事");
 
         const overdue = items[0];
@@ -31,10 +31,40 @@ describe("边界提醒面板", () => {
         expect(overdue.textContent).toContain("按早晨计划正式下班");
         expect(overdue.textContent).toContain("该做了 · 已过 32 分钟");
         expect(overdue.textContent).toContain("已做");
+        // 标题位写具体事项，阶段名与状态退到补充行
+        expect(overdue.querySelector(".xz-boundary-item__body strong")?.textContent).toBe("区间内自选现实时间");
+        expect(overdue.querySelector(".xz-boundary-item__body small")?.textContent).toBe("按早晨计划正式下班 · 该做了 · 已过 32 分钟 · 计划时刻＝收尾完成并关闭工作环境");
+        expect(overdue.querySelector(".xz-boundary-item__body strong")?.getAttribute("title")).toBe("区间内自选现实时间；计划时刻＝收尾完成并关闭工作环境（按早晨计划正式下班）");
 
         const soon = items[1];
         expect(soon.classList.contains("is-soon")).toBe(true);
         expect(soon.textContent).toContain("28 分钟后");
+        // 提醒原文只有一句时，标题就是整句，补充行不重复同一句话
+        expect(soon.querySelector(".xz-boundary-item__body strong")?.textContent).toBe("随餐鱼油 1 粒");
+        expect(soon.querySelector(".xz-boundary-item__body small")?.textContent).toBe("晚饭与回家 · 28 分钟后");
+    });
+
+    it("点完「已做」挪到已确认区后，抬头仍是同一条具体事项（用户实际遇到的困惑）", async () => {
+        render(attention());
+        // 12:10 的午饭那条：抬头不能还是「午饭」，否则看不出勾掉的是哪一条
+        const lunch = document.querySelector('.xz-boundary-item.is-done[data-boundary-key="wd-lunch::wd-lunch:1"]');
+        expect(lunch?.textContent).toContain("12:10");
+        expect(lunch?.querySelector(".xz-boundary-item__body strong")?.textContent).toBe("随餐鱼油 1 粒");
+        expect(lunch?.querySelector(".xz-boundary-item__body small")?.textContent).toBe("午饭 · 已完成");
+        // 抬头本来就是阶段名的那条（提醒原文＝条目标题）不重复一遍阶段名
+        const breakfast = document.querySelector('.xz-boundary-item.is-done[data-boundary-key="wd-wake::wd-wake:0"]');
+        expect(breakfast?.querySelector(".xz-boundary-item__body strong")?.textContent).toBe("起床");
+        expect(breakfast?.querySelector(".xz-boundary-item__body small")?.textContent).toBe("已完成");
+    });
+
+    it("确认按钮的无障碍名称带上阶段名，读屏时不丢上下文", async () => {
+        render(attention());
+        expect(document.querySelector(".xz-boundary-item.is-overdue .xz-boundary-item__done")?.getAttribute("aria-label"))
+            .toBe("确认已做：按早晨计划正式下班 · 区间内自选现实时间");
+        expect(document.querySelector(".xz-boundary-item.is-later .xz-boundary-item__done")?.getAttribute("aria-label"))
+            .toBe("提前确认已做：酪蛋白｜按需 · 仅在全天蛋白质不足或晚上容易饥饿时饮用");
+        expect(document.querySelector('.xz-boundary-item.is-done[data-boundary-key="wd-lunch::wd-lunch:1"] .xz-boundary-item__done')?.getAttribute("aria-label"))
+            .toBe("撤销确认：午饭 · 随餐鱼油 1 粒");
     });
 
     it("点「已做」把该条的 key 交回调用方，已确认项显示为可撤销", async () => {
@@ -68,7 +98,7 @@ describe("边界提醒面板", () => {
         const done = attention().doneKeys;
         render({ items: [], later: [], doneKeys: done, doneCount: done.length, totalCount: done.length, laterPreviewHeadline: "" });
         expect(document.querySelector(".xz-daily-boundary-panel")?.classList.contains("is-empty")).toBe(true);
-        expect(document.body.textContent).toContain("今天的边界提醒都确认完了（2/2）");
+        expect(document.body.textContent).toContain("今天的边界提醒都确认完了（3/3）");
         expect(document.querySelector(".xz-boundary-list")).toBeNull();
     });
 
@@ -112,7 +142,9 @@ describe("边界提醒面板", () => {
 
 function item(key: string, entryId: string, entryTitle: string, reminder: string, at: string, minutesFromNow: number, status: ChecklistBoundaryItem["status"]): ChecklistBoundaryItem {
     const [hours, minutes] = at.split(":").map(Number);
-    return { key, entryId, entryTitle, reminder, at, atMinutes: hours * 60 + minutes, minutesFromNow, status };
+    // 与领域层同一套拆句规则：标题＝提醒原文第一分句，阶段名退到补充行
+    const { headline, detail } = boundaryHeadlineParts(reminder, entryTitle);
+    return { key, entryId, entryTitle, headline, detail, reminder, at, atMinutes: hours * 60 + minutes, minutesFromNow, status };
 }
 
 function attention(): ChecklistBoundaryAttention {
@@ -127,6 +159,8 @@ function attention(): ChecklistBoundaryAttention {
     const doneKeys = [
         item("wd-breakfast::wd-breakfast:1", "wd-breakfast", "返回办公室＋早餐＋日评估", "玉米、红薯、鸡蛋；随餐鱼油 1 粒", "08:45", 527, "later"),
         item("wd-lunch::wd-lunch:1", "wd-lunch", "午饭", "随餐鱼油 1 粒；不边吃边工作", "12:10", 322, "later"),
+        // 提醒原文＝条目标题的那类（没有补充分句），用于验证补充行不重复阶段名
+        item("wd-wake::wd-wake:0", "wd-wake", "起床", "起床", "06:00", 687, "later"),
     ];
     return {
         items,

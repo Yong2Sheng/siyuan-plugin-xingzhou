@@ -492,20 +492,21 @@ describe("行舟一级模块外壳", () => {
         expect(saveDaily.mock.calls[0][0].fields).toMatchObject({ trainingCompleted: "no", trainingPlan: "" });
     });
 
-    it("先确认是否有手表评分和体重测量，再按需显示数值输入", async () => {
+    it("先确认是否有手表睡眠数据与体重测量，再按需显示数值输入", async () => {
         let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
         await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
 
-        const watchDecision = [...document.querySelectorAll("label")]
-            .find((label) => label.textContent?.includes("今天是否有手表睡眠评分"))
-            ?.querySelector("select") as HTMLSelectElement;
+        const watchDecision = document.querySelector('[aria-label="今天是否有手表睡眠数据"]') as HTMLSelectElement;
         const weightDecision = [...document.querySelectorAll("label")]
             .find((label) => label.textContent?.includes("今天是否测量晨起体重"))
             ?.querySelector("select") as HTMLSelectElement;
-        expect(document.body.textContent).not.toContain("今天没有手表评分，无需填写");
+        expect(document.body.textContent).not.toContain("今天没有手表数据，睡眠时长、评分与入睡时间都无需填写");
+        // 睡眠时长、入睡时间都跟在「是否有手表睡眠数据」这个开关后面，未确认时不显示
+        expect(document.querySelector('[aria-label="睡眠时长小时"]')).toBeNull();
+        expect(document.querySelector('[aria-label="手表入睡时间小时"]')).toBeNull();
         expect([...document.querySelectorAll("label")].some((label) => label.textContent?.trim().startsWith("晨起体重"))).toBe(false);
 
         watchDecision.value = "no";
@@ -513,7 +514,9 @@ describe("行舟一级模块外壳", () => {
         weightDecision.value = "no";
         weightDecision.dispatchEvent(new Event("change", { bubbles: true }));
         await tick();
-        expect(document.body.textContent).toContain("今天没有手表评分，无需填写");
+        expect(document.body.textContent).toContain("今天没有手表数据，睡眠时长、评分与入睡时间都无需填写");
+        expect(document.querySelector('[aria-label="睡眠时长小时"]')).toBeNull();
+        expect(document.querySelector('[aria-label="手表入睡时间小时"]')).toBeNull();
         expect(document.body.textContent).toContain("今天没有测量条件，无需填写");
 
         watchDecision.value = "yes";
@@ -523,6 +526,29 @@ describe("行舟一级模块外壳", () => {
         await tick();
         expect([...document.querySelectorAll("label")].some((label) => label.textContent?.trim().startsWith("手表睡眠评分"))).toBe(true);
         expect([...document.querySelectorAll("label")].some((label) => label.textContent?.trim().startsWith("晨起体重"))).toBe(true);
+
+        // 选「是」之后才出现睡眠时长与入睡时间；没有熄灯时刻时不编造「躺下后多久」，
+        // 只说明它不参与评价（跨午夜的实测间隔由领域层测试覆盖）
+        expect(document.querySelector('[aria-label="睡眠时长小时"]')).not.toBeNull();
+        choose("睡眠时长小时", "7");
+        choose("睡眠时长分钟", "30");
+        await tick();
+        expect(document.body.textContent).toContain("手表实际睡眠");
+        choose("手表入睡时间小时", "00");
+        choose("手表入睡时间分钟", "05");
+        await tick();
+        expect(document.body.textContent).toContain("入睡时间只做记录，不参与是否按计划的评价");
+
+        // 改选「否」：入睡时间输入口收起，已填的值一并清掉，不留孤儿数据
+        const savesBefore = saveDaily.mock.calls.length;
+        watchDecision.value = "no";
+        watchDecision.dispatchEvent(new Event("change", { bubbles: true }));
+        await tick();
+        expect(document.querySelector('[aria-label="手表入睡时间小时"]')).toBeNull();
+        await vi.waitFor(() => expect(saveDaily.mock.calls.length).toBeGreaterThan(savesBefore), { timeout: 2000 });
+        expect(saveDaily.mock.calls.at(-1)?.[0].fields).toMatchObject({
+            hasWatchSleepScore: "no", watchSleepScore: null, watchSleepOnsetTime: "", hasWatchSleepOnset: "",
+        });
     });
 
     it("先确认是否有临时调整，仅在选择是时显示说明输入框", async () => {
@@ -564,10 +590,13 @@ describe("行舟一级模块外壳", () => {
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
         await tick();
-        await vi.waitFor(() => expect(document.querySelector('[aria-label="昨晚熄灯小时"]')).not.toBeNull());
+        await vi.waitFor(() => expect(document.querySelector('[aria-label="今日起床小时"]')).not.toBeNull());
 
-        choose("昨晚熄灯小时", "22");
-        choose("昨晚熄灯分钟", "07");
+        choose("今日起床小时", "06");
+        choose("今日起床分钟", "10");
+        // 睡眠时长属手表数据，先确认今天有手表数据它才出现
+        choose("今天是否有手表睡眠数据", "yes");
+        await tick();
         choose("睡眠时长小时", "5");
         choose("睡眠时长分钟", "46");
         choose("计划下班时间小时", "16");
@@ -583,72 +612,149 @@ describe("行舟一级模块外壳", () => {
         expect(document.body.textContent).not.toContain("保存今日记录");
         await vi.waitFor(() => expect(saveDaily.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 2000 });
         expect(saveDaily.mock.calls.at(-1)?.[0].fields).toMatchObject({
-            lightsOffTime: "22:07", sleepDurationMinutes: 346, plannedWorkEndTime: "16:45", actualWorkEndTime: "16:49",
+            wakeTime: "06:10", sleepDurationMinutes: 346, plannedWorkEndTime: "16:45", actualWorkEndTime: "16:49",
         });
         expect(document.body.textContent).toContain("已自动保存并复核");
     });
 
-    it("只标记 12 点后熬夜也能保存，填了时间就按时间判定，清空后回到标记状态", async () => {
-        let store = researchDailyStore();
-        const loadDaily = vi.fn().mockResolvedValue(store);
+    it("早晨只列举证与结论：有实测就自动判定，没实测才追问一次", async () => {
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        const yesterday = new Date(`${today}T12:00:00`);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const previous = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+
+        // 前晚登记了计划 22:30，今天早上既没实测也没回答 → 唯一的追问场景
+        const planned = createDailyRecord(previous, "research-workday", 1000);
+        planned.fields.bedtimePreparation = "yes";
+        planned.fields.plannedLightsOffTime = "22:30";
+        let store = upsertDailyRecord(createEmptyDailyStore(1000), planned, 1000);
+        store = upsertDailyRecord(store, { ...createDailyRecord(today), dayType: "research-workday" }, 1000);
+
+        const loadDaily = vi.fn(async () => store);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
         await tick();
-        await vi.waitFor(() => expect(document.querySelector('[aria-label="昨晚熄灯时段"]')).not.toBeNull());
+        await vi.waitFor(() => expect(document.body.textContent).toContain("昨晚计划"), { timeout: 2000 });
 
-        // 选「12 点后（熬夜）」：时间行收起为静态标记，不需要分钟也能算填好
-        choose("昨晚熄灯时段", "after-midnight");
-        await tick();
-        expect(document.querySelector(".xz-daily-lights-off-skip")?.textContent).toContain("不记具体时间");
-        expect(document.querySelector('[aria-label="昨晚熄灯小时"]')).toBeNull();
-        // 落盘以 upsert 后的记录为准：时段在保存时重新推导
-        await vi.waitFor(() => expect(store.records[0].fields).toMatchObject({
-            lightsOffTime: "", lightsOffAt: "", lightsOffBand: "after-midnight",
-        }), { timeout: 2000 });
+        // 只读展示前晚的计划，早晨不再有任何时刻输入框
+        expect(document.querySelector(".xz-daily-review__plan")?.textContent).toContain("22:30");
+        expect(document.querySelector('[aria-label="实际熄灯小时"]')).toBeNull();
+        expect(document.querySelector('[aria-label="昨晚我按计划熄灯了吗"]')).not.toBeNull();
+        expect(document.body.textContent).toContain("要你自己回答一次");
 
-        // 展开并填具体时间：时段改由时间判定，同时出现「清空」
-        clickButton("填时间");
+        choose("昨晚我按计划熄灯了吗", "no");
         await tick();
-        choose("昨晚熄灯小时", "00");
-        choose("昨晚熄灯分钟", "30");
-        await tick();
-        expect((document.querySelector('[aria-label="昨晚熄灯时段"]') as HTMLSelectElement).value).toBe("after-midnight");
-        expect(document.querySelector(".xz-daily-time-clear")).not.toBeNull();
-        await vi.waitFor(() => expect(store.records[0].fields).toMatchObject({
-            lightsOffTime: "00:30", lightsOffBand: "after-midnight",
-        }), { timeout: 2000 });
-        expect(store.records[0].fields.lightsOffAt).toMatch(/T00:30$/);
+        // 没按计划 → 原因必填：输入口出现，并且在写完之前不落库
+        const reason = document.querySelector(".xz-daily-adherence-reason textarea") as HTMLTextAreaElement | null;
+        expect(reason).not.toBeNull();
+        await vi.waitFor(() => expect(document.body.textContent).toContain("请先填写「没按计划的原因」"), { timeout: 2000 });
+        expect(saveDaily).not.toHaveBeenCalled();
 
-        // 只有自己点「清空」才会清掉时间，时段标记保持不变
-        clickButton("清空");
-        await tick();
-        expect(document.querySelector(".xz-daily-lights-off-skip")?.textContent).toContain("不记具体时间");
-        await vi.waitFor(() => expect(store.records[0].fields).toMatchObject({
-            lightsOffTime: "", lightsOffAt: "", lightsOffBand: "after-midnight",
-        }), { timeout: 2000 });
+        reason!.value = "小说写到一半没停下来";
+        reason!.dispatchEvent(new Event("input", { bubbles: true }));
+        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalled(), { timeout: 2000 });
+        expect(saveDaily.mock.calls.at(-1)?.[0].fields).toMatchObject({
+            lightsOffAdherence: "no",
+            lightsOffAdherenceReason: "小说写到一半没停下来",
+        });
+        expect(store.records.find((record) => record.date === today)?.fields.lightsOffAdherence).toBe("no");
     });
 
-    it("填了时间以后时段由时间决定，下拉里冲突的选项置灰", async () => {
+    it("睡前记了实际熄灯，第二天早上自动判成「否」，不再问时刻", async () => {
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        const yesterday = new Date(`${today}T12:00:00`);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const previous = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+
+        const planned = createDailyRecord(previous, "research-workday", 1000);
+        planned.fields.bedtimePreparation = "yes";
+        planned.fields.plannedLightsOffTime = "22:30";
+        const morning = createDailyRecord(today, "research-workday", 1000);
+        morning.fields.lightsOffTime = "23:07";
+        morning.fields.lightsOffTimeSource = "live";
+        let store = upsertDailyRecord(createEmptyDailyStore(1000), planned, 1000);
+        store = upsertDailyRecord(store, morning, 1000);
+
+        const loadDaily = vi.fn(async () => store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await tick();
+        await vi.waitFor(() => expect(document.body.textContent).toContain("没有按计划熄灯"), { timeout: 2000 });
+
+        // 结论在回顾横条里，用 is-missed 表达未达成
+        expect(document.querySelector(".xz-daily-review.is-missed")).not.toBeNull();
+        expect(document.querySelector(".xz-daily-review__verdict")?.textContent).toContain("否");
+        expect(document.body.textContent).toContain("晚 37 分钟");
+        expect(document.querySelector(".xz-daily-review__actual")?.textContent).toContain("23:07");
+        // 有实测就不再追问；实际时刻在回顾横条里以纯文字展示，默认不出现选择器
+        expect(document.querySelector('[aria-label="昨晚我按计划熄灯了吗"]')).toBeNull();
+        expect(document.querySelector(".xz-daily-review__actual")?.textContent).toContain("23:07");
+        expect(document.querySelector('[aria-label="实际熄灯小时"]')).toBeNull();
+        // 点「改」才展开选择器；改完再收起也不会丢掉时刻
+        clickButton("改");
+        await tick();
+        expect(document.querySelector('[aria-label="实际熄灯小时"]')).not.toBeNull();
+        clickButton("收起");
+        await tick();
+        expect(document.querySelector('[aria-label="实际熄灯小时"]')).toBeNull();
+        expect(document.querySelector(".xz-daily-review__actual")?.textContent).toContain("23:07");
+        expect(document.querySelector(".xz-daily-adherence-reason")).not.toBeNull();
+    });
+
+    it("睡前手动记实际熄灯也按当场记录保存，并立刻给出与计划的偏差", async () => {
         let store = researchDailyStore();
         const loadDaily = vi.fn().mockResolvedValue(store);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
         await tick();
-        await vi.waitFor(() => expect(document.querySelector('[aria-label="昨晚熄灯小时"]')).not.toBeNull());
+        await vi.waitFor(() => expect(document.querySelector('[aria-label="今日起床小时"]')).not.toBeNull());
 
-        choose("昨晚熄灯小时", "00");
-        choose("昨晚熄灯分钟", "30");
+        clickButton("21:00");
+        await tick();
+        await vi.waitFor(() => expect(document.querySelector('[aria-label="今晚的睡前安排"]')).not.toBeNull(), { timeout: 2000 });
+        choose("今晚的睡前安排", "yes");
+        await tick();
+        choose("计划熄灯时间小时", "22");
+        choose("计划熄灯时间分钟", "30");
+        await tick();
+        await vi.waitFor(() => expect(store.records.at(-1)!.fields.plannedLightsOffTime).toBe("22:30"), { timeout: 2000 });
+
+        const offBefore = store.records.at(-1)!.fields.lightsOffTime;
+        choose("实际熄灯小时", "23");
+        choose("实际熄灯分钟", "07");
+        await tick();
+        await vi.waitFor(() => expect(store.records.at(-1)!.fields.lightsOffTime).not.toBe(offBefore), { timeout: 2000 });
+        // 睡前准备那格属于当晚（关灯前填的），因此归日就是当天，不按「晚于起床即前一夜」推导
+        expect(store.records.at(-1)!.fields.lightsOffTimeSource).toBe("live");
+        expect(store.records.at(-1)!.fields.lightsOffAt).toBe(`${store.records.at(-1)!.date}T23:07`);
+        expect(document.body.textContent).toContain("晚 37 分钟");
+    });
+
+    it("一键「此刻熄灯」写的是当场记录：归日是当天，不按「晚于起床即前一夜」推导", async () => {
+        let store = researchDailyStore();
+        const loadDaily = vi.fn().mockResolvedValue(store);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        await tick();
+        await vi.waitFor(() => expect(document.querySelector('[aria-label="今日起床小时"]')).not.toBeNull());
+
+        clickButton("21:00");
+        await tick();
+        await vi.waitFor(() => expect(document.querySelector('[aria-label="今晚的睡前安排"]')).not.toBeNull(), { timeout: 2000 });
+        choose("今晚的睡前安排", "yes");
+        await tick();
+        clickButton("此刻熄灯");
         await tick();
 
-        const select = document.querySelector('[aria-label="昨晚熄灯时段"]') as HTMLSelectElement;
-        const optionStates = [...select.options].map((option) => ({ value: option.value, disabled: option.disabled }));
-        expect(select.value).toBe("after-midnight");
-        expect(optionStates).toEqual([
-            { value: "", disabled: true },
-            { value: "before-midnight", disabled: true },
-            { value: "after-midnight", disabled: false },
-        ]);
-        await vi.waitFor(() => expect(store.records[0].fields).toMatchObject({ lightsOffTime: "00:30", lightsOffBand: "after-midnight" }), { timeout: 2000 });
+        await vi.waitFor(() => expect(store.records.at(-1)!.fields.lightsOffTimeSource).toBe("live"), { timeout: 2000 });
+        const today = store.records.at(-1)!.date;
+        const recorded = store.records.at(-1)!.fields;
+        expect(recorded.lightsOffTime).toMatch(/^\d{2}:\d{2}$/);
+        // 当场记录的 22:47 属于今晚；若按回忆补记的旧口径会被算到前一天
+        expect(recorded.lightsOffAt).toBe(`${today}T${recorded.lightsOffTime}`);
+        expect(document.body.textContent).toContain("已按「此刻熄灯」记为");
     });
 
     it("再次点击已选评分即可清除，并且不增加会造成跳动的按钮", async () => {

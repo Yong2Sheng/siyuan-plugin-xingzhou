@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { calculateDailyCompletion } from "../src/daily-completion";
-import { createDailyRecord } from "../src/daily-records";
+import { createDailyRecord, resolveSleepDateTimes } from "../src/daily-records";
 
 describe("生活节律完整度检查", () => {
     it("空白工作日标出各阶段待补项，普通备注不参与检查", () => {
@@ -31,19 +31,36 @@ describe("生活节律完整度检查", () => {
         expect(skipped.stages.find((stage) => stage.stage === "after-work")?.state).toBe("incomplete");
     });
 
-    it("「12 点后」的熬夜标记满足昨晚熄灯，12 点前没有时间仍然算待补", () => {
-        const markerOnly = createDailyRecord("2026-09-04", "research-workday", 1000);
-        markerOnly.fields.lightsOffBand = "after-midnight";
-        expect(calculateDailyCompletion(markerOnly).missing.map((item) => item.label)).not.toContain("昨晚熄灯");
+    it("没有登记计划的夜晚自动满足昨晚熄灯，不再占着待补清单", () => {
+        const noPlan = createDailyRecord("2026-09-04", "research-workday", 1000);
+        expect(calculateDailyCompletion(noPlan).missing.map((item) => item.label)).not.toContain("昨晚熄灯");
 
-        const timed = createDailyRecord("2026-09-04", "research-workday", 1000);
-        timed.fields.lightsOffTime = "23:05";
-        timed.fields.lightsOffBand = "before-midnight";
-        expect(calculateDailyCompletion(timed).missing.map((item) => item.label)).not.toContain("昨晚熄灯");
+        // 连熬夜标记都没有、也没有实测：同样算「不适用」，不追问
+        const nothing = createDailyRecord("2026-09-04", "research-workday", 1000);
+        nothing.fields.lightsOffBand = "before-midnight";
+        expect(calculateDailyCompletion(nothing).missing.map((item) => item.label)).not.toContain("昨晚熄灯");
+    });
 
-        const beforeWithoutTime = createDailyRecord("2026-09-04", "research-workday", 1000);
-        beforeWithoutTime.fields.lightsOffBand = "before-midnight";
-        expect(calculateDailyCompletion(beforeWithoutTime).missing.map((item) => item.label)).toContain("昨晚熄灯");
+    it("前晚登记了计划时：有实测自动判定，没实测就必须回答一次", () => {
+        const planned = createDailyRecord("2026-09-03", "research-workday", 1000);
+        planned.fields.bedtimePreparation = "yes";
+        planned.fields.plannedLightsOffTime = "22:30";
+        const plannedResolved = resolveSleepDateTimes(planned);
+
+        // 有计划 + 有实测 → 自动判定，直接满足
+        const measured = createDailyRecord("2026-09-04", "research-workday", 1000);
+        measured.fields.lightsOffTime = "22:47";
+        measured.fields.lightsOffTimeSource = "live";
+        expect(calculateDailyCompletion(measured, plannedResolved).missing.map((item) => item.label)).not.toContain("昨晚熄灯");
+
+        // 有计划 + 没实测 + 没回答 → 唯一的待补场景
+        const unanswered = createDailyRecord("2026-09-04", "research-workday", 1000);
+        expect(calculateDailyCompletion(unanswered, plannedResolved).missing.map((item) => item.label)).toContain("昨晚熄灯");
+
+        // 有计划 + 人工回答 → 满足
+        const answered = createDailyRecord("2026-09-04", "research-workday", 1000);
+        answered.fields.lightsOffAdherence = "no";
+        expect(calculateDailyCompletion(answered, plannedResolved).missing.map((item) => item.label)).not.toContain("昨晚熄灯");
     });
 
     it("根据条件判断动态加入或移除待补字段", () => {

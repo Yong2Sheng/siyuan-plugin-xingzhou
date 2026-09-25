@@ -11,6 +11,7 @@ import { createEmptyNutritionStore, type NutritionStore } from "../src/nutrition
 import {
     buildTrendChart,
     convertWeight,
+    lightsOffAdherenceSummary,
     trendDayIndex,
     trendGranularityFor,
     trendNightValue,
@@ -135,6 +136,52 @@ describe("趋势指标：计划熄灯与实际熄灯配对", () => {
         const plan = chart.series.find((series) => series.id === "plan")!.points;
         expect(plan[0].x).toBe(trendDayIndex("2026-09-10"));
         expect(plan[0].y).toBe(23);
+    });
+});
+
+describe("趋势指标：熄灯计划达成统计", () => {
+    /** 同一天要同时写「当晚计划」和「当晚实际」时，必须在同一条记录上补字段：upsertDailyRecord 是整条替换。 */
+    function night(date: string, plannedTime: string, actualTime = "", source: "live" | "recalled" = "live"): DailyRecord {
+        const base = createDailyRecord(date, "research-workday", 1000);
+        return {
+            ...base,
+            fields: {
+                ...base.fields,
+                bedtimePreparation: plannedTime ? "yes" : "",
+                plannedLightsOffTime: plannedTime,
+                lightsOffTime: actualTime,
+                lightsOffTimeSource: actualTime ? source : "",
+            },
+        };
+    }
+
+    it("只统计登记了计划的夜晚，实测晚于计划 15 分钟以上算未达成", () => {
+        // 09-10 晚计划 22:30 → 09-11 早晨记录的实测 22:15（早 15 分钟，算守住）
+        // 09-11 晚计划 22:30 → 09-12 记录的实测 23:07（晚 37 分钟，未达成）
+        // 09-12 晚没有计划 → 09-13 的实测不进分母
+        const records = storeOf(
+            night("2026-09-10", "22:30"),
+            night("2026-09-11", "22:30", "22:15"),
+            night("2026-09-12", "", "23:07"),
+            night("2026-09-13", "", "23:30"),
+        ).records;
+        expect(lightsOffAdherenceSummary(records)).toEqual({ planned: 2, met: 1 });
+    });
+
+    it("有计划但没记实测时会用人工回答", () => {
+        const answered = night("2026-09-11", "22:30");
+        answered.fields.lightsOffAdherence = "no";
+        // 09-12 的计划要等 09-13 的记录来判定，因此不进分母
+        const records = storeOf(night("2026-09-10", "22:30"), answered, night("2026-09-12", "23:00")).records;
+        expect(lightsOffAdherenceSummary(records)).toEqual({ planned: 2, met: 0 });
+    });
+
+    it("睡眠窗口摘要里带上达成情况", () => {
+        const chart = buildTrendChart("sleepWindow", context([
+            night("2026-09-10", "22:30"),
+            night("2026-09-11", "22:30", "22:40"),
+        ], undefined, null, "2026-09-12"));
+        expect(chart.coverage).toContain("计划达成 1/1 晚（容差 15 分钟）");
     });
 });
 

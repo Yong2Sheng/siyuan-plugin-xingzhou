@@ -1,5 +1,10 @@
 import {
     DAILY_RUBRICS,
+    LIGHTS_OFF_TOLERANCE_MINUTES,
+    deriveLightsOffAdherence,
+    lightsOffNightInput,
+    plannedLightsOffReference,
+    shiftDateKey,
     type DailyDayType,
     type DailyRecord,
     type DailyRecordFields,
@@ -600,6 +605,28 @@ export function buildTrendChart(metricId: TrendMetricId, context: TrendChartCont
     };
 }
 
+/**
+ * 一个夜晚的判定：当天傍晚登记的计划写在记录 D，实际熄灯与人工回答保存在次日早晨的记录 D+1。
+ * 因此取「前一晚的计划 + 本晚的实际」，再交给纯函数推导，避免在趋势里复刻一套判定规则。
+ */
+function adherenceNight(context: TrendChartContext, record: DailyRecord) {
+    const previous = context.records.find((candidate) => candidate.date === shiftDateKey(record.date, -1));
+    return deriveLightsOffAdherence(lightsOffNightInput(previous ?? null, record));
+}
+
+/** 窗口内的达成统计：只有登记了计划的夜晚才进分母。 */
+export function lightsOffAdherenceSummary(records: DailyRecord[]): { planned: number; met: number } {
+    let planned = 0;
+    let met = 0;
+    for (const record of records) {
+        const previous = records.find((candidate) => candidate.date === shiftDateKey(record.date, -1));
+        if (!previous || !plannedLightsOffReference(previous)) continue;
+        planned += 1;
+        if (deriveLightsOffAdherence(lightsOffNightInput(previous, record)).status === "met") met += 1;
+    }
+    return { planned, met };
+}
+
 /** 覆盖度按「过滤后真正参与绘制的原始天数」生成：窗口外的记录不算，被排除的昼夜类型也不算。 */
 function coverageFor(
     metricId: TrendMetricId,
@@ -613,8 +640,13 @@ function coverageFor(
     const first = keptRaw.keys().next().value as string | undefined;
     const granularityLabel = granularity === "day" ? "按日" : granularity === "week" ? "按周" : "按月";
     switch (metricId) {
-        case "sleepWindow":
-            return `熄灯时刻 ${days("off")}/${windowRecords} 晚 · 另有 ${bandNights} 晚只标「12 点后」 · ${granularityLabel}`;
+        case "sleepWindow": {
+            const adherence = lightsOffAdherenceSummary(context.records);
+            const adherenceLabel = adherence.planned
+                ? `计划达成 ${adherence.met}/${adherence.planned} 晚（容差 ${LIGHTS_OFF_TOLERANCE_MINUTES} 分钟）`
+                : `计划达成 0 晚（窗口内没有登记过计划熄灯）`;
+            return `熄灯时刻 ${days("off")}/${windowRecords} 晚 · 另有 ${bandNights} 晚只标「12 点后」 · ${adherenceLabel} · ${granularityLabel}`;
+        }
         case "sleepDuration":
             return `手表 ${days("watch")}/${windowRecords} 晚 · 卧床跨度 ${days("span")} 晚 · ${granularityLabel}`;
         case "weight":

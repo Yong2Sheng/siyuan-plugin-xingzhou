@@ -5,16 +5,23 @@
         cloneDailyRecord,
         createDailyRecord,
         defaultDayType,
+        deriveLightsOffAdherence,
         isWorkMetricApplicable,
+        lightsOffNightInput,
+        plannedLightsOffReferenceFromFields,
         previousDayFirstAction,
         resolveSleepDateTimes,
+        shiftDateKey,
+        sleepLatencyLabel,
         type BedtimePreparation,
         type ClosureNeed,
         type DailyDayType,
         type DailyRecord,
         type DailyRecordStore,
         type DailyRubric,
+        type LightsOffAdherence,
         type LightsOffBand,
+        type LightsOffTimeSource,
         type PlannedLightsOffDay,
         type PresenceState,
         type ResultState,
@@ -97,6 +104,11 @@
     let missingOpen = false;
     /** 「12 点后 + 不记具体时间」时是否已展开精确时间输入；纯界面状态，不持久化。 */
     let sleepTimeExpanded = false;
+    /** 「此刻熄灯」的短暂确认提示与它的定时器。 */
+    let lightsOffFlash = "";
+    let lightsOffFlashTimer: ReturnType<typeof setTimeout> | null = null;
+    /** 必填项挡住自动保存时的提示：说清缺什么，而不是让状态停在「等待自动保存」。 */
+    let blockMessage = "";
     /*
      * 边界提醒：checklist 数据由本组件统一持有（面板与 Checklist 视图共用同一份），
      * 避免两个视图各持一份快照、互相用旧数据覆盖。
@@ -120,17 +132,35 @@
     $: isSaturdayReset = draft.dayType === "saturday-reset";
     $: isConferenceDay = draft.dayType === "conference-day";
     $: yesterdayFirstAction = previousDayFirstAction(store?.records ?? [], currentDate);
+    /** 前一天的记录：昨晚的计划写在它里面，实际熄灯与早晨回答写在当前记录里。 */
+    $: previousRecord = store?.records.find((record) => record.date === shiftDateKey(currentDate, -1)) ?? null;
+    $: nightInput = lightsOffNightInput(previousRecord, draft);
+    $: lightsOffAdherence = deriveLightsOffAdherence(nightInput);
+    /** 睡前对照：用本记录自己的计划 + 本记录里当场记录的实际熄灯。 */
+    $: tonightCompare = tonightPlan && actualLightsOffRecorded
+        ? deriveLightsOffAdherence({ ...nightInput, plannedAt: tonightPlan.plannedAt, time: tonightPlan.time, date: tonightPlan.date, free: false })
+        : null;
+    $: tonightDiff = tonightCompare?.status === "met" || tonightCompare?.status === "missed"
+        ? (tonightCompare.evidence ? lightsOffEvidenceLabel(tonightCompare.evidence.diffMinutes) : "")
+        : "";
+    /** 只有在判定为「没按计划」时，原因才是必填；守住或不适用都不该拦保存。 */
+    $: lightsOffReasonSatisfied = lightsOffAdherence.status !== "missed" || draft.fields.lightsOffAdherenceReason.trim().length > 0;
+    /** 实际熄灯是否已登记（当场记录或早期早晨补记都算），决定早晨是否需要人工回答。 */
+    $: actualLightsOffRecorded = Boolean(nightInput.actualTime);
+    $: plannedLightsOff = previousRecord?.fields.plannedLightsOffAt || "";
+    /**
+     * 本记录自己登记的计划熄灯（今晚这一夜）。睡前那格的「计划 vs 实际」对照要用它——
+     * 实际熄灯属于今晚，计划也写在本记录里，而 nightInput 配的是「昨晚的计划 + 今早的实际」，
+     * 两者是不同的夜晚，不能混用。
+     */
+    $: tonightPlan = plannedLightsOffReferenceFromFields(draft.date, draft.fields);
     $: dayGuidance = dayTypes.find((entry) => entry.value === draft.dayType)?.guidance ?? "";
     $: boundary = calculateBoundary(draft.fields.plannedWorkEndTime, draft.fields.actualWorkEndTime);
     $: resolvedSleep = resolveSleepDateTimes(draft);
-    $: sleepHasTime = /^\d{2}:\d{2}$/.test(draft.fields.lightsOffTime);
+    /** 熄灯 → 入睡的实测间隔：只做记录与显示，不参与任何「是否按计划」的判定。 */
+    $: sleepLatency = resolvedSleep.fields.sleepLatencyMinutes;
     $: sleepBand = resolvedSleep.fields.lightsOffBand;
-    $: sleepBandTitle = [
-        sleepBand === "after-midnight" ? "12 点后（熬夜）：熄灯落在次日凌晨" : sleepBand === "before-midnight" ? "12 点前：熄灯落在当晚" : "尚未确认熄灯时段",
-        resolvedSleep.fields.lightsOffAt ? `记录为 ${shortDateFromLocalDateTime(resolvedSleep.fields.lightsOffAt)} ${draft.fields.lightsOffTime}` : "未记具体时间",
-        sleepHasTime ? "要改时段请先点「清空」" : "",
-    ].filter(Boolean).join(" · ");
-    $: completion = calculateDailyCompletion(draft);
+    $: completion = calculateDailyCompletion(draft, previousRecord);
     $: morningCompletion = stagePresentation(completion, "morning");
     $: learningCompletion = stagePresentation(completion, "learning");
     $: boundaryCompletion = stagePresentation(completion, "boundary");
@@ -161,6 +191,7 @@
     onDestroy(() => {
         clearAutoSaveTimer();
         clearBoundaryTimer();
+        if (lightsOffFlashTimer !== null) clearTimeout(lightsOffFlashTimer);
         if (dirty) void saveNow();
     });
 
@@ -285,6 +316,7 @@
         editRevision += 1;
         message = "";
         error = "";
+        blockMessage = "";
         scheduleAutoSave();
     }
 
@@ -377,11 +409,16 @@
         markDirty();
     }
 
+    /** 评分与入睡时间同属「手表睡眠数据」：改选「否」时两者一起清掉，避免留下孤儿值。 */
     function changeHasWatchSleepScore(value: string) {
         const allowed: PresenceState[] = ["", "yes", "no"];
         if (!allowed.includes(value as PresenceState)) return;
         draft.fields.hasWatchSleepScore = value as PresenceState;
-        if (value !== "yes") draft.fields.watchSleepScore = null;
+        if (value !== "yes") {
+            draft.fields.watchSleepScore = null;
+            draft.fields.watchSleepOnsetTime = "";
+            draft.fields.hasWatchSleepOnset = "";
+        }
         draft = { ...draft, fields: { ...draft.fields } };
         markDirty();
     }
@@ -490,29 +527,62 @@
     }
 
     /**
-     * 就寝时段：填了具体时间时时段由时间决定（下拉里其它项已置灰），
-     * 只有没填时间时才能显式选择；选「12 点后（熬夜）」即可只留标记、不记具体分钟。
+     * 睡前当场记录实际熄灯：归日就是记录日当晚，因此必须同时写上来源标记，
+     * 否则解析时会把 22:47 这种时刻当成「昨夜的熄灯」算到前一天去。
      */
-    function changeLightsOffBand(value: string) {
-        const allowed: LightsOffBand[] = ["", "before-midnight", "after-midnight"];
-        if (!allowed.includes(value as LightsOffBand)) return;
-        if (sleepHasTime) return;
-        draft.fields.lightsOffBand = value as LightsOffBand;
-        sleepTimeExpanded = false;
+    function recordLightsOffNow() {
+        const recordDate = currentDate;
+        const time = clockTimeNow();
+        draft.fields.lightsOffTime = time;
+        draft.fields.lightsOffTimeSource = "live";
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+        lightsOffFlash = `${time} 已记入 ${formatDate(recordDate)}`;
+        if (lightsOffFlashTimer !== null) clearTimeout(lightsOffFlashTimer);
+        lightsOffFlashTimer = setTimeout(() => {
+            lightsOffFlash = "";
+            lightsOffFlashTimer = null;
+        }, 6000);
+    }
+
+    /**
+     * 手动选时间后显式标注来源。来源由「在哪一格填的」决定，而不是由时刻反推：
+     * 睡前准备那一格是关灯前的当场记录（22:47 属于今晚），早晨的「补记时间」是回忆（属于昨晚），
+     * 两者跨午夜的归日不同，靠时刻本身无法区分。清空后必须去掉来源标记，
+     * 否则凌晨时刻会被算到错误的一天。
+     */
+    function markLightsOffSource() {
+        const source: LightsOffTimeSource = stage === "evening" ? "live" : "recalled";
+        draft.fields.lightsOffTimeSource = /^\d{2}:\d{2}$/.test(draft.fields.lightsOffTime) ? source : "";
         draft = { ...draft, fields: { ...draft.fields } };
         markDirty();
     }
 
-    /** 只有用户自己点「清空」才会清掉熄灯时间；时段标记保持不变。 */
-    function clearLightsOffTime() {
-        draft.fields.lightsOffTime = "";
-        sleepTimeExpanded = false;
-        draft = { ...draft, fields: { ...draft.fields } };
-        markDirty();
-    }
-
+    /** 只有熬夜标记、没有时刻的存量记录：展开一次时间输入来补记。 */
     function expandLightsOffTime() {
         sleepTimeExpanded = true;
+    }
+
+    /** 早晨的人工回答：只在系统无法从实际熄灯推导时才出现。 */
+    function changeLightsOffAdherence(value: string) {
+        if (!["", "yes", "no"].includes(value)) return;
+        draft.fields.lightsOffAdherence = value as LightsOffAdherence;
+        if (value !== "no") draft.fields.lightsOffAdherenceReason = "";
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    /** 撤销当天的人工回答，交还给自动判定（实测不为空时立刻重新算出结论）。 */
+    function resetLightsOffAdherence() {
+        draft.fields.lightsOffAdherence = "";
+        draft.fields.lightsOffAdherenceReason = "";
+        draft = { ...draft, fields: { ...draft.fields } };
+        markDirty();
+    }
+
+    function clockTimeNow(): string {
+        const now = new Date();
+        return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     }
 
     export async function flushAutoSave(): Promise<boolean> {
@@ -534,6 +604,15 @@
         message = "";
         try {
             while (dirty) {
+                /*
+                 * 没按计划的原因必填：与「未知」的外键引用不同，这里缺的是一句人能马上补齐的话，
+                 * 因此不落库、保留 dirty 等用户填写，同时把原因说清楚，避免看起来「保存失灵」。
+                 */
+                if (!lightsOffReasonSatisfied) {
+                    blockMessage = "请先填写「没按计划的原因」，保存会等你写完这句。";
+                    return false;
+                }
+                blockMessage = "";
                 const revision = editRevision;
                 syncPersonalProjectLinks();
                 const snapshot = cloneDailyRecord(draft);
@@ -694,6 +773,12 @@
             label: difference > 0 ? `超出计划 ${difference} 分钟` : difference === 0 ? "正好按计划下班" : `比计划早 ${Math.abs(difference)} 分钟`,
         };
     }
+
+    /** 实测熄灯与计划的差值文案；早于计划不算违规，因此单独说「早」。 */
+    function lightsOffEvidenceLabel(diffMinutes: number): string {
+        if (diffMinutes === 0) return "正好按计划熄灯";
+        return diffMinutes > 0 ? `晚 ${diffMinutes} 分钟` : `早 ${Math.abs(diffMinutes)} 分钟`;
+    }
 </script>
 
 <section class="xz-daily-module" on:input={markDailyDirty} on:change={markDailyDirty}>
@@ -787,39 +872,110 @@
                 {#if stage === "morning" || stage === "all"}
                     <section class="xz-daily-form-section">
                         <h3>睡眠与身体</h3>
-                        <div class="xz-daily-fields three">
-                            <div class="xz-daily-field">
-                                <span class="xz-daily-label-with-note">昨晚熄灯
-                                    <select class="xz-daily-sleep-band" class:after-midnight={sleepBand === "after-midnight"} aria-label="昨晚熄灯时段" title={sleepBandTitle} value={sleepBand} on:change|stopPropagation={(event) => changeLightsOffBand(event.currentTarget.value)}>
-                                        <option value="" disabled={sleepHasTime}>尚未确认</option>
-                                        <option value="before-midnight" disabled={sleepHasTime && sleepBand !== "before-midnight"}>12 点前</option>
-                                        <option value="after-midnight" disabled={sleepHasTime && sleepBand !== "after-midnight"}>12 点后（熬夜）</option>
-                                    </select>
-                                </span>
-                                <div class="xz-daily-sleep-control" data-missing-focus>
-                                    {#if sleepBand === "after-midnight" && !sleepHasTime && !sleepTimeExpanded}
-                                        <div class="xz-daily-lights-off-skip"><span>不记具体时间</span><button type="button" on:click={expandLightsOffTime}>填时间</button></div>
+                        <div class="xz-daily-fields xz-sleep">
+                            <!-- 回顾横条：昨晚的计划与达成结论（只读事实），与下面的填写区分开 -->
+                            <div class="xz-daily-review" class:is-met={lightsOffAdherence.status === "met"} class:is-missed={lightsOffAdherence.status === "missed"} class:is-none={!plannedLightsOff}>
+                                <div class="xz-daily-review__plan">
+                                    <span>昨晚计划</span>
+                                    {#if nightInput.time}
+                                        <strong>{nightInput.time}</strong>
+                                        <small>{shortDateFromLocalDateTime(plannedLightsOff)} 当晚</small>
                                     {:else}
-                                        <div class="xz-daily-time-row">
-                                            <TimeSelect bind:value={draft.fields.lightsOffTime} ariaLabel="昨晚熄灯" />
-                                            {#if sleepHasTime}<button type="button" class="xz-daily-time-clear" on:click={clearLightsOffTime}>清空</button>{/if}
-                                        </div>
+                                        <strong>未登记</strong>
                                     {/if}
                                 </div>
+                                <div class="xz-daily-review__verdict">
+                                    {#if !plannedLightsOff}
+                                        <strong>不适用</strong>
+                                        <span>{previousRecord?.fields.bedtimePreparation === "free" ? "昨晚是自由安排，没有登记计划熄灯，不计入达成率" : "昨晚没有登记计划熄灯，这一晚不计入达成率"}</span>
+                                    {:else if lightsOffAdherence.status === "met" || lightsOffAdherence.status === "missed"}
+                                        <strong>{lightsOffAdherence.status === "met" ? "是" : "否"}</strong>
+                                        <span>{lightsOffAdherence.status === "met" ? "按计划熄灯" : "没有按计划熄灯"}</span>
+                                        {#if lightsOffAdherence.evidence}
+                                            <small>{lightsOffEvidenceLabel(lightsOffAdherence.evidence.diffMinutes)}（睡前当场记录）</small>
+                                        {:else}
+                                            <small>由你回答</small>
+                                        {/if}
+                                    {:else}
+                                        <span>还没有回答是否按计划熄灯</span>
+                                    {/if}
+                                </div>
+                                {#if actualLightsOffRecorded}
+                                    <div class="xz-daily-review__actual" data-missing-focus>
+                                        <span>实际</span><strong>{draft.fields.lightsOffTime}</strong>
+                                        <button class="xz-daily-review__edit" type="button" on:click={() => (sleepTimeExpanded = !sleepTimeExpanded)}>{sleepTimeExpanded ? "收起" : "改"}</button>
+                                        {#if sleepTimeExpanded}
+                                            <TimeSelect bind:value={draft.fields.lightsOffTime} ariaLabel="实际熄灯" clearable on:change={markLightsOffSource} />
+                                        {/if}
+                                    </div>
+                                {/if}
                             </div>
-                            <div class="xz-daily-field"><span class="xz-daily-label-with-note">今日起床 {#if resolvedSleep.fields.wakeAt}<small>{shortDateFromLocalDateTime(resolvedSleep.fields.wakeAt)}</small>{/if}</span><TimeSelect bind:value={draft.fields.wakeTime} ariaLabel="今日起床" /></div>
-                            <div class="xz-daily-field"><span>睡眠时长</span><DurationSelect bind:value={draft.fields.sleepDurationMinutes} maxHours={16} ariaLabel="睡眠时长" /></div>
-                            <div class="xz-daily-decision-column">
-                                <label><span>今天是否有手表睡眠评分</span><select value={draft.fields.hasWatchSleepScore} on:change|stopPropagation={(event) => changeHasWatchSleepScore(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
-                                {#if draft.fields.hasWatchSleepScore === "yes"}<label><span>手表睡眠评分</span><input class="xz-daily-compact-number" type="number" min="0" max="100" bind:value={draft.fields.watchSleepScore} placeholder="未填写" /></label>{:else if draft.fields.hasWatchSleepScore === "no"}<p class="xz-daily-field-note">今天没有手表评分，无需填写。</p>{/if}
-                            </div>
-                            <ScoreInput bind:value={draft.fields.subjectiveSleepQuality} rubric={rubricById.subjectiveSleepQuality} on:inspect={inspectRubric} on:change={markDirty} />
-                            <div class="xz-daily-decision-column">
-                                <label><span>今天是否测量晨起体重</span><select value={draft.fields.hasMorningWeight} on:change|stopPropagation={(event) => changeHasMorningWeight(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
-                                {#if draft.fields.hasMorningWeight === "yes"}<label><span>晨起体重</span><div class="xz-daily-inline"><input type="number" min="0" step="0.1" bind:value={draft.fields.morningWeight} placeholder="未填写" /><select bind:value={draft.fields.weightUnit}><option value="kg">kg</option><option value="lb">lb</option></select></div></label>{:else if draft.fields.hasMorningWeight === "no"}<p class="xz-daily-field-note">今天没有测量条件，无需填写。</p>{/if}
+
+                            <!-- 需要回答 / 需要补记：可编辑行，跟在回顾横条下面 -->
+                            {#if plannedLightsOff && !actualLightsOffRecorded && lightsOffAdherence.status !== "met" && lightsOffAdherence.status !== "missed"}
+                                <div class="xz-daily-adherence-row">
+                                    <span class="xz-daily-label-with-note">昨晚我按计划熄灯了吗</span>
+                                    <select class="xz-daily-adherence" aria-label="昨晚我按计划熄灯了吗" value={draft.fields.lightsOffAdherence} on:change|stopPropagation={(event) => changeLightsOffAdherence(event.currentTarget.value)}>
+                                        <option value="">尚未回答</option>
+                                        <option value="yes">是，按计划熄灯</option>
+                                        <option value="no">否，没有按计划熄灯</option>
+                                    </select>
+                                    <p class="xz-daily-verdict-status">前一晚没有按「此刻熄灯」，也没有可对照的实际时刻，所以这里要你自己回答一次。</p>
+                                </div>
+                            {/if}
+                            {#if plannedLightsOff && !actualLightsOffRecorded && sleepBand && !sleepTimeExpanded}
+                                <div class="xz-daily-adherence-row">
+                                    <div class="xz-daily-lights-off-skip"><span>{sleepBand === "after-midnight" ? "只标了「12 点后」，没有具体时刻" : "只标了「12 点前」，没有具体时刻"}</span><button type="button" on:click={expandLightsOffTime}>补记时间</button></div>
+                                </div>
+                            {/if}
+                            {#if sleepTimeExpanded && !actualLightsOffRecorded}
+                                <div class="xz-daily-adherence-row">
+                                    <span class="xz-daily-label-with-note">昨晚实际熄灯 <small>回忆补记</small></span>
+                                    <TimeSelect bind:value={draft.fields.lightsOffTime} ariaLabel="实际熄灯" clearable on:change={markLightsOffSource} />
+                                </div>
+                            {/if}
+                            {#if plannedLightsOff && lightsOffAdherence.status === "missed"}
+                                <label class="xz-daily-adherence-reason"><span>没按计划的原因 <b>（必填）</b></span><textarea bind:value={draft.fields.lightsOffAdherenceReason} placeholder="例如：小说写到一半没停下来 / 临时处理了一条紧急的事"></textarea></label>
+                            {/if}
+
+                            <!-- 填写区：今早的指标与手表数据 -->
+                            <div class="xz-daily-sleep-fill">
+                                <div class="xz-daily-field xz-sleep-wake"><span class="xz-daily-label-with-note">今日起床 {#if resolvedSleep.fields.wakeAt}<small>{shortDateFromLocalDateTime(resolvedSleep.fields.wakeAt)}</small>{/if}</span><TimeSelect bind:value={draft.fields.wakeTime} ariaLabel="今日起床" /></div>
+                                <div class="xz-daily-decision-column xz-sleep-weight">
+                                    <label><span>今天是否测量晨起体重</span><select value={draft.fields.hasMorningWeight} on:change|stopPropagation={(event) => changeHasMorningWeight(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
+                                    {#if draft.fields.hasMorningWeight === "yes"}<label><span>晨起体重</span><div class="xz-daily-inline"><input type="number" min="0" step="0.1" bind:value={draft.fields.morningWeight} placeholder="未填写" /><select bind:value={draft.fields.weightUnit}><option value="kg">kg</option><option value="lb">lb</option></select></div></label>{:else if draft.fields.hasMorningWeight === "no"}<p class="xz-daily-field-note">今天没有测量条件，无需填写。</p>{/if}
+                                </div>
+                                <!-- 手表一栏：睡眠时长（趋势里就叫「手表实际睡眠」）、评分、入睡时间都是同一块手表给出的数据，
+                                     放在一起才看得出「熄灯 → 入睡 → 实际睡了多久」是一条链。 -->
+                                <div class="xz-daily-decision-column xz-daily-watch-group xz-sleep-watch">
+                                    <header><strong>手表睡眠数据</strong><span>时长、评分与入睡时间同源</span></header>
+                                    <label><span>今天是否有手表睡眠数据</span><select aria-label="今天是否有手表睡眠数据" value={draft.fields.hasWatchSleepScore} on:change|stopPropagation={(event) => changeHasWatchSleepScore(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
+                                    {#if draft.fields.hasWatchSleepScore === "yes"}
+                                        <div class="xz-daily-field"><span>睡眠时长 <small>手表实际睡眠</small></span><DurationSelect bind:value={draft.fields.sleepDurationMinutes} maxHours={16} ariaLabel="睡眠时长" /></div>
+                                        <label><span>手表睡眠评分</span><input class="xz-daily-compact-number" type="number" min="0" max="100" bind:value={draft.fields.watchSleepScore} placeholder="未填写" /></label>
+                                        <div class="xz-daily-field">
+                                            <span class="xz-daily-label-with-note">手表入睡时间 <small>记录用</small></span>
+                                            <TimeSelect bind:value={draft.fields.watchSleepOnsetTime} ariaLabel="手表入睡时间" />
+                                        </div>
+                                        {#if sleepLatency !== null}
+                                            <p class="xz-daily-onset-note">
+                                                {draft.fields.lightsOffTime} → {draft.fields.watchSleepOnsetTime} · 躺下后 {sleepLatencyLabel(sleepLatency)} 睡着
+                                                <em>入睡不受意志直接控制，只做记录，不参与是否按计划的评价。</em>
+                                            </p>
+                                        {:else}
+                                            <p class="xz-daily-field-note">入睡时间只做记录，不参与是否按计划的评价。</p>
+                                        {/if}
+                                    {:else if draft.fields.hasWatchSleepScore === "no"}
+                                        <p class="xz-daily-field-note">今天没有手表数据，睡眠时长、评分与入睡时间都无需填写。</p>
+                                    {/if}
+                                </div>
+                                <div class="xz-daily-score xz-sleep-quality"><ScoreInput bind:value={draft.fields.subjectiveSleepQuality} rubric={rubricById.subjectiveSleepQuality} on:inspect={inspectRubric} on:change={markDirty} /></div>
                             </div>
                         </div>
                     </section>
+                {/if}
+
+                {#if stage === "morning" || stage === "all"}
                     <section class="xz-daily-form-section">
                         <h3>今日安排</h3>
                         {#if yesterdayFirstAction}
@@ -1051,7 +1207,7 @@
                     <section class="xz-daily-form-section">
                         <h3>睡前准备</h3>
                         <div class="xz-daily-fields two">
-                            <label><span>今晚的睡前安排</span><select value={draft.fields.bedtimePreparation} on:change|stopPropagation={(event) => changeBedtimePreparation(event.currentTarget.value)}><option value="">尚未选择</option><option value="yes">按计划准备</option><option value="no">不进行睡前准备</option><option value="free">自由安排，不记录计划</option></select></label>
+                            <label><span>今晚的睡前安排</span><select aria-label="今晚的睡前安排" value={draft.fields.bedtimePreparation} on:change|stopPropagation={(event) => changeBedtimePreparation(event.currentTarget.value)}><option value="">尚未选择</option><option value="yes">按计划准备</option><option value="no">不进行睡前准备</option><option value="free">自由安排，不记录计划</option></select></label>
                             {#if draft.fields.bedtimePreparation === "yes" || draft.fields.bedtimePreparation === "no"}
                                 <div class="xz-daily-field">
                                     <span class="xz-daily-label-with-note">计划熄灯 {#if resolvedSleep.fields.plannedLightsOffAt}<small>{shortDateFromLocalDateTime(resolvedSleep.fields.plannedLightsOffAt)}</small>{/if}</span>
@@ -1060,8 +1216,32 @@
                                         <TimeSelect bind:value={draft.fields.plannedLightsOffTime} ariaLabel="计划熄灯时间" />
                                     </div>
                                 </div>
+                                <div class="xz-daily-field">
+                                    <span class="xz-daily-label-with-note">实际熄灯 <small>可选 · 当场记录</small></span>
+                                    <div class="xz-daily-actual-row">
+                                        <div class="xz-daily-actual-time"><TimeSelect bind:value={draft.fields.lightsOffTime} ariaLabel="实际熄灯" clearable on:change={markLightsOffSource} /></div>
+                                        <button class="xz-daily-lights-off-button" class:recorded={actualLightsOffRecorded} type="button" on:click={recordLightsOffNow}>{actualLightsOffRecorded ? "重新记录" : "此刻熄灯"}</button>
+                                    </div>
+                                    {#if actualLightsOffRecorded}
+                                        <p class="xz-daily-actual-meta">
+                                            {#if draft.fields.lightsOffTimeSource === "live"}已按「此刻熄灯」记为 {draft.fields.lightsOffTime}{:else}已记录 {draft.fields.lightsOffTime}（手动填写）{/if}
+                                            · 想重记就点「清空」后再按一次
+                                        </p>
+                                        {#if tonightCompare}
+                                            <p class="xz-daily-actual-compare">
+                                                计划 <strong>{tonightPlan?.time}</strong>
+                                                <b class:over={tonightCompare.status === "missed"} class:under={tonightCompare.status === "met"}>{tonightDiff}</b>
+                                                <span>{tonightCompare.status === "met" ? "明早的判定会按这次实测自动算出「按计划」" : "明早的判定会按这次实测自动算出「没按计划」，并要你补一句原因"}</span>
+                                            </p>
+                                        {/if}
+                                    {:else}
+                                        <p class="xz-daily-actual-meta">
+                                            {#if lightsOffFlash}{lightsOffFlash}{:else}关灯上床前按一次，明早自动判定；不按，明早就要你自己回答一次「有没有按计划」。过了这一夜不再补记。{/if}
+                                        </p>
+                                    {/if}
+                                </div>
                             {:else if draft.fields.bedtimePreparation === "free"}
-                                <p class="xz-daily-bedtime-note">今晚自由安排，不设置计划熄灯时间；明早仍可记录实际睡眠。</p>
+                                <p class="xz-daily-bedtime-note">今晚自由安排，不设置计划熄灯时间；明早不会出现是否按计划的判定，实际熄灯也不必记录。</p>
                             {/if}
                         </div>
                     </section>
@@ -1070,12 +1250,13 @@
                 <footer class="xz-daily-save-bar">
                     <div>
                         {#if error}<span class="error" role="alert">自动保存失败：{error}</span>
+                        {:else if blockMessage}<span class="error" role="alert">{blockMessage}</span>
                         {:else if saving}<span role="status">正在自动保存并复核…</span>
                         {:else if dirty}<span role="status">等待自动保存…</span>
                         {:else if message}<span class="success" role="status">{message}</span>
                         {:else}<span role="status">填写后将自动保存</span>{/if}
                     </div>
-                    {#if error}<button class="b3-button" type="button" disabled={saving} on:click={() => void saveNow()}>重试保存</button>{/if}
+                    {#if error || blockMessage}<button class="b3-button" type="button" disabled={saving} on:click={() => void saveNow()}>重试保存</button>{/if}
                 </footer>
             </article>
 
