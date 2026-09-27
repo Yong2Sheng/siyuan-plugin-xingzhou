@@ -1,6 +1,7 @@
 import { tick } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ExecutionSlicePlanner from "../src/ExecutionSlicePlanner.svelte";
+import type { ExecutionSlice } from "../src/execution-slices";
 import type { WorkItem } from "../src/work-items";
 
 describe("执行切片配置", () => {
@@ -211,6 +212,181 @@ describe("执行切片配置", () => {
             expect.objectContaining({ id: "done", status: "scheduled", completedAt: null }),
         ]);
     });
+
+    it("右键过期切片：第一个动作是补记完成，第二个是重排到…", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const { past: pastKey } = await monthKeys();
+        const current = transaction({
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "past", scheduledDate: pastKey, status: "missed", completedAt: null, updatedAt: 1 }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: current, save } });
+        await tick();
+
+        dayCell(pastKey).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        const items = [...document.querySelectorAll<HTMLButtonElement>(".xz-slice-context-menu button")];
+        expect(items.map((button) => button.textContent?.trim())).toEqual(["补记完成此切片", "重排到…"]);
+        expect(items[1].classList.contains("is-neutral")).toBe(true);
+
+        items[1].click();
+        await tick();
+        expect(document.querySelector(".xz-slice-context-menu button.is-neutral")).toBeNull();
+        expect(document.querySelector(".xz-slice-context-title")?.textContent).toContain("重排到");
+        expect(document.querySelectorAll("[data-reschedule-date]").length).toBe(14);
+        expect(save).not.toHaveBeenCalled();
+    });
+
+    it("重排面板：今天与被占用的日期不可选，点空闲日期提交新日期", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const { past: pastKey } = await monthKeys();
+        const todayKey = localDateKey();
+        const current = transaction({
+            sliceTargetCount: 2,
+            executionSlices: [
+                { id: "past", scheduledDate: pastKey, status: "missed", completedAt: null, updatedAt: 1 },
+                { id: "today", scheduledDate: todayKey, status: "scheduled", completedAt: null, updatedAt: 2 },
+            ],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: current, save } });
+        await tick();
+
+        dayCell(pastKey).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        ([...document.querySelectorAll<HTMLButtonElement>(".xz-slice-context-menu button")]
+            .find((button) => button.textContent?.trim() === "重排到…") as HTMLButtonElement).click();
+        await tick();
+
+        expect(dayCell(pastKey).classList.contains("missed")).toBe(true);
+        /* 今天（该事务已有切片）这种边界日期列出来但不可选 */
+        const occupied = [...document.querySelectorAll<HTMLButtonElement>("[data-reschedule-date]")]
+            .filter((button) => button.disabled);
+        expect(occupied.length).toBeGreaterThan(0);
+        expect(occupied.every((button) => (button.getAttribute("title") ?? "") !== "")).toBe(true);
+
+        /* 从面板里挑一个可选日期点下去，必须提交重排而不是完成 */
+        const free = [...document.querySelectorAll<HTMLButtonElement>("[data-reschedule-date]")].find((button) => !button.disabled);
+        if (!free) throw new Error("重排面板里没有可选日期");
+        const targetKey = free.dataset.rescheduleDate ?? "";
+        free.click();
+        await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+        const slices = save.mock.calls[0][0].executionSlices as Array<{ id: string; scheduledDate: string; status: string }>;
+        expect(slices.find((slice) => slice.id === "past")).toMatchObject({ scheduledDate: targetKey, status: "scheduled" });
+        expect(slices.find((slice) => slice.id === "today")).toMatchObject({ scheduledDate: todayKey, status: "scheduled" });
+        /* 提交后菜单关闭，不会残留第二段面板 */
+        expect(document.querySelector(".xz-slice-context-menu")).toBeNull();
+        /* 组件已换成重排后的数据时，新日期不能再渲染成红色「未完成」 */
+        component.$destroy();
+        document.body.replaceChildren();
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: { ...current, executionSlices: slices as ExecutionSlice[] }, save } });
+        await tick();
+        /* 改期后的新日期是干净的待做片：橙色「已改期」而不是红／主题色 */
+        expect(dayCell(targetKey).classList.contains("rescheduled")).toBe(true);
+        expect(dayCell(targetKey).classList.contains("missed")).toBe(false);
+    });
+
+    it("补记完成后完成日记回原计划日，撤销文案不再区分补记", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const { past: pastKey } = await monthKeys();
+        const current = transaction({
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "past", scheduledDate: pastKey, status: "missed", completedAt: null, updatedAt: 1 }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: current, save } });
+        await tick();
+
+        dayCell(pastKey).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        document.querySelector<HTMLButtonElement>(".xz-slice-context-menu button")?.click();
+        await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+
+        const completed = (save.mock.calls[0][0].executionSlices as Array<{ id: string; status: string; completedAt: number | null }>)[0];
+        expect(completed.status).toBe("completed");
+        expect(localDateKeyFrom(completed.completedAt ?? 0)).toBe(pastKey);
+
+        /* 完成后的菜单只说撤销，不再出现「撤销这次补记完成」 */
+        component.$destroy();
+        document.body.replaceChildren();
+        const done = transaction({
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "past", scheduledDate: pastKey, status: "completed", completedAt: completed.completedAt, updatedAt: 2 }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: done, save, saveUndo: vi.fn() } });
+        await tick();
+        dayCell(pastKey).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        const undo = document.querySelector<HTMLButtonElement>(".xz-slice-context-menu button");
+        expect(undo?.textContent).toBe("撤销完成此切片");
+        expect(document.querySelector(".xz-slice-context-menu .is-neutral")).toBeNull();
+    });
+
+    it("改期过的切片标成橙色「已改期」，并说明原定日期", async () => {
+        const { future: key } = await monthKeys();
+        const origin = dayKeyOffset(key, -3);
+        const current = transaction({
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "moved", scheduledDate: key, status: "scheduled", completedAt: null, updatedAt: 1, rescheduledFrom: origin }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: current } });
+        await tick();
+
+        const cell = dayCell(key);
+        expect(cell.classList.contains("rescheduled")).toBe(true);
+        expect(cell.classList.contains("scheduled")).toBe(false);
+        /* 格子有负载时显示「待做／共」，所以改期说明落在 title 与图例上 */
+        expect(cell.getAttribute("title")).toContain("改期而来");
+        const [, originMonth, originDate] = origin.split("-");
+        expect(cell.getAttribute("title")).toContain(`${Number(originMonth)} 月 ${Number(originDate)} 日`);
+        expect(document.querySelector(".xz-slice-legend i.rescheduled")).not.toBeNull();
+        expect(document.querySelector(".xz-slice-month-summary")?.textContent).toContain("已改期 1 片");
+    });
+
+    it("第 2 次往后挪才提醒：面板给出现实选项，第 1 次不打扰", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const { future: key } = await monthKeys();
+        const origin = dayKeyOffset(key, -3);
+        const repeat = transaction({
+            sliceTargetCount: 1,
+            durationMinutes: 30,
+            executionSlices: [{ id: "moved", scheduledDate: key, status: "scheduled", completedAt: null, updatedAt: 1, rescheduledFrom: origin }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: repeat, save } });
+        await tick();
+
+        dayCell(key).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        ([...document.querySelectorAll<HTMLButtonElement>(".xz-slice-context-menu button")]
+            .find((button) => button.textContent?.trim() === "重排到…") as HTMLButtonElement).click();
+        await tick();
+        expect(document.querySelector(".xz-slice-reschedule-warning")?.textContent).toContain("第 2 次");
+        const actions = [...document.querySelectorAll<HTMLButtonElement>(".xz-slice-reschedule-extra button")];
+        const [, month, date] = key.split("-");
+        expect(actions.map((button) => button.textContent?.trim())).toEqual([`还是挪到 ${Number(month)}-${Number(date)}`, "缩小到 15 分钟", "放弃这一片"]);
+
+        actions.find((button) => button.textContent?.trim() === "缩小到 15 分钟")?.click();
+        await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+        expect(save.mock.calls[0][0]).toMatchObject({ duration: 15 });
+    });
+
+    it("第 1 次改期不出现提醒，也不多一个橙色格", async () => {
+        const { future: key } = await monthKeys();
+        const first = transaction({
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "plain", scheduledDate: key, status: "scheduled", completedAt: null, updatedAt: 1, rescheduledFrom: null }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: first } });
+        await tick();
+
+        expect(dayCell(key).classList.contains("rescheduled")).toBe(false);
+        dayCell(key).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        ([...document.querySelectorAll<HTMLButtonElement>(".xz-slice-context-menu button")]
+            .find((button) => button.textContent?.trim() === "重排到…") as HTMLButtonElement).click();
+        await tick();
+        expect(document.querySelector(".xz-slice-reschedule-warning")).toBeNull();
+        expect(document.querySelector(".xz-slice-reschedule-extra")).toBeNull();
+    });
+
 
     it("已放弃的切片保持只读：点不动、右键也没有菜单", async () => {
         const save = vi.fn().mockResolvedValue(undefined);
@@ -493,7 +669,17 @@ function keyOf(date: Date): string {
 }
 
 function localDateKey(): string {
-    const date = new Date();
+    return localDateKeyFrom(Date.now());
+}
+
+/** 把日期键前后挪几天，用来造「原定日期」这类相邻日期。 */
+function dayKeyOffset(key: string, days: number): string {
+    const [year, month, date] = key.split("-").map(Number);
+    return localDateKeyFrom(new Date(year, month - 1, date + days).getTime());
+}
+
+function localDateKeyFrom(timestamp: number): string {
+    const date = new Date(timestamp);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 

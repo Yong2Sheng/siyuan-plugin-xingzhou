@@ -8,6 +8,14 @@ export type ExecutionSlice = {
     status: ExecutionSliceStatus;
     completedAt: number | null;
     updatedAt: number;
+    /**
+     * 改期来源：这一片最初安排在哪一天。第一次改期时写下，之后一直保留（撤销完成也不会丢）。
+     * 是否在界面上标成「已改期」不看它有没有值，而看切片是否仍未完成——完成或放弃后颜色就回正常，
+     * 但来源日期继续留着，日后要做「这片折腾过几次」的统计不用再改数据。
+     *
+     * 可选：这个字段是后加的，存量切片和旧调用点没有它，一律按「没改期」理解（normalize 会补成 null）。
+     */
+    rescheduledFrom?: string | null;
 };
 
 export type ExecutionSliceDayLoad = {
@@ -57,9 +65,27 @@ export function normalizeExecutionSlices(value: unknown): ExecutionSlice[] {
             status: candidate.status,
             completedAt: finiteNumber(candidate.completedAt),
             updatedAt: finiteNumber(candidate.updatedAt) ?? Date.now(),
+            /* 存量数据没有这个字段：当作「没改过期」，不猜测历史 */
+            rescheduledFrom: isDateKey(candidate.rescheduledFrom) ? candidate.rescheduledFrom : null,
         });
     }
     return result.sort(compareSlices);
+}
+
+/**
+ * 这一片是否「改期过、还没做」：界面据此标橙色。
+ *
+ * 包含已改期且已经过期（missed）的切片：那种情况恰恰最该被看见——它不只是"没做完"，
+ * 是"改过一次还是没做"。完成／放弃的切片虽然还留着来源日期，但不再欠这笔账，颜色回正常。
+ */
+export function isRescheduledSlice(slice: ExecutionSlice): boolean {
+    if (slice.status !== "scheduled" && slice.status !== "missed") return false;
+    return Boolean(slice.rescheduledFrom);
+}
+
+/** 改期过、还没做的片数，用于月历汇总里那句「已改期 N 片」。 */
+export function rescheduledSliceCount(item: WorkItem): number {
+    return (item.executionSlices ?? []).filter(isRescheduledSlice).length;
 }
 
 export function completedSliceCount(item: WorkItem): number {
@@ -232,6 +258,7 @@ export function scheduleSlice(item: WorkItem, date: string, id = createExecution
         status: "scheduled",
         completedAt: null,
         updatedAt: now,
+        rescheduledFrom: null,
     }]);
 }
 
@@ -241,16 +268,18 @@ export function cancelScheduledSlice(item: WorkItem, sliceId: string): Execution
     return normalizeExecutionSlices((item.executionSlices ?? []).filter((candidate) => candidate.id !== sliceId));
 }
 
+/**
+ * 移动已安排的切片：周视图与日历的改期入口走这里。
+ * 与重排同语义（过期切片改期后放回「已安排」），只是文案上「移动」用在计划内的调整，
+ * 所以直接复用同一条规则，避免两个入口改出两种结果。
+ */
 export function moveScheduledSlice(item: WorkItem, sliceId: string, date: string, now = Date.now()): ExecutionSlice[] {
-    const slice = (item.executionSlices ?? []).find((candidate) => candidate.id === sliceId);
-    if (!slice || slice.status !== "scheduled") throw new Error("只能移动尚未完成的切片。");
-    if (!isDateKey(date)) throw new Error("执行切片日期格式无效。");
-    if (item.deadline && date > localDateKey(item.deadline)) throw new Error("执行切片不能移动到截止日期之后。");
-    if (date < localDateKey(now)) throw new Error("不能把执行切片移动到过去日期。");
-    if (slicesOnDate(item, date).some((candidate) => candidate.id !== sliceId)) throw new Error("这个事务在该日期已经有执行记录。");
-    return normalizeExecutionSlices((item.executionSlices ?? []).map((candidate) => candidate.id === sliceId
-        ? { ...candidate, scheduledDate: date, updatedAt: now }
-        : candidate));
+    try {
+        return rescheduleSlice(item, sliceId, date, now);
+    } catch (caught) {
+        const message = caught instanceof Error ? caught.message : String(caught);
+        throw new Error(message.replace("重排", "移动"));
+    }
 }
 
 export function setSliceOutcome(
@@ -266,14 +295,54 @@ export function setSliceOutcome(
         : candidate));
 }
 
-/** Complete a slice while preserving its planned date; completedAt records when the work actually finished. */
+/**
+ * Complete a slice while preserving its planned date.
+ *
+ * 完成时间按「这次完成算哪一天」写入：
+ * - 计划日期还没到（提前完成）或就是今天（当场完成）：记点击时刻；
+ * - 计划日期已经过去（补记完成）：记回原计划日中午，因为补记表达的是
+ *   「那天做了但忘了点」，完成事实属于原计划日，而不是点按钮的这一天。
+ *
+ * 补记没有时间窗口：过期切片任何时候都能补记，只是完成日一律记回原计划日。
+ */
 export function completeSliceNow(item: WorkItem, sliceId: string, now = Date.now()): ExecutionSlice[] {
     const slice = (item.executionSlices ?? []).find((candidate) => candidate.id === sliceId);
     if (!slice || (slice.status !== "scheduled" && slice.status !== "missed")) {
         throw new Error("只能完成已安排或未完成的切片。");
     }
+    const completedAt = slice.scheduledDate < localDateKey(now) ? plannedDayTimestamp(slice.scheduledDate, now) : now;
     return normalizeExecutionSlices((item.executionSlices ?? []).map((candidate) => candidate.id === sliceId
-        ? { ...candidate, status: "completed" as const, completedAt: now, updatedAt: now }
+        ? { ...candidate, status: "completed" as const, completedAt, updatedAt: now }
+        : candidate));
+}
+
+/**
+ * 重排：把尚未完成的切片挪到另一天，并把它放回「已安排」。
+ *
+ * 改期表达的是「那天没做，改到这天做」，所以新日期上是一个干净的待做切片：
+ * 不保留 missed（否则新日期一路红着，当天只能点「补记完成」，跨日后又被当成过期）；
+ * 也不写成 completed——重排不是完成，完成与否由用户在新日期决定。
+ * 原计划日的「没做完」不再保留记录，这是改期的语义：那段历史被这次改期取代。
+ */
+export function rescheduleSlice(item: WorkItem, sliceId: string, date: string, now = Date.now()): ExecutionSlice[] {
+    const slice = (item.executionSlices ?? []).find((candidate) => candidate.id === sliceId);
+    if (!slice || (slice.status !== "scheduled" && slice.status !== "missed")) {
+        throw new Error("只能重排尚未完成的切片；已完成的切片请先撤销完成。");
+    }
+    if (!isDateKey(date)) throw new Error("执行切片日期格式无效。");
+    if (item.deadline && date > localDateKey(item.deadline)) throw new Error("执行切片不能重排到截止日期之后。");
+    if (date < localDateKey(now)) throw new Error("不能把执行切片重排到过去日期。");
+    if (slicesOnDate(item, date).some((candidate) => candidate.id !== sliceId)) throw new Error("这个事务在该日期已经有执行记录。");
+    return normalizeExecutionSlices((item.executionSlices ?? []).map((candidate) => candidate.id === sliceId
+        ? {
+            ...candidate,
+            scheduledDate: date,
+            status: "scheduled" as const,
+            completedAt: null,
+            updatedAt: now,
+            /* 只在第一次改期时记下原计划日；之后再挪仍指向最初那一天，界面靠它认出「这是第 2 次往后挪」 */
+            rescheduledFrom: candidate.rescheduledFrom ?? slice.scheduledDate,
+        }
         : candidate));
 }
 
@@ -326,6 +395,13 @@ function isSliceStatus(value: unknown): value is ExecutionSliceStatus {
 
 function isDateKey(value: unknown): value is string {
     return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+/** 原计划日当天中午：补记完成时用它把完成事实记回那一天，同时保留一个确定、可比较的时刻。 */
+function plannedDayTimestamp(date: string, fallback: number): number {
+    const [year, month, day] = date.split("-").map(Number);
+    const timestamp = new Date(year, month - 1, day, 12, 0, 0, 0).getTime();
+    return Number.isFinite(timestamp) ? timestamp : fallback;
 }
 
 function finiteNumber(value: unknown): number | null {

@@ -1,8 +1,34 @@
 # Changelog
 
+## 5.1.0 - 2026-09-27
+
+Execution slices gain a **reschedule** path, and rescheduling now leaves a visible trace: orange means this slice was moved here from another date. The meaning of a make-up completion is settled too — it only ever means "I did it that day but forgot to tick it".
+
+### Added
+
+- **Rescheduling slices (work item detail → execution-slice calendar)**: right-clicking a past, today, or future slice opens a two-step menu — the first action is still completion (make-up / complete / complete early), the second is **“Reschedule to…”**, which turns the menu into a 14-day date panel; taken dates and dates past the deadline stay listed but greyed out with the reason. Previously **only the week view could change a date**, and a past slice in the calendar offered nothing but a make-up completion.
+- **The week view's “Move to…” is open to past slices**: a missed red card can now be rescheduled (previously only non-expired slices had that dropdown). It does not offer “Cancel schedule” — a past slice is the record of work not done that day, and cancelling it would delete that record.
+- **A “rescheduled” state colour (orange)**: a rescheduled slice is drawn with an orange border plus a left bar in the calendar; in the week view the card gets an orange border, a **“Rescheduled” badge and the original date**, and the calendar summary adds “N slice(s) rescheduled” with its own legend entry. Orange appears only while the slice is **rescheduled and still undone**: completing turns it green, abandoning turns it dashed grey. A rescheduled slice that has since expired **stays orange** — it is not merely "not done", it is "moved once and still not done", which is exactly when it should be visible.
+- **A second-reschedule warning**: moving the same slice a second time puts the cost at the top of the panel — "this slice has already been rescheduled once (originally 24 September); moving it again makes it the second time — either do it today, or shrink it to something you can start right now" — together with the alternatives at hand: **“Shrink to 15 minutes”** (sets that slice's estimated duration to 15 minutes; repeated rescheduling usually means the slice is too big to start) and **“Abandon this slice”**. The first reschedule stays quiet.
+
+### Changed
+
+- **A make-up completion is now dated to the slice's original day**: a make-up means "I did it that day but forgot to tick it", so the completion belongs to the original day rather than to the day the button was pressed. Previously a make-up always wrote the click time, making "made it up on Tuesday for Monday" indistinguishable from "actually did Monday's work on Tuesday".
+- **A rescheduled slice returns to “Scheduled”**: rescheduling means "not done that day, moved to this day", so the new date should hold a clean to-do slice. Previously the missed state was carried over, leaving the new date red, offering only a make-up completion on the day, and expiring again on the next load.
+- **One undo wording**: a make-up and an on-the-spot completion both land in “Completed”, so the context menu now always says “Undo completion” instead of guessing from the date (a slice completed on time used to be labelled “Undo this make-up completion”).
+
+### Data
+
+- Slices gain an optional `rescheduledFrom` field (written on the first reschedule, kept unchanged afterwards so the UI can recognise a second move). **No migration needed**: a slice without the field is treated as never rescheduled, and invalid values are ignored rather than lighting up the orange state. The origin date is kept after completion or abandonment, so undoing a completion never loses it.
+
+### Verification
+
+- `pnpm test`: 621 passed / 4 skipped (60 files); `pnpm run check`: 0 errors / 0 warnings.
+- New regression coverage: a make-up dated to the original day, reschedule state and origin, the completed/abandoned/expired readings, legacy data degradation, the calendar's orange cell and hover text, the second-move warning with “Shrink to 15 minutes”, the silent first move, and the orange badge after a week-view reschedule.
+
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
-## Unreleased
+## 5.0.0 - 2026-09-25
 
 ### Added
 

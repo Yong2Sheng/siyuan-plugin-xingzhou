@@ -952,6 +952,81 @@ describe("XingzhouApp", () => {
         await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="makeup"] .xz-week-item-meta`)?.textContent).toContain("进行中"));
     });
 
+    /* 改期目标必须落在本周之内（周视图只渲染本周七天）；周日没有"本周内的未来"，这条自动跳过 */
+    const weekRescheduleKeys = (() => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const weekStart = new Date(today);
+        weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+        const dayKeys = Array.from({ length: 7 }, (_, index) => {
+            const date = new Date(weekStart);
+            date.setDate(weekStart.getDate() + index);
+            return localDateKey(date);
+        });
+        const todayKey = localDateKey(today);
+        const staleKey = dayKeys.filter((key) => key < todayKey).pop() ?? "";
+        const targetKey = dayKeys.find((key) => key > todayKey) ?? "";
+        return { staleKey, targetKey };
+    })();
+
+    it.skipIf(!weekRescheduleKeys.staleKey || !weekRescheduleKeys.targetKey)("周视图把过期切片改到本周之内：新日期回到「已安排」，不再红着", async () => {
+        /*
+         * 过期切片在周视图里可以「移动到…」改期。改期表达「那天没做，改到这天做」，
+         * 所以新日期必须是干净的待做切片；这条守住用户实测发现的「改完还是红色」。
+         */
+        const { staleKey, targetKey } = weekRescheduleKeys;
+
+        const item: WorkItem = {
+            id: "reschedule", rowId: "reschedule", title: "改期的事务", documentId: null, detached: true,
+            type: "事务", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            planDate: null, deadline: null, noDeadline: true, durationMinutes: 20, energy: "中", updatedAt: Date.now(),
+            sliceTargetCount: 5,
+            executionSlices: [{ id: "stale-slice", scheduledDate: staleKey, status: "missed", completedAt: null, updatedAt: Date.now() }],
+        };
+        const workItemData: WorkItemData = {
+            attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+            items: [item], missingFields: [], fields: {},
+        };
+        const saveItem = vi.fn(async (currentData: WorkItemData, currentItem: WorkItem, changes: WorkItemChanges): Promise<WorkItemData> => ({
+            ...currentData,
+            items: currentData.items.map((candidate) => candidate.id === currentItem.id ? {
+                ...candidate,
+                ...(changes.executionSlices !== undefined ? { executionSlices: changes.executionSlices } : {}),
+            } : candidate),
+        }));
+        component = new XingzhouApp({
+            target: document.body,
+            props: { load: vi.fn().mockResolvedValue(workItemData), captureInbox: vi.fn(), saveItem, deleteItem: vi.fn(), openDocument: vi.fn() },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-workspace")).not.toBeNull());
+        [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "本周")?.click();
+        await tick();
+
+        const select = document.querySelector<HTMLSelectElement>(`[data-work-item-id="reschedule"][data-week-date="${staleKey}"] select`);
+        expect(select).toBeInstanceOf(HTMLSelectElement);
+        /* 过期切片只改期，不给「取消安排」——它已经是「没做完」的事实记录，取消等于删掉记录 */
+        expect([...select!.options].map((option) => option.value)).not.toContain("__clear");
+        select!.value = targetKey;
+        select!.dispatchEvent(new Event("change", { bubbles: true }));
+
+        await vi.waitFor(() => expect(saveItem).toHaveBeenCalledOnce());
+        expect(saveItem.mock.calls[0][2].executionSlices).toEqual([expect.objectContaining({
+            id: "stale-slice",
+            scheduledDate: targetKey,
+            status: "scheduled",
+            completedAt: null,
+            rescheduledFrom: staleKey,
+        })]);
+        await vi.waitFor(() => expect(document.querySelector(`[data-work-item-id="reschedule"][data-week-date="${targetKey}"]`)).not.toBeNull());
+        const moved = document.querySelector<HTMLElement>(`[data-work-item-id="reschedule"][data-week-date="${targetKey}"]`);
+        expect(moved?.classList.contains("xz-week-item--missed")).toBe(false);
+        expect(moved?.querySelector(".xz-week-slice-status")?.textContent).not.toContain("未完成");
+        /* 改期过的待做片在周视图里标成橙色「已改期」，并写出原定日期 */
+        expect(moved?.classList.contains("xz-week-item--rescheduled")).toBe(true);
+        expect(moved?.querySelector(".xz-week-rescheduled-badge")?.textContent).toBe("已改期");
+        expect(moved?.querySelector(".xz-week-slice-status")?.textContent).toContain("已改期");
+    });
+
     it.skipIf(new Date().getDay() === 1)("事务先前已是已完成的存量数据，撤销切片完成后也会退回进行中", async () => {
         /* 用户实测的存量状态：事务早已手工标记为已完成，切片停在“未完成” */
         const today = new Date();

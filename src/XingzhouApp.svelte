@@ -101,11 +101,13 @@
         completeSliceNow,
         completedSliceCount,
         expirePastSlices,
+        isRescheduledSlice,
         localDateKey,
         moveScheduledSlice,
         scheduleSlice,
         setSliceOutcome,
         sliceCompletionPercent,
+        slicesOnDate,
         undoCompletedSlice,
         type ExecutionSlice,
     } from "./execution-slices";
@@ -2366,9 +2368,33 @@
         return "已安排";
     }
 
+    /** 改期过的待做片在周视图里说成「已改期」，与日历橙色同口径。 */
+    function weekSliceStatusLabel(slice: ExecutionSlice): string {
+        if (slice.status === "scheduled" && isRescheduledSlice(slice)) return "已改期";
+        return sliceStatusLabel(slice.status);
+    }
+
     function isEarlyCompletedSlice(slice: ExecutionSlice): boolean {
         return slice.status === "completed" && Boolean(slice.completedAt)
             && localDateKey(slice.completedAt ?? 0) < slice.scheduledDate;
+    }
+
+    /**
+     * 周视图「移动到…」的目标日期是否不可选。
+     * 与事务日历的重排面板同一套规则：不能回到过去、不能超过截止日期、不能撞上该事务当天的切片；
+     * 正在被移动的这一片本身不算占用。
+     */
+    function weekSliceTargetBlocked(item: WorkItem, slice: ExecutionSlice, targetKey: string): boolean {
+        if (targetKey < localDateKey()) return true;
+        if (item.deadline && targetKey > formatInputDate(item.deadline)) return true;
+        return slicesOnDate(item, targetKey).some((candidate) => candidate.id !== slice.id);
+    }
+
+    function weekSliceTargetBlockReason(item: WorkItem, slice: ExecutionSlice, targetKey: string): string {
+        if (targetKey < localDateKey()) return "过去日期";
+        if (item.deadline && targetKey > formatInputDate(item.deadline)) return "超出截止日期";
+        if (slicesOnDate(item, targetKey).some((candidate) => candidate.id !== slice.id)) return "已有切片";
+        return "";
     }
 
     function shortDateLabel(dateKey: string): string {
@@ -3079,7 +3105,7 @@
                                             {@const slice = occurrence.slice}
                                             {@const compactOccurrence = isWeekOccurrenceCompact(occurrence.phase)}
                                             {@const dateCompleted = slice ? slice.status === "completed" : item.completedDates?.includes(day.key) ?? false}
-                                            <article class:xz-week-item--closed={isClosed(item)} class:xz-week-item--date-completed={dateCompleted} class:xz-week-item--missed={slice?.status === "missed"} class:xz-week-item--abandoned={slice?.status === "abandoned"} class:xz-week-item--continuation={compactOccurrence} class:xz-week-item--early-achievement={occurrence.phase === "early-completion"} class="xz-week-item" data-work-item-id={item.id} data-week-date={day.key} data-week-phase={occurrence.phase}>
+                                            <article class:xz-week-item--closed={isClosed(item)} class:xz-week-item--date-completed={dateCompleted} class:xz-week-item--missed={slice?.status === "missed"} class:xz-week-item--abandoned={slice?.status === "abandoned"} class:xz-week-item--rescheduled={Boolean(slice && slice.status === "scheduled" && isRescheduledSlice(slice))} class:xz-week-item--continuation={compactOccurrence} class:xz-week-item--early-achievement={occurrence.phase === "early-completion"} class="xz-week-item" data-work-item-id={item.id} data-week-date={day.key} data-week-phase={occurrence.phase}>
                                                 {#if occurrence.phase === "early-completion" && slice}
                                                     <span class="xz-week-early-achievement-label">✓ {day.isToday ? "今日提前完成" : "提前完成"}</span>
                                                     <button class="xz-week-item-title" type="button" on:click={() => revealInboxItem(item)}>{item.title}</button>
@@ -3088,7 +3114,8 @@
                                                 <button class="xz-week-item-title" type="button" on:click={() => revealInboxItem(item)}>{item.title}</button>
                                                 <div class="xz-week-item-meta">
                                                     <span class="xz-week-item-phase">{weekOccurrenceLabel(occurrence.phase)}</span>
-                                                    {#if slice}<span class={`xz-week-slice-status ${slice.status}`}>{isEarlyCompletedSlice(slice) ? "✓ 已提前完成" : sliceStatusLabel(slice.status)}</span>{:else if dateCompleted}<span class="xz-week-item-date-done">✓ 当日已完成</span>{/if}
+                                                    {#if slice}<span class={`xz-week-slice-status ${slice.status}`}>{isEarlyCompletedSlice(slice) ? "✓ 已提前完成" : weekSliceStatusLabel(slice)}</span>{:else if dateCompleted}<span class="xz-week-item-date-done">✓ 当日已完成</span>{/if}
+                                                    {#if slice && slice.status === "scheduled" && isRescheduledSlice(slice)}<em class="xz-week-rescheduled-badge">已改期</em><span class="xz-week-rescheduled-from">原定 {shortDateLabel(slice.rescheduledFrom ?? "")}</span>{/if}
                                                     {#if slice && isEarlyCompletedSlice(slice)}<span>完成于{sliceCompletionDateLabel(slice)}</span>{/if}
                                                     <span>{displayStatus(item.status) || "未设置"}</span>
                                                     {#if slice}<span>{sliceCompletionPercent(item)}%</span>{/if}
@@ -3096,26 +3123,28 @@
                                                     {#if !compactOccurrence && item.energy}<span>{item.energy}精力</span>{/if}
                                                 </div>
                                                 <div class="xz-week-item-actions">
-                                                    {#if slice?.status === "scheduled"}
+                                                                                                        {#if slice?.status === "scheduled" || slice?.status === "missed"}
                                                         <select aria-label={`移动“${item.title}”的执行切片`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekSliceAssignment(event, item, slice)}>
                                                             <option value="">移动到…</option>
-                                                            {#each weekDays as targetDay}<option value={targetDay.key} disabled={targetDay.key < localDateKey() || Boolean(item.deadline && targetDay.key > formatInputDate(item.deadline))}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}
-                                                            <option value="__clear">取消安排</option>
+                                                            {#each weekDays as targetDay}<option value={targetDay.key} disabled={weekSliceTargetBlocked(item, slice, targetDay.key)}>{targetDay.label} · {targetDay.dateLabel}{weekSliceTargetBlocked(item, slice, targetDay.key) ? `（${weekSliceTargetBlockReason(item, slice, targetDay.key)}）` : ""}</option>{/each}
+                                                            {#if slice.status === "scheduled"}<option value="__clear">取消安排</option>{/if}
                                                         </select>
-                                                        {#if day.key < localDateKey()}
-                                                            <button type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>补记完成</button>
-                                                            <button class="xz-week-missed-button" type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "miss")}>记为未完成</button>
-                                                        {:else if day.key === localDateKey()}
-                                                            <button type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>完成</button>
-                                                            <button class="xz-week-abandon-button" type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "abandon")}>放弃</button>
-                                                        {:else}
-                                                            <button type="button" title="保留原计划日期，并将切片标记为已完成" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>提前完成</button>
+                                                        {#if slice.status === "scheduled"}
+                                                            {#if day.key < localDateKey()}
+                                                                <button type="button" title="补记：那天做了但忘了点，完成日记回这一天" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>补记完成</button>
+                                                                <button class="xz-week-missed-button" type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "miss")}>记为未完成</button>
+                                                            {:else if day.key === localDateKey()}
+                                                                <button type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>完成</button>
+                                                                <button class="xz-week-abandon-button" type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "abandon")}>放弃</button>
+                                                            {:else}
+                                                                <button type="button" title="保留原计划日期，并将切片标记为已完成" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>提前完成</button>
+                                                            {/if}
+                                                        {:else if slice.status === "missed"}
+                                                            <button type="button" title="补记：那天做了但忘了点，完成日记回这一天" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>补记完成</button>
                                                         {/if}
                                                     {:else if slice?.status === "completed"}
                                                         <button class="xz-week-complete-button--done" type="button" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "undo")}>撤销完成</button>
-                                                    {:else if slice?.status === "missed"}
-                                                        <button type="button" title="补记后仍保留原计划日期" disabled={weekSavingIds.has(item.id)} on:click={() => void updateWeekSlice(item, slice, "complete")}>补记完成</button>
-                                                    {:else if !slice}
+                                                    {:else}
                                                         {#if !compactOccurrence}<select aria-label={occurrence.phase === "start" ? `修改“${item.title}”的开始日` : `移动“${item.title}”`} disabled={weekSavingIds.has(item.id)} on:change={(event) => handleWeekAssignment(event, item)}>
                                                                 <option value="">{occurrence.phase === "start" ? "修改开始日…" : "移动到…"}</option>
                                                                 {#each weekDays as targetDay}<option value={targetDay.key} disabled={Boolean(item.deadline && targetDay.key > formatInputDate(item.deadline))}>{targetDay.label} · {targetDay.dateLabel}</option>{/each}

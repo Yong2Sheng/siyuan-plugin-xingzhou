@@ -25,6 +25,8 @@
     --xingzhou-primary-light: var(--b3-theme-primary-lightest);
     --xingzhou-border: var(--b3-border-color);
     --xingzhou-danger: var(--b3-theme-error);
+    /* 已改期：橙红一档，和棕金主题色（--b3-theme-primary）拉开，也不与 danger 撞色 */
+    --xingzhou-rescheduled: #d2701f;
     --xingzhou-radius: var(--b3-border-radius, 6px);
     --xingzhou-canvas: color-mix(in srgb, var(--xingzhou-bg) 94%, var(--xingzhou-surface) 6%);
     --xingzhou-panel: var(--xingzhou-bg);
@@ -619,6 +621,9 @@
 .xz-slice-day.scheduled { border-color: color-mix(in srgb, var(--xingzhou-primary) 58%, var(--xingzhou-border)); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); opacity: 1; }
 .xz-slice-day.completed { border-color: color-mix(in srgb, var(--b3-theme-success) 55%, var(--xingzhou-border)); color: var(--b3-theme-success); background: color-mix(in srgb, var(--b3-theme-success) 10%, var(--xingzhou-bg)); opacity: 1; cursor: pointer; }
 .xz-slice-day.missed { border-color: color-mix(in srgb, var(--xingzhou-danger) 48%, var(--xingzhou-border)); color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 8%, var(--xingzhou-bg)); opacity: 1; }
+/* 已改期：这一片是从别的日期挪过来的，还没做。左侧竖条让它不靠色相也能认出来 */
+.xz-slice-day.rescheduled { border-color: color-mix(in srgb, var(--xingzhou-rescheduled) 72%, var(--xingzhou-border)); border-left: 3px solid var(--xingzhou-rescheduled); color: var(--xingzhou-rescheduled); background: color-mix(in srgb, var(--xingzhou-rescheduled) 16%, var(--xingzhou-bg)); opacity: 1; }
+.xz-slice-day-status.rescheduled { background: var(--xingzhou-rescheduled); }
 .xz-slice-day.abandoned { border-style: dashed; color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); opacity: .8; }
 .xz-slice-context-menu { position: fixed; z-index: 1200; min-width: 176px; display: grid; gap: 4px; padding: 6px; border: 1px solid var(--xingzhou-strong-border); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-panel); box-shadow: 0 10px 28px color-mix(in srgb, #000 18%, transparent); }
 .xz-slice-context-menu button { width: 100%; padding: 8px 10px; border: 0; border-radius: var(--xingzhou-radius); color: var(--b3-theme-success); background: color-mix(in srgb, var(--b3-theme-success) 10%, transparent); text-align: left; cursor: pointer; font-size: 12px; font-weight: 650; }
@@ -628,10 +633,37 @@
 .xz-slice-context-menu button.is-undo { color: var(--xingzhou-text); background: color-mix(in srgb, var(--xingzhou-muted) 10%, transparent); }
 .xz-slice-context-menu button.is-undo:hover:not(:disabled) { background: color-mix(in srgb, var(--xingzhou-muted) 17%, transparent); }
 .xz-slice-context-menu small { padding: 2px 10px 4px; color: var(--xingzhou-muted); font-size: 10px; }
+/* 第二个动作（重排到…）：中性色，和绿色「完成」区分开，避免抢焦点 */
+.xz-slice-context-menu button.is-neutral { color: var(--xingzhou-text); background: color-mix(in srgb, var(--xingzhou-muted) 10%, transparent); }
+.xz-slice-context-menu button.is-neutral:hover:not(:disabled) { background: color-mix(in srgb, var(--xingzhou-muted) 17%, transparent); }
+/* 重排面板：菜单就地换成日期网格，标题说明范围，禁用日期给出原因（title / aria-label）。
+   选择器带上 .xz-slice-context-menu 前缀，否则会被上面「动作按钮」的全宽样式盖掉。 */
+.xz-slice-context-menu .xz-slice-context-title { display: grid; gap: 2px; padding: 2px 10px 4px; color: var(--xingzhou-text); font-size: 11px; font-weight: 650; }
+.xz-slice-context-menu .xz-slice-context-title em { color: var(--xingzhou-muted); font-size: 10px; font-weight: 400; font-style: normal; }
+.xz-slice-context-menu .xz-slice-context-days { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; padding: 0 8px 4px; }
+.xz-slice-context-menu .xz-slice-context-days button { width: auto; min-height: 30px; display: grid; place-items: center; padding: 3px 2px; border: 1px solid var(--xingzhou-strong-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-bg); text-align: center; font-size: 10.5px; font-weight: 600; }
+.xz-slice-context-menu .xz-slice-context-days button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--xingzhou-primary) 55%, var(--xingzhou-border)); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
+.xz-slice-context-menu .xz-slice-context-days button:disabled { border-style: dashed; color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); cursor: not-allowed; }
+.xz-slice-context-menu .xz-slice-context-days button small { margin: 0; padding: 0; color: var(--xingzhou-primary); font-size: 8px; font-weight: 700; }
+.xz-slice-context-menu .xz-slice-context-days button:disabled small { color: var(--xingzhou-muted); }
+/* 二次改期提醒：只在第 2 次往后挪时出现，说清代价并把手边的替代动作摆出来 */
+.xz-slice-context-menu .xz-slice-reschedule-warning { margin: 0 10px 6px; padding: 7px 9px; border-left: 3px solid var(--xingzhou-rescheduled); border-radius: 5px; color: var(--xingzhou-text); background: color-mix(in srgb, var(--xingzhou-rescheduled) 14%, transparent); font-size: 10.5px; line-height: 1.65; }
+.xz-slice-context-menu .xz-slice-reschedule-extra { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 10px 8px; }
+.xz-slice-context-menu .xz-slice-reschedule-extra button { width: auto; min-height: 30px; padding: 5px 11px; border: 1px solid color-mix(in srgb, var(--xingzhou-rescheduled) 45%, var(--xingzhou-border)); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-bg); text-align: center; font-size: 11.5px; font-weight: 650; }
+.xz-slice-context-menu .xz-slice-reschedule-extra button:hover:not(:disabled) { border-color: var(--xingzhou-rescheduled); color: var(--xingzhou-rescheduled); background: var(--xingzhou-bg); }
+.xz-slice-context-menu .xz-slice-reschedule-extra button.is-abandon { color: var(--xingzhou-danger); border-color: color-mix(in srgb, var(--xingzhou-danger) 40%, var(--xingzhou-border)); }
+.xz-slice-context-menu .xz-slice-reschedule-extra button.is-abandon:hover:not(:disabled) { border-color: var(--xingzhou-danger); color: var(--xingzhou-danger); }
+.xz-slice-context-menu .xz-slice-reschedule-note { align-self: center; color: var(--xingzhou-muted); font-size: 10px; }
+/* 窄容器：日期面板换成 4 列，菜单不再贴边溢出 */
+@container (max-width: 520px) {
+    .xz-slice-context-menu .xz-slice-context-days { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .xz-slice-context-menu { max-width: calc(100vw - 16px); }
+}
 /* 月历头部汇总与口径图例 */
 .xz-slice-month-summary { display: flex; flex-wrap: wrap; gap: 2px 10px; margin: -2px 0 4px; color: var(--xingzhou-muted); font-size: 10px; }
 .xz-slice-month-summary strong { color: var(--xingzhou-text); }
 .xz-slice-month-summary .is-clear { color: var(--b3-theme-success); }
+.xz-slice-month-summary .is-rescheduled { color: var(--xingzhou-rescheduled); font-weight: 600; }
 .xz-slice-month-legend { margin: 0 0 8px; color: var(--xingzhou-muted); font-size: 9.5px; line-height: 1.6; }
 /* 窄容器（约 41–55px 格子）：去掉数字周围的空格与「· N 片」，保留标签与数字 */
 @container (max-width: 420px) {
@@ -904,6 +936,10 @@
 .xz-week-early-achievement-plan { color: var(--xingzhou-muted); font-size: 9px; line-height: 1.45; }
 .xz-week-item--missed { border-left-color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-bg) 92%, var(--xingzhou-danger) 8%); }
 .xz-week-item--abandoned { border-left-style: dashed; opacity: .76; }
+/* 已改期：与日历同一口径。放在 missed 之后，让「改期后又过期」也保持橙色 */
+.xz-week-item--rescheduled { border-left-color: var(--xingzhou-rescheduled); border-color: color-mix(in srgb, var(--xingzhou-rescheduled) 60%, var(--xingzhou-border)); background: color-mix(in srgb, var(--xingzhou-bg) 86%, var(--xingzhou-rescheduled) 14%); }
+.xz-week-rescheduled-badge { padding: 1px 6px; border-radius: 999px; color: var(--b3-theme-on-primary, #fff); background: var(--xingzhou-rescheduled); font-size: 10px; font-weight: 700; font-style: normal; white-space: nowrap; }
+.xz-week-rescheduled-from { color: var(--xingzhou-rescheduled); font-size: 10px; font-weight: 600; }
 .xz-week-slice-status { font-weight: 600; }
 .xz-week-slice-status.completed { color: var(--b3-theme-success); }
 .xz-week-slice-status.missed { color: var(--xingzhou-danger); }

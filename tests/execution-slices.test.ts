@@ -7,12 +7,17 @@ import {
     automaticStatusForSliceUndo,
     cancelScheduledSlice,
     completeSliceNow,
+    completedSliceCount,
     dayLoadValue,
     expirePastSlices,
     executionSlicePlanSummary,
     executionSliceLoadsByDate,
     executionSliceRemainingByDate,
+    localDateKey,
+    isRescheduledSlice,
     moveScheduledSlice,
+    normalizeExecutionSlices,
+    rescheduleSlice,
     scheduleSlice,
     setSliceOutcome,
     sliceCompletionPercent,
@@ -73,7 +78,96 @@ describe("事务执行切片", () => {
 
         const missed = [{ id: "past", scheduledDate: "2026-09-03", status: "missed" as const, completedAt: null, updatedAt: 1 }];
         const corrected = completeSliceNow(item({ executionSlices: missed }), "past", TODAY);
-        expect(corrected[0]).toMatchObject({ scheduledDate: "2026-09-03", status: "completed", completedAt: TODAY });
+        expect(corrected[0]).toMatchObject({ scheduledDate: "2026-09-03", status: "completed" });
+        /* 补记是「那天做了但忘了点」，完成日必须记回原计划日，不能记成点按钮的今天 */
+        expect(localDateKey(corrected[0].completedAt ?? 0)).toBe("2026-09-03");
+    });
+
+    it("补记不限时间：过期很久的切片也能补记，完成日一律回到原计划日", () => {
+        const missed = [{ id: "stale", scheduledDate: "2025-01-02", status: "missed" as const, completedAt: null, updatedAt: 1 }];
+        const corrected = completeSliceNow(item({ executionSlices: missed }), "stale", TODAY);
+        expect(corrected[0]).toMatchObject({ scheduledDate: "2025-01-02", status: "completed" });
+        expect(localDateKey(corrected[0].completedAt ?? 0)).toBe("2025-01-02");
+    });
+
+    it("重排把未完成／过期切片挪到新日期，并在新日期放回「已安排」", () => {
+        const slices = [
+            { id: "missed", scheduledDate: "2026-09-02", status: "missed" as const, completedAt: null, updatedAt: 1 },
+            { id: "planned", scheduledDate: "2026-09-05", status: "scheduled" as const, completedAt: null, updatedAt: 2 },
+        ];
+        const rescheduled = rescheduleSlice(item({ executionSlices: slices }), "missed", "2026-09-07", TODAY);
+        expect(rescheduled).toEqual(expect.arrayContaining([
+            /* 改期后新日期上是一个干净的待做切片：不红、也不是已完成 */
+            expect.objectContaining({ id: "missed", scheduledDate: "2026-09-07", status: "scheduled", completedAt: null }),
+            expect.objectContaining({ id: "planned", scheduledDate: "2026-09-05" }),
+        ]));
+        /* 待做汇总跟着挪到新日期，原日期不再挂着它 */
+        expect(executionSliceRemainingByDate([item({ executionSlices: rescheduled })]).get("2026-09-07")).toMatchObject({ count: 1 });
+        /* 片数不变：过期片改期后重新占住一个「已安排」名额，完成片数仍然是 0 */
+        expect(availableSliceCount(item({ executionSlices: slices }))).toBe(1);
+        expect(availableSliceCount(item({ executionSlices: rescheduled }))).toBe(0);
+        expect(completedSliceCount(item({ executionSlices: rescheduled }))).toBe(0);
+    });
+
+    it("改期会在切片上留下来源日期，界面靠它标出「已改期」", () => {
+        const slices = [{ id: "moved", scheduledDate: "2026-09-02", status: "missed" as const, completedAt: null, updatedAt: 1, rescheduledFrom: null }];
+        const once = rescheduleSlice(item({ executionSlices: slices }), "moved", "2026-09-06", TODAY);
+        expect(once[0]).toMatchObject({ scheduledDate: "2026-09-06", status: "scheduled", rescheduledFrom: "2026-09-02" });
+        expect(isRescheduledSlice(once[0])).toBe(true);
+
+        /* 第二次往后挪：来源仍指向最初那一天，界面据此认出这是第 2 次 */
+        const twice = rescheduleSlice(item({ executionSlices: once }), "moved", "2026-09-08", TODAY);
+        expect(twice[0]).toMatchObject({ scheduledDate: "2026-09-08", rescheduledFrom: "2026-09-02" });
+    });
+
+    it("完成、放弃、过期都不再算「已改期」；撤销完成后痕迹还在", () => {
+        const moved = [{ id: "moved", scheduledDate: "2026-09-06", status: "scheduled" as const, completedAt: null, updatedAt: 2, rescheduledFrom: "2026-09-02" }];
+        const current = item({ executionSlices: moved });
+
+        /* 完成：颜色回正常，但改期来源留着 */
+        const done = completeSliceNow(current, "moved", TODAY)[0];
+        expect(done.rescheduledFrom).toBe("2026-09-02");
+        expect(isRescheduledSlice(done)).toBe(false);
+        expect(isRescheduledSlice(undoCompletedSlice(item({ executionSlices: [done] }), "moved", "2026-09-06", TODAY)[0])).toBe(true);
+
+        /* 放弃：同上，不再标橙 */
+        expect(isRescheduledSlice(setSliceOutcome(current, "moved", "abandoned", TODAY)[0])).toBe(false);
+        /* 改期后又过期：仍是待做的改期片，橙色保留 */
+        const expired = expirePastSlices(current, "2026-09-08", TODAY);
+        expect(expired?.[0]).toMatchObject({ status: "missed", rescheduledFrom: "2026-09-02" });
+        expect(isRescheduledSlice(expired?.[0] ?? moved[0])).toBe(true);
+    });
+
+    it("存量切片没有改期来源字段：按「没改过」处理，不会误标橙色", () => {
+        const legacy = normalizeExecutionSlices([{ id: "old", scheduledDate: "2026-09-05", status: "scheduled", completedAt: null, updatedAt: 1 }]);
+        expect(legacy[0].rescheduledFrom).toBeNull();
+        expect(isRescheduledSlice(legacy[0])).toBe(false);
+        /* 非法值同样降级成 null，不让脏数据点亮橙色 */
+        const dirty = normalizeExecutionSlices([{ id: "dirty", scheduledDate: "2026-09-05", status: "scheduled", completedAt: null, updatedAt: 1, rescheduledFrom: "上周三" }]);
+        expect(dirty[0].rescheduledFrom).toBeNull();
+    });
+
+    it("重排只接受尚未完成的切片，并拦住同日重复、过去与截止日期之后", () => {
+        const slices = [
+            { id: "done", scheduledDate: "2026-09-02", status: "completed" as const, completedAt: 1, updatedAt: 1 },
+            { id: "gone", scheduledDate: "2026-09-02", status: "abandoned" as const, completedAt: null, updatedAt: 2 },
+            { id: "open", scheduledDate: "2026-09-06", status: "scheduled" as const, completedAt: null, updatedAt: 3 },
+        ];
+        const current = item({ executionSlices: slices });
+        expect(() => rescheduleSlice(current, "done", "2026-09-07", TODAY)).toThrow("尚未完成");
+        expect(() => rescheduleSlice(current, "gone", "2026-09-07", TODAY)).toThrow("尚未完成");
+        /* 撞上同事务另一天已有的切片：拦住；移动到自己原来的日期不算冲突 */
+        const withNeighbour = item({ executionSlices: [
+            ...slices,
+            { id: "neighbour", scheduledDate: "2026-09-08", status: "scheduled" as const, completedAt: null, updatedAt: 4 },
+        ] });
+        expect(() => rescheduleSlice(withNeighbour, "open", "2026-09-08", TODAY)).toThrow("已经有执行记录");
+        expect(() => rescheduleSlice(current, "open", "2026-09-06", TODAY)).not.toThrow();
+        expect(() => rescheduleSlice(current, "open", "2026-09-03", TODAY)).toThrow("过去日期");
+        expect(() => rescheduleSlice(current, "open", "2026-09-11", TODAY)).toThrow("截止日期之后");
+        /* 同一天里的另一片不算占用自己：移动到空日期不受影响 */
+        const moved = rescheduleSlice(current, "open", "2026-09-09", TODAY).find((slice) => slice.id === "open");
+        expect(moved?.scheduledDate).toBe("2026-09-09");
     });
 
     it("今天已有同一事务切片时仍可提前完成未来切片", () => {
