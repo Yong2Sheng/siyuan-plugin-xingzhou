@@ -388,3 +388,94 @@ describe("趋势指标：营养口径", () => {
         expect(chart.lines).toEqual([]);
     });
 });
+
+describe("趋势指标：「混乱 / 失控」日整体退出统计", () => {
+    /** 与趋势无关的字段：只标状态，用来验证「标了就不进统计」 */
+    function marked(date: string, dayState: DailyRecord["dayState"], overrides: Partial<DailyRecordFields> = {}, dayType: DailyDayType = "research-workday"): DailyRecord {
+        return { ...record(date, overrides, dayType), dayState };
+    }
+
+    it("被标记的日子不进折线，覆盖度的分母也跟着变小", () => {
+        const days = ["2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17"];
+        const normal = context(days.map((date) => record(date, { hasMorningWeight: "yes", morningWeight: 65 })));
+        const chart = buildTrendChart("weight", normal);
+        expect(chart.series[0].points).toHaveLength(4);
+        expect(chart.coverage).toContain("4/4 天");
+
+        const withChaos = context([
+            record("2026-09-14", { hasMorningWeight: "yes", morningWeight: 65 }),
+            marked("2026-09-15", "chaotic", { hasMorningWeight: "yes", morningWeight: 99 }),
+            record("2026-09-16", { hasMorningWeight: "yes", morningWeight: 65 }),
+            marked("2026-09-17", "uncontrolled", { hasMorningWeight: "yes", morningWeight: 99 }),
+        ]);
+        const filtered = buildTrendChart("weight", withChaos);
+        // 被标记日期的数值（99）既不画出来，也不参与均值
+        expect(filtered.series[0].points.map((point) => point.recordDate)).toEqual(["2026-09-14", "2026-09-16"]);
+        expect(filtered.series[0].points.map((point) => point.y)).toEqual([65, 65]);
+        expect(trendSummary(filtered).statValue).toBe(65);
+        // 分母同样不含被标记的日子：4 天里有 2 天被标记，窗口内只剩 2 天
+        expect(filtered.coverage).toContain("2/2 天");
+    });
+
+    it("被标记的日子不画熬夜竖带，也不进睡眠窗口", () => {
+        const chart = buildTrendChart("sleepWindow", context([
+            record("2026-09-15", { lightsOffTime: "", lightsOffBand: "after-midnight" }),
+            { ...record("2026-09-16", { lightsOffTime: "", lightsOffBand: "after-midnight" }), dayState: "chaotic" },
+        ]));
+        expect(chart.bands).toHaveLength(1);
+        expect(chart.bands[0].x).toBe(trendDayIndex("2026-09-14"));
+    });
+
+    it("当晚或次晨只要有一天被标记，这一晚就不进「计划达成 x/y 晚」的分母", () => {
+        const plan = (date: string, dayState: DailyRecord["dayState"] = "normal") => ({
+            ...record(date, { bedtimePreparation: "yes", plannedLightsOffTime: "23:00", plannedLightsOffDay: "same-day" }),
+            dayState,
+        });
+
+        const met = lightsOffAdherenceSummary(storeOf(plan("2026-09-14"), record("2026-09-15", { lightsOffTime: "22:55", wakeTime: "07:00" })).records);
+        expect(met).toEqual({ planned: 1, met: 1 });
+
+        // 次晨那天被标记：不进分母（否则会变成一次追责）
+        const nextDayMarked = lightsOffAdherenceSummary(storeOf(
+            plan("2026-09-14"),
+            { ...record("2026-09-15", { lightsOffTime: "01:30", wakeTime: "07:00" }), dayState: "uncontrolled" },
+        ).records);
+        expect(nextDayMarked).toEqual({ planned: 0, met: 0 });
+
+        // 登记计划的那晚本身被标记：同样不进分母
+        const planDayMarked = lightsOffAdherenceSummary(storeOf(
+            plan("2026-09-14", "chaotic"),
+            record("2026-09-15", { lightsOffTime: "22:55", wakeTime: "07:00" }),
+        ).records);
+        expect(planDayMarked).toEqual({ planned: 0, met: 0 });
+    });
+
+    it("被标记日期的营养摄入不进曲线，也不进「平均每天 N 条」", () => {
+        const nutrition = createEmptyNutritionStore(1000);
+        const entry = (id: string, date: string, kcal: number) => ({
+            id, date, templateId: null, nameSnapshot: "记录", baseAmountSnapshot: 1, unitSnapshot: "份",
+            valuesPerServing: { caloriesKcal: kcal, proteinGrams: 10, carbsGrams: 1, fatGrams: 1 },
+            consumedAmount: 1, createdAt: 1000, updatedAt: 1000,
+        });
+        nutrition.entries.push(entry("e1", "2026-09-15", 500), entry("e2", "2026-09-16", 900), entry("e3", "2026-09-16", 100));
+
+        const chart = buildTrendChart("calories", context(
+            [record("2026-09-15", {}), { ...record("2026-09-16", {}), dayState: "chaotic" }],
+            { range: "all" },
+            nutrition,
+        ));
+        expect(chart.series[0].points).toHaveLength(1);
+        expect(chart.series[0].points[0].recordDate).toBe("2026-09-15");
+        expect(chart.series[0].points[0].y).toBe(500);
+        // 被标记那天连同它的 2 条记录一起消失：只剩 1 天 1 条
+        expect(chart.coverage).toContain("1 天有记录");
+        expect(chart.coverage).toContain("平均每天 1 条");
+    });
+
+    it("没有标记时统计与从前完全一致（不改变既有口径）", () => {
+        const days = ["2026-09-14", "2026-09-15", "2026-09-16"];
+        const chart = buildTrendChart("energy", context(days.map((date, index) => record(date, { daytimeEnergy: index + 2 }))));
+        expect(chart.series[0].points.map((point) => point.y)).toEqual([2, 3, 4]);
+        expect(chart.coverage).toContain("3/3 天");
+    });
+});

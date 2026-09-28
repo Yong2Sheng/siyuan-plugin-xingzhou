@@ -2,7 +2,7 @@ import { tick } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AppShell from "../src/AppShell.svelte";
 import DailyRhythm from "../src/DailyRhythm.svelte";
-import { createDailyRecord, createEmptyDailyStore, upsertDailyRecord, type DailyRecord } from "../src/daily-records";
+import { createDailyRecord, createEmptyDailyStore, isDailyRecordExcluded, upsertDailyRecord, type DailyRecord } from "../src/daily-records";
 import type { WorkItem, WorkItemData, WorkItemViewState } from "../src/work-items";
 
 function researchDailyStore() {
@@ -1091,4 +1091,115 @@ describe("行舟一级模块外壳", () => {
     function sampleWorkItemData(items: WorkItem[]): WorkItemData {
         return { attributeViewId: "internal", attributeViewName: "行舟内部数据", viewId: "internal", items, missingFields: [], fields: {} };
     }
+});
+
+describe("生活节律：「混乱 / 失控」日标记", () => {
+    let component: { $destroy(): void } | undefined;
+
+    afterEach(() => {
+        component?.$destroy();
+        component = undefined;
+        document.body.replaceChildren();
+    });
+
+    const today = () => {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    };
+
+    /** 昨天登记了熄灯计划：昨晚的判定与「没按计划的原因」必填都会挂在今天这条记录上 */
+    function plannedYesterday() {
+        const yesterday = new Date(`${today()}T12:00:00`);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const date = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+        const plan = createDailyRecord(date, "research-workday", 1000);
+        plan.fields.bedtimePreparation = "yes";
+        plan.fields.plannedLightsOffDay = "same-day";
+        plan.fields.plannedLightsOffTime = "23:00";
+        return plan;
+    }
+
+    it("标记「混乱」后当天不再催填，并立刻把状态保存下来", async () => {
+        const torn = createDailyRecord(today(), "research-workday", 1000);
+        torn.fields.wakeTime = "07:05";
+        torn.fields.lightsOffTime = "02:10";
+        torn.fields.importantWorkPlan = "改图 —— 后面就没再动";
+        let store = upsertDailyRecord(upsertDailyRecord(createEmptyDailyStore(1000), plannedYesterday(), 1000), torn, 1000);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily: vi.fn().mockResolvedValue(store), saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
+
+        const markButton = (label: string) => [...document.querySelectorAll(".xz-day-state__seg button")]
+            .find((button) => button.textContent?.trim() === label) as HTMLButtonElement;
+        expect([...document.querySelectorAll(".xz-day-state__seg button")].map((button) => button.textContent?.trim())).toEqual(["正常", "混乱", "失控"]);
+        expect(markButton("正常").getAttribute("aria-pressed")).toBe("true");
+        expect(document.querySelector(".xz-day-state-banner")).toBeNull();
+
+        markButton("混乱").click();
+        await tick();
+
+        expect(markButton("混乱").getAttribute("aria-pressed")).toBe("true");
+        expect(document.querySelector(".xz-day-state-banner")?.textContent).toContain("已标记「混乱的一天」");
+        expect(document.querySelector(".xz-day-state-chip")?.textContent).toContain("混乱");
+        expect(document.querySelector(".xz-daily-completion-summary")?.textContent).toContain("本日不统计");
+        expect(document.querySelector(".xz-daily-missing-panel")).toBeNull();
+        expect([...document.querySelectorAll(".xz-daily-stage-nav button[data-completion]")].map((button) => button.getAttribute("data-completion"))).toEqual(["—", "—", "—", "—", "—"]);
+
+        // 标记本身走的是同一条自动保存链路：不需要再填任何字段
+        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalled(), { timeout: 3000 });
+        expect(saveDaily.mock.calls.at(-1)?.[0].dayState).toBe("chaotic");
+        expect(store.records.find((record) => record.date === today())?.dayState).toBe("chaotic");
+        // 已写下的内容一个字都没动
+        expect(store.records.find((record) => record.date === today())?.fields.importantWorkPlan).toBe("改图 —— 后面就没再动");
+    });
+
+    it("「改回正常」把这一天还给统计，内容原样保留", async () => {
+        const torn = createDailyRecord(today(), "research-workday", 1000);
+        torn.dayState = "chaotic";
+        torn.fields.bestThing = "还是出门走了 20 分钟";
+        let store = upsertDailyRecord(upsertDailyRecord(createEmptyDailyStore(1000), plannedYesterday(), 1000), torn, 1000);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily: vi.fn().mockResolvedValue(store), saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-day-state-banner")).not.toBeNull());
+
+        const restore = [...document.querySelectorAll(".xz-day-state-banner__actions button")]
+            .find((button) => button.textContent?.trim() === "改回正常") as HTMLButtonElement;
+        restore.click();
+        await tick();
+
+        expect(document.querySelector(".xz-day-state-banner")).toBeNull();
+        expect(document.querySelector(".xz-day-state-chip")).toBeNull();
+        expect(document.querySelector(".xz-daily-completion-summary")?.textContent).not.toContain("本日不统计");
+        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalled(), { timeout: 3000 });
+        expect(saveDaily.mock.calls.at(-1)?.[0].dayState).toBe("normal");
+        expect(saveDaily.mock.calls.at(-1)?.[0].fields.bestThing).toBe("还是出门走了 20 分钟");
+    });
+
+    it("整天空白的那天给出标记入口，标完不需要先填任何字段", async () => {
+        let store = createEmptyDailyStore(1000);
+        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
+        component = new DailyRhythm({ target: document.body, props: { loadDaily: vi.fn().mockResolvedValue(store), saveDaily } });
+        await vi.waitFor(() => expect(document.querySelector(".xz-day-state-empty")).not.toBeNull());
+
+        expect(document.querySelector(".xz-day-state-empty")?.textContent).toContain("这一天还没有任何记录");
+        const mark = [...document.querySelectorAll(".xz-day-state-empty__actions button")]
+            .find((button) => button.textContent?.includes("失控")) as HTMLButtonElement;
+        mark.click();
+        await tick();
+
+        expect(document.querySelector(".xz-day-state-banner")?.textContent).toContain("已标记「失控的一天」");
+        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalled(), { timeout: 3000 });
+        const saved = saveDaily.mock.calls.at(-1)?.[0] as DailyRecord;
+        expect(saved.dayState).toBe("uncontrolled");
+        expect(isDailyRecordExcluded(saved)).toBe(true);
+        // 整条记录确实没有任何用户输入，标记本身就该能被保存
+        // （weightUnit 是空记录自带的默认单位，不算输入）
+        const untouched = Object.entries(saved.fields).every(([key, value]) => {
+            if (key === "weightUnit") return value === "kg";
+            if (value === null) return true;
+            if (Array.isArray(value)) return value.length === 0;
+            return typeof value === "number" ? !Number.isFinite(value) : value === "";
+        });
+        expect(untouched).toBe(true);
+    });
 });

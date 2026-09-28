@@ -5,7 +5,9 @@ import {
     createEmptyDailyStore,
     dailyBackupFileForRevision,
     defaultDayType,
+    dailyStoresMatch,
     deriveLightsOffAdherence,
+    isDailyRecordExcluded,
     isWorkMetricApplicable,
     lightsOffNightInput,
     parseDailyStore,
@@ -594,5 +596,82 @@ describe("previousDayFirstAction 次日早晨提示", () => {
     it("跨月与跨年边界仍取字面前一天的记录", () => {
         expect(previousDayFirstAction([record("2026-02-28", "月界")], "2026-03-01")).toBe("月界");
         expect(previousDayFirstAction([record("2025-12-31", "年界")], "2026-01-01")).toBe("年界");
+    });
+});
+
+describe("「混乱 / 失控」日标记", () => {
+    it("新记录默认是正常，只有显式标记才退出统计", () => {
+        const record = createDailyRecord("2026-09-10", "research-workday", 1000);
+        expect(record.dayState).toBe("normal");
+        expect(isDailyRecordExcluded(record)).toBe(false);
+        expect(isDailyRecordExcluded({ ...record, dayState: "chaotic" })).toBe(true);
+        expect(isDailyRecordExcluded({ ...record, dayState: "uncontrolled" })).toBe(true);
+    });
+
+    it("存量数据没有 dayState 字段时按正常解析，非法值同样回落正常", () => {
+        const legacy = {
+            version: 1,
+            revision: 4,
+            createdAt: 1000,
+            updatedAt: 1000,
+            records: [
+                { date: "2026-09-03", dayType: "research-workday", profileVersion: 1, createdAt: 1000, updatedAt: 1000, fields: {} },
+                { date: "2026-09-04", dayType: "research-workday", dayState: "  ", profileVersion: 1, createdAt: 1000, updatedAt: 1000, fields: {} },
+                { date: "2026-09-05", dayType: "research-workday", dayState: 7, profileVersion: 1, createdAt: 1000, updatedAt: 1000, fields: {} },
+            ],
+        };
+        const parsed = parseDailyStore(legacy);
+        expect(parsed?.records.map((record) => record.dayState)).toEqual(["normal", "normal", "normal"]);
+    });
+
+    it("标记的日子连同已填内容一起往返保存，不被清空也不被重写", () => {
+        const store = createEmptyDailyStore(1000);
+        const record = createDailyRecord("2026-09-11", "research-workday", 1000);
+        record.dayState = "chaotic";
+        record.fields.wakeTime = "07:20";
+        record.fields.importantWorkPlan = "改图 —— 后面就没再动";
+        record.fields.daytimeEnergy = 2;
+
+        const saved = upsertDailyRecord(store, record, 2000);
+        expect(saved.revision).toBe(store.revision + 1);
+        expect(saved.records[0].dayState).toBe("chaotic");
+        expect(saved.records[0].fields).toMatchObject({ wakeTime: "07:20", importantWorkPlan: "改图 —— 后面就没再动", daytimeEnergy: 2 });
+
+        // 写后复核：重新解析一次仍与内存中的内容完全一致（dayState 必须在解析里存活）
+        const reread = parseDailyStore(JSON.parse(JSON.stringify(saved)));
+        expect(reread).not.toBeNull();
+        expect(dailyStoresMatch(saved, reread!)).toBe(true);
+    });
+
+    it("整天空白也能标记：只有日期与状态、其余字段全空的记录可以保存并复核", () => {
+        const empty = createDailyRecord("2026-09-12", "research-workday", 1000);
+        empty.dayState = "uncontrolled";
+
+        const saved = upsertDailyRecord(createEmptyDailyStore(1000), empty, 2000);
+        const reread = parseDailyStore(JSON.parse(JSON.stringify(saved)));
+        expect(reread?.records[0].dayState).toBe("uncontrolled");
+        expect(dailyStoresMatch(saved, reread!)).toBe(true);
+    });
+
+    it("改回正常后重新进入统计，内容依然是原来那一份", () => {
+        const store = createEmptyDailyStore(1000);
+        const marked = createDailyRecord("2026-09-13", "research-workday", 1000);
+        marked.fields.bestThing = "还是出门走了 20 分钟";
+        marked.dayState = "chaotic";
+        const first = upsertDailyRecord(store, marked, 2000);
+        expect(isDailyRecordExcluded(first.records[0])).toBe(true);
+
+        const restored = upsertDailyRecord(first, { ...first.records[0], dayState: "normal" }, 3000);
+        expect(restored.revision).toBe(first.revision + 1);
+        expect(isDailyRecordExcluded(restored.records[0])).toBe(false);
+        expect(restored.records[0].fields.bestThing).toBe("还是出门走了 20 分钟");
+    });
+
+    it("标记不影响日期类型：混乱的周三仍然是科研工作日", () => {
+        const record = createDailyRecord("2026-09-16", "research-workday", 1000);
+        record.dayState = "chaotic";
+        const saved = upsertDailyRecord(createEmptyDailyStore(1000), record, 2000);
+        expect(saved.records[0].dayType).toBe("research-workday");
+        expect(isWorkMetricApplicable(saved.records[0].dayType)).toBe(true);
     });
 });

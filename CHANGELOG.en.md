@@ -1,5 +1,42 @@
 # Changelog
 
+## 5.2.0 - 2026-09-28
+
+Every day gains a **day state**: whether it ran as planned, fell behind, or went entirely sideways. A marked day drops out of the statistics, while **everything already written stays exactly as it is**.
+
+It started from a concrete loop — **once a few items slip, the rest of the day is abandoned, and then even the record stops being written**. Until now "this day fell apart" and "nothing was planned for this day" looked identical in the data: both were blank stretches on the trend chart, and both counted as a miss in the adherence rate. The mark is not there to punish a bad day; it is there so that day can **step out of the statistics with dignity**. It was never a failure to be averaged in.
+
+### Added
+
+- **A three-way day state (Life Rhythm › Today's record, top bar)**: beside the day type, defaulting to **Normal**, with **Chaotic** (a record exists but the plan was not followed) and **Out of control** (the day went wrong, or there is barely any record). One click applies it and saves automatically: the mark itself counts as input, so it **saves without filling in a single field**.
+- **A marked day is no longer chased for fields**: the completion summary reads `Complete — · not counted today`, the stage badges all become “—” (nothing to check), and the to-fill list and its “Check missing” button disappear — a day that already went sideways should not be chased for twenty more fields. A banner at the top explains that the day stays out of the trends, adherence, and coverage denominators while all content is kept, and offers **“Back to Normal”**.
+- **A way out for a completely blank day**: previously an empty day could only be filled in field by field; now the form area offers **“Mark Chaotic / Mark Out of control / Start filling in”**, and marking requires no input at all.
+- **State chips**: the record header and the History list show a small “Chaotic” or “Out of control” chip, so a marked day stays recognisable after scrolling past the top bar. Chaotic uses sand, Out of control uses rose; neither uses error red — this means “not counted”, not “wrong”.
+
+### Changed
+
+- **A marked day leaves every statistic**: the trend lines, the coverage denominator, the late-night bands, the denominator of “plan met x/y nights”, and the nutrition lines with their “N entries per day”. When a window contains nothing but marked days, the chart reports an empty state instead of drawing a pretend line. If either the evening that recorded a plan or the next morning that gives the verdict is marked, that night leaves the adherence denominator — otherwise “did I actually turn the lights off last night” turns into an interrogation.
+- **A marked day is exempt from the required “reason for missing the plan”**: that night's verdict never reaches the adherence rate anyway, so a mandatory sentence must not block the act of marking the day.
+
+### Data
+
+- Daily records gain a `dayState` field (`normal` / `chaotic` / `uncontrolled`). **No migration needed**: a record without the field parses as Normal, invalid values fall back to Normal, and the storage version is unchanged. Marking **never clears or validates** any filled field, and switching back to Normal puts the day straight back into the statistics.
+- The nutrition structure is untouched: intake on a marked day stays out of the statistics while `nutrition.json` keeps its structure, revision rule, rotating backups, and read-after-write verification.
+
+### Verification
+
+- `pnpm test`: 639 passed / 4 skipped (57 files passed, 3 skipped); `pnpm run check`: 0 errors / 0 warnings.
+- Sixteen new regressions: default and invalid values for the new field, legacy record parsing, a marked day surviving a save round-trip and returning to Normal, marking a completely blank day, completion becoming “all not applicable”, exclusion from the trend lines, coverage denominator, bands, adherence denominator, and nutrition, plus the component-level path “click the mark → no more chasing → saves immediately”.
+- The real `daily-records.json` on disk (22 days, revision 1476) was read with the new parser: every record parses, all read as Normal, and every filled field keeps its exact value.
+- Build and `package.zip` verification pass; publishing is triggered by pushing the `v5.2.0` tag through GitHub Actions.
+
+### Upgrade notes
+
+- Just reload the plugin after upgrading; no data migration is required. Existing records all count as Normal, so behaviour is exactly as before.
+- Only a day you deliberately mark steps out of the statistics.
+
+---
+
 ## 5.1.0 - 2026-09-27
 
 Execution slices gain a **reschedule** path, and rescheduling now leaves a visible trace: orange means this slice was moved here from another date. The meaning of a make-up completion is settled too — it only ever means "I did it that day but forgot to tick it".

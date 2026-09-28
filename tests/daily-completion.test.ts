@@ -153,3 +153,50 @@ describe("生活节律完整度检查", () => {
         expect(calculateDailyCompletion(record).missing.map((item) => item.label)).toContain("会后个人事务");
     });
 });
+
+describe("生活节律完整度：被标记的日子不再催填", () => {
+    it("标记为混乱后所有阶段变为不适用，且不再产生任何待补项", () => {
+        const record = createDailyRecord("2026-09-04", "research-workday", 1000);
+        const before = calculateDailyCompletion(record);
+        expect(before.missing.length).toBeGreaterThan(0);
+        expect(before.applicableCount).toBe(5);
+
+        record.dayState = "chaotic";
+        const after = calculateDailyCompletion(record);
+        expect(after.missing).toEqual([]);
+        expect(after.completedCount).toBe(0);
+        expect(after.applicableCount).toBe(0);
+        expect(after.stages.every((stage) => stage.state === "not-applicable")).toBe(true);
+    });
+
+    it("失控与混乱同样处理，改回正常后待补项按原样回来", () => {
+        const record = createDailyRecord("2026-09-05", "research-workday", 1000);
+        record.dayState = "uncontrolled";
+        expect(calculateDailyCompletion(record).applicableCount).toBe(0);
+
+        record.dayState = "normal";
+        const restored = calculateDailyCompletion(record);
+        expect(restored.applicableCount).toBe(5);
+        expect(restored.missing.length).toBeGreaterThan(0);
+    });
+
+    it("标记不掩盖已有输入：写过的内容仍留在记录里", () => {
+        const record = createDailyRecord("2026-09-06", "research-workday", 1000);
+        record.fields.wakeTime = "07:05";
+        record.fields.bestThing = "还是把饭做了";
+        record.dayState = "chaotic";
+        const result = calculateDailyCompletion(record);
+
+        expect(result.missing).toEqual([]);
+        expect(record.fields.wakeTime).toBe("07:05");
+        expect(record.fields.bestThing).toBe("还是把饭做了");
+    });
+
+    it("「整天空白」不等于被标记：空白的一天照常列出待补项", () => {
+        const empty = createDailyRecord("2026-09-07", "research-workday", 1000);
+        const result = calculateDailyCompletion(empty);
+        expect(empty.dayState).toBe("normal");
+        expect(result.applicableCount).toBeGreaterThan(0);
+        expect(result.missing.length).toBeGreaterThan(0);
+    });
+});

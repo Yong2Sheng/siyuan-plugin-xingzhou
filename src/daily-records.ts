@@ -25,6 +25,17 @@ export const LIGHTS_OFF_TOLERANCE_MINUTES = 15;
 export type ResultState = "met" | "exceeded" | "missed" | "not-applicable" | "";
 export type ClosureNeed = "needed" | "not-needed" | "";
 
+/**
+ * 这一天的「状态」，与「日期类型」是两件事：日期类型说明这天本来该是什么日子，
+ * 状态说明这天实际有没有按安排走。安排没跟上（`chaotic`）或状态不对、基本没记录（`uncontrolled`）
+ * 都只表示「这一天的记录不值得进统计」，不改变它本来的日期类型——
+ * 因此必须单独存一个字段，不能把 chaotic 塞进 dayType 里。
+ *
+ * 被标记的日子会从趋势、达成率与覆盖度里整体排除（见 isDailyRecordExcluded）；
+ * 已写入的字段一律原样保留，不是清空、也不是「填错了」。
+ */
+export type DailyDayState = "normal" | "chaotic" | "uncontrolled";
+
 export type DailyWorkItemLink = {
     workItemId: string;
     titleSnapshot: string;
@@ -104,6 +115,8 @@ export type DailyRecordFields = {
 export type DailyRecord = {
     date: string;
     dayType: DailyDayType;
+    /** 这天的实际状态：正常计入统计，或标记为混乱 / 失控（整体排除出统计）。 */
+    dayState: DailyDayState;
     profileVersion: 1;
     createdAt: number;
     updatedAt: number;
@@ -167,11 +180,28 @@ export function createDailyRecord(date: string, dayType = defaultDayType(date), 
     return {
         date,
         dayType,
+        dayState: "normal",
         profileVersion: DAILY_PROFILE_VERSION,
         createdAt: now,
         updatedAt: now,
         fields: emptyDailyFields(),
     };
+}
+
+/**
+ * 这一天是否退出统计。被标记的日子不进趋势折线、不进覆盖度分母、
+ * 不计入「计划达成 x/y 晚」，营养摄入也按同一天跳过。
+ *
+ * 判断只写在这一处：调用方不要再各自抄一遍 `dayState !== "normal"`。
+ */
+export function isDailyRecordExcluded(record: Pick<DailyRecord, "dayState">): boolean {
+    return record.dayState !== "normal";
+}
+
+export function dailyDayStateLabel(dayState: DailyDayState): string {
+    if (dayState === "chaotic") return "混乱的一天";
+    if (dayState === "uncontrolled") return "失控的一天";
+    return "正常";
 }
 
 export function defaultDayType(date: string): DailyDayType {
@@ -464,6 +494,7 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
     return resolveSleepDateTimes({
         date: source.date,
         dayType: source.dayType,
+        dayState: dayState(source.dayState),
         profileVersion: DAILY_PROFILE_VERSION,
         createdAt,
         updatedAt: finiteNumber(source.updatedAt) ?? createdAt,
@@ -565,6 +596,14 @@ function isDateKey(value: unknown): value is string {
 
 function isDayType(value: unknown): value is DailyDayType {
     return value === "research-workday" || value === "conference-day" || value === "saturday-reset" || value === "sunday-half-day" || value === "holiday";
+}
+
+/**
+ * 存量记录没有这个字段：一律当作「正常」，因此不需要迁移、不用动存储版本号。
+ * 非法值同样回落「正常」——最坏情况是这一天照常进统计，而不是整份数据无法解析。
+ */
+function dayState(value: unknown): DailyDayState {
+    return value === "chaotic" || value === "uncontrolled" ? value : "normal";
 }
 
 function triState(value: unknown): TriState {

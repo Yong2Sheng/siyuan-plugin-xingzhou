@@ -2,6 +2,7 @@ import {
     DAILY_RUBRICS,
     LIGHTS_OFF_TOLERANCE_MINUTES,
     deriveLightsOffAdherence,
+    isDailyRecordExcluded,
     lightsOffNightInput,
     plannedLightsOffReference,
     shiftDateKey,
@@ -488,6 +489,15 @@ function simpleSeries(
     return { id, label, colorIndex, ghost: options.ghost, points };
 }
 
+/**
+ * 营养摄入按日期对齐每日记录：被标记的日期整天的摄入都不进统计。
+ * 营养本身没有「混乱」的概念——它跟着那天走，因此判断依据始终是记录上的 dayState。
+ */
+function nutritionWithoutExcludedDays(nutrition: NutritionStore | null, excludedDates: Set<string>): NutritionStore | null {
+    if (!nutrition || !excludedDates.size) return nutrition;
+    return { ...nutrition, entries: nutrition.entries.filter((entry) => !excludedDates.has(entry.date)) };
+}
+
 function nutritionSeries(context: TrendChartContext, id: string, label: string, pick: (totals: ReturnType<typeof nutritionTotalsForDate>) => number): RawSeries {
     const points: RawSeries["points"] = [];
     if (!context.nutrition) return { id, label, colorIndex: 0, points };
@@ -529,20 +539,29 @@ export function trendUsesNightAnchor(metricId: TrendMetricId): boolean {
 
 export function buildTrendChart(metricId: TrendMetricId, context: TrendChartContext): TrendChartData {
     const definition = trendMetricById(metricId);
-    const build = metricBuild(metricId, context);
+    /*
+     * 被标记为「混乱 / 失控」的日子整体退出统计：在进入任何取值函数之前就摘掉，
+     * 因此折线、覆盖度分母、竖带、达成率与营养聚合自动一致——不需要每个指标各自再判断一次。
+     * 已写入的数字仍然留在记录里，只是不参与统计。
+     */
+    const excludedDates = new Set(context.records.filter(isDailyRecordExcluded).map((record) => record.date));
+    const countingRecords = context.records.filter((record) => !excludedDates.has(record.date));
+    const countingNutrition = nutritionWithoutExcludedDays(context.nutrition, excludedDates);
+    const counting: TrendChartContext = { ...context, records: countingRecords, nutrition: countingNutrition };
+    const build = metricBuild(metricId, counting);
     const night = trendUsesNightAnchor(metricId);
 
     // 窗口按「记录锚点」而不是「已绘制的点」计算：只标了时段、没记时刻的夜晚也要算进数据范围。
-    const anchorDays = context.records.map((record) => night ? trendDayIndex(record.date) - 1 : trendDayIndex(record.date));
-    if (metricId === "sleepWindow") anchorDays.push(...context.records.map((record) => trendDayIndex(record.date)));
-    if (definition.group === "nutrition" && context.nutrition) {
-        anchorDays.push(...context.nutrition.entries.map((entry) => trendDayIndex(entry.date)));
+    const anchorDays = countingRecords.map((record) => night ? trendDayIndex(record.date) - 1 : trendDayIndex(record.date));
+    if (metricId === "sleepWindow") anchorDays.push(...countingRecords.map((record) => trendDayIndex(record.date)));
+    if (definition.group === "nutrition" && countingNutrition) {
+        anchorDays.push(...countingNutrition.entries.map((entry) => trendDayIndex(entry.date)));
     }
     const [windowFrom, windowTo] = trendRangeWindow(context.settings, context.today, anchorDays);
     const { granularity, fellBack } = trendEffectiveGranularity(context.settings.granularity, windowFrom, windowTo, anchorDays);
     const stat: TrendStat = context.settings.stat === "auto" ? (build.statDefault ?? definition.statDefault) : context.settings.stat;
     const excluded = new Set(context.settings.excludedDayTypes);
-    const windowRecords = context.records.filter((record) => {
+    const windowRecords = countingRecords.filter((record) => {
         const index = trendDayIndex(record.date);
         return index >= windowFrom && index <= windowTo;
     }).length;
@@ -572,7 +591,7 @@ export function buildTrendChart(metricId: TrendMetricId, context: TrendChartCont
     const values = series.filter((entry) => !entry.ghost).flatMap((entry) => entry.points.map((point) => point.y));
     const scale = build.yTicks.length && build.yDomain[0] === SCORE_DOMAIN[0]
         ? { domain: build.yDomain, ticks: build.yTicks }
-        : scaleForMetric(metricId, context, build, values);
+        : scaleForMetric(metricId, counting, build, values);
     // 竖带同样要过滤、同样要分桶：否则切到按周/按月时，逐夜竖带会全叠在同一格上
     const rawBands = build.bands.filter((band) => band.anchor >= windowFrom && band.anchor <= windowTo && !excluded.has(band.dayType));
     const bands = aggregateBands(rawBands, granularity);
@@ -596,7 +615,7 @@ export function buildTrendChart(metricId: TrendMetricId, context: TrendChartCont
         zones: build.zones,
         lines: build.lines,
         target: build.target,
-        coverage: coverageFor(metricId, keptRaw, context, windowRecords, granularity, rawBands.length),
+        coverage: coverageFor(metricId, keptRaw, counting, windowRecords, granularity, rawBands.length),
         notes: fellBack
             ? [...build.notes, `窗口内数据只落在 1 个${granularity === "week" ? "月" : "周"}里，已自动改用按${granularity === "week" ? "周" : "日"}聚合；也可以手动切粒度看细节。`]
             : build.notes,
@@ -614,13 +633,19 @@ function adherenceNight(context: TrendChartContext, record: DailyRecord) {
     return deriveLightsOffAdherence(lightsOffNightInput(previous ?? null, record));
 }
 
-/** 窗口内的达成统计：只有登记了计划的夜晚才进分母。 */
+/**
+ * 窗口内的达成统计：只有登记了计划的夜晚才进分母。
+ * 被标记为「混乱 / 失控」的日子整体不统计——当晚登记计划的那天、或者次日早晨给结论的那天
+ * 只要有任意一天被标记，这一晚就不进分母：否则「昨晚到底熄没熄灯」会变成一次追责。
+ */
 export function lightsOffAdherenceSummary(records: DailyRecord[]): { planned: number; met: number } {
+    const excluded = new Set(records.filter(isDailyRecordExcluded).map((record) => record.date));
     let planned = 0;
     let met = 0;
     for (const record of records) {
+        if (excluded.has(record.date)) continue;
         const previous = records.find((candidate) => candidate.date === shiftDateKey(record.date, -1));
-        if (!previous || !plannedLightsOffReference(previous)) continue;
+        if (!previous || excluded.has(previous.date) || !plannedLightsOffReference(previous)) continue;
         planned += 1;
         if (deriveLightsOffAdherence(lightsOffNightInput(previous, record)).status === "met") met += 1;
     }

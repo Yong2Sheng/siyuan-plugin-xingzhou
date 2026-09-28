@@ -4,8 +4,10 @@
         DAILY_RUBRICS,
         cloneDailyRecord,
         createDailyRecord,
+        dailyDayStateLabel,
         defaultDayType,
         deriveLightsOffAdherence,
+        isDailyRecordExcluded,
         isWorkMetricApplicable,
         lightsOffNightInput,
         plannedLightsOffReferenceFromFields,
@@ -15,8 +17,10 @@
         sleepLatencyLabel,
         type BedtimePreparation,
         type ClosureNeed,
+        type DailyDayState,
         type DailyDayType,
         type DailyRecord,
+        type DailyRecordFields,
         type DailyRecordStore,
         type DailyRubric,
         type LightsOffAdherence,
@@ -74,6 +78,15 @@
         { value: "saturday-reset", label: "周六轻量复盘", guidance: "轻量复盘后进入至少 24 小时完全无工作区间。" },
         { value: "sunday-half-day", label: "周日半日科研", guidance: "上午休息，12:00–17:00 科研，17:00 后回到个人生活。" },
         { value: "holiday", label: "休假／节假日", guidance: "科研字段不适用，只记录身体、恢复、训练、生活与晚间观察。" },
+    ];
+    /**
+     * 今日状态与日期类型是两件事：类型说「这天本来该是什么日子」，状态说「这天实际有没有按安排走」。
+     * 标记只让这一天退出统计，不清空、不校验已经写下的内容。
+     */
+    const dayStates: Array<{ value: DailyDayState; label: string; guidance: string }> = [
+        { value: "normal", label: "正常", guidance: "这一天照常计入趋势与达成率。" },
+        { value: "chaotic", label: "混乱", guidance: "有记录但没跟上安排：该日不参与趋势与达成率。" },
+        { value: "uncontrolled", label: "失控", guidance: "状态不对或基本没记录：该日不参与任何统计。" },
     ];
     const profileRows = [
         ["科研工作日", "周一至周五默认", "早晨安排", "完整科研与工作边界", "晚间复盘"],
@@ -143,8 +156,14 @@
     $: tonightDiff = tonightCompare?.status === "met" || tonightCompare?.status === "missed"
         ? (tonightCompare.evidence ? lightsOffEvidenceLabel(tonightCompare.evidence.diffMinutes) : "")
         : "";
-    /** 只有在判定为「没按计划」时，原因才是必填；守住或不适用都不该拦保存。 */
-    $: lightsOffReasonSatisfied = lightsOffAdherence.status !== "missed" || draft.fields.lightsOffAdherenceReason.trim().length > 0;
+    /**
+     * 只有在判定为「没按计划」时，原因才是必填；守住或不适用都不该拦保存。
+     * 被标记为混乱／失控的日子整体退出统计，那晚的判定本来就不进达成率，
+     * 因此也不该用一句必填理由挡住「把这一天标记下来」这个动作。
+     */
+    $: lightsOffReasonSatisfied = isDailyRecordExcluded(draft)
+        || lightsOffAdherence.status !== "missed"
+        || draft.fields.lightsOffAdherenceReason.trim().length > 0;
     /** 实际熄灯是否已登记（当场记录或早期早晨补记都算），决定早晨是否需要人工回答。 */
     $: actualLightsOffRecorded = Boolean(nightInput.actualTime);
     $: plannedLightsOff = previousRecord?.fields.plannedLightsOffAt || "";
@@ -167,6 +186,14 @@
     $: afterWorkCompletion = stagePresentation(completion, "after-work");
     $: recoveryCompletion = stagePresentation(completion, "recovery");
     $: eveningCompletion = stagePresentation(completion, "evening");
+    /**
+     * 被标记为「混乱 / 失控」的日子：退出统计（趋势、达成率、覆盖度），当天也不再催填。
+     * 「整天空白」是另一个概念——没有任何输入、状态仍是正常，因此照常显示表单。
+     */
+    $: recordExcluded = isDailyRecordExcluded(draft);
+    $: dayStateLabel = dailyDayStateLabel(draft.dayState);
+    $: dayStateGuidance = dayStates.find((entry) => entry.value === draft.dayState)?.guidance ?? "";
+    $: recordEmpty = !recordExcluded && !recordHasContent(draft);
     /*
      * 边界提醒只依赖这两个字段，因此在数据源变化时只换这两个引用：
      * 模板（含边界时间）来自 templates，勾选状态来自当天 dayStates。
@@ -344,6 +371,36 @@
         if (dayType === "holiday" && (stage === "learning" || stage === "boundary" || stage === "after-work")) stage = "recovery";
         draft = { ...draft, fields: { ...draft.fields } };
         markDirty();
+    }
+
+    /**
+     * 标记「混乱 / 失控 / 正常」。标记本身不动任何已填字段——那天写了什么就是什么，
+     * 只是退出统计。`markDirty()` 会走同一条自动保存链路，因此整天空白的那天
+     * 也能靠这一次点击落库（recordHasContent 把非正常状态算作内容，见 saveLoop 的必填闸门）。
+     */
+    function changeDayState(dayState: DailyDayState) {
+        if (!dayStates.some((entry) => entry.value === dayState) || draft.dayState === dayState) return;
+        draft.dayState = dayState;
+        markDirty();
+    }
+
+    /**
+     * 这一天是否已经有任何输入；用于区分「整天空白」与「填了一部分」。
+     *
+     * `weightUnit` 与几个时刻/评分的派生字段不是用户输入——新建的空记录里
+     * weightUnit 就是 "kg"，如果不排除，整天空白的那天永远不会显示空状态。
+     */
+    const FIELD_NOT_USER_INPUT: ReadonlySet<keyof DailyRecordFields> = new Set([
+        "weightUnit", "lightsOffAt", "wakeAt", "watchSleepOnsetAt", "sleepLatencyMinutes", "plannedLightsOffAt",
+    ]);
+
+    function recordHasContent(record: DailyRecord): boolean {
+        return Object.entries(record.fields).some(([key, value]) => {
+            if (FIELD_NOT_USER_INPUT.has(key as keyof DailyRecordFields)) return false;
+            if (typeof value === "number") return Number.isFinite(value);
+            if (Array.isArray(value)) return value.length > 0;
+            return typeof value === "string" && value.trim().length > 0;
+        });
     }
 
     function changeProfessionalStudyPlanned(value: string) {
@@ -682,6 +739,8 @@
             state: "not-started",
             missing: [],
         };
+        /* 被标记的日子整体不统计：徽标一律「—」，不再显示待补数字催填 */
+        if (recordExcluded) return { state: "not-applicable" as const, statusLabel: "本日不统计", badge: "—" };
         const statusLabel = entry.state === "complete"
             ? "已完成"
             : entry.state === "not-applicable"
@@ -812,9 +871,41 @@
         {/if}
     {:else if view === "today"}
         <div class="xz-daily-context">
-            <label><span>今日类型</span><select value={draft.dayType} on:change|stopPropagation={(event) => changeDayType(event.currentTarget.value)}>{#each dayTypes as type}<option value={type.value}>{type.label}</option>{/each}</select></label>
-            <p>{dayGuidance} 日期类型可以覆盖每周默认。</p>
+            <div class="xz-daily-context__row">
+                <label><span>今日类型</span><select value={draft.dayType} on:change|stopPropagation={(event) => changeDayType(event.currentTarget.value)}>{#each dayTypes as type}<option value={type.value}>{type.label}</option>{/each}</select></label>
+                <div class="xz-day-state">
+                    <span class="xz-day-state__label">今日状态</span>
+                    <span class="xz-day-state__seg" role="group" aria-label="今日状态">
+                        {#each dayStates as entry (entry.value)}
+                            <button
+                                type="button"
+                                data-state={entry.value}
+                                class:active={draft.dayState === entry.value}
+                                aria-pressed={draft.dayState === entry.value}
+                                title={entry.guidance}
+                                on:click|stopPropagation={() => changeDayState(entry.value)}
+                            >{entry.label}</button>
+                        {/each}
+                    </span>
+                </div>
+            </div>
+            <div class="xz-daily-context__row">
+                <p class="xz-daily-context__hint">{dayGuidance} 日期类型可以覆盖每周默认。</p>
+                <span class="xz-day-state__note"><i>i</i>{dayStateGuidance}</span>
+            </div>
         </div>
+
+        {#if recordExcluded}
+            <div class="xz-day-state-banner" data-state={draft.dayState}>
+                <div class="xz-day-state-banner__main">
+                    <strong>已标记「{dayStateLabel}」</strong>
+                    <p>这一天不参与趋势、达成率与统计分母；已经写下的内容原样保留，随时可以改回「正常」。</p>
+                </div>
+                <div class="xz-day-state-banner__actions">
+                    <button class="primary" type="button" on:click|stopPropagation={() => changeDayState("normal")}>改回正常</button>
+                </div>
+            </div>
+        {/if}
 
         <div class="xz-daily-progress" class:holiday={!workApplicable}>
             <div><i>1</i><span><strong>早晨记录</strong><small>{isSaturdayReset ? "睡眠、身体与训练" : isConferenceDay ? "睡眠、身体与会议安排" : "睡眠、身体与科研安排"}</small></span></div>
@@ -842,12 +933,16 @@
         <div class="xz-daily-layout">
             <article class="xz-daily-record">
                 <header class="xz-daily-record-header">
-                    <div><h2>{formatDate(currentDate)}</h2><p>{dayTypeLabel(draft.dayType)} · {store?.records.some((record) => record.date === currentDate) ? "已有记录" : "尚未保存"}</p></div>
+                    <div><h2>{formatDate(currentDate)}</h2><p>{dayTypeLabel(draft.dayType)}{#if recordExcluded}<em class="xz-day-state-chip" data-state={draft.dayState}>{dayStateLabel.replace("的一天", "")}</em>{/if} · {store?.records.some((record) => record.date === currentDate) ? "已有记录" : "尚未保存"}</p></div>
                     <div class="xz-daily-header-actions">
-                        <div class="xz-daily-completion-summary" aria-live="polite">
+                        <div class="xz-daily-completion-summary" class:is-excluded={recordExcluded} aria-live="polite">
                             <div class="xz-daily-stage-legend" aria-label="阶段状态说明"><span><i>○</i>未开始</span><span class="incomplete"><i>1</i>数字表示待补项</span><span class="complete"><i>✓</i>已完成</span><span><i>—</i>无需填写</span></div>
-                            <span>完成 <strong>{completion.completedCount}/{completion.applicableCount}</strong>{#if completion.missing.length}<em>待补 {completion.missing.length} 项</em>{:else}<em class="complete">已补齐</em>{/if}</span>
-                            <button type="button" class:active={missingOpen} on:click={() => missingOpen = !missingOpen}>{missingOpen ? "收起待补" : "检查待补"}</button>
+                            {#if recordExcluded}
+                                <span>完成 <strong>—</strong><em>本日不统计</em></span>
+                            {:else}
+                                <span>完成 <strong>{completion.completedCount}/{completion.applicableCount}</strong>{#if completion.missing.length}<em>待补 {completion.missing.length} 项</em>{:else}<em class="complete">已补齐</em>{/if}</span>
+                                <button type="button" class:active={missingOpen} on:click={() => missingOpen = !missingOpen}>{missingOpen ? "收起待补" : "检查待补"}</button>
+                            {/if}
                         </div>
                         <nav class="xz-daily-stage-nav" aria-label="填写阶段">
                             <button class={`completion-${morningCompletion.state}`} class:active={stage === "morning"} data-completion={morningCompletion.badge} aria-label={`早晨，${morningCompletion.statusLabel}`} title={morningCompletion.statusLabel} type="button" on:click={() => void changeStage("morning")}>早晨</button>
@@ -858,7 +953,7 @@
                     </div>
                 </header>
 
-                {#if missingOpen}
+                {#if missingOpen && !recordExcluded}
                     <section class="xz-daily-missing-panel" aria-label="待补项目">
                         <header><div><strong>{completion.missing.length ? `还有 ${completion.missing.length} 项待补` : "今日关键记录已补齐"}</strong><small>{completion.missing.length ? "只检查关键字段；备注和补充说明仍是可选项。" : "普通备注与补充说明无需填写。"}</small></div><button type="button" aria-label="关闭待补项目" on:click={() => missingOpen = false}>×</button></header>
                         {#if completion.missing.length}
@@ -867,6 +962,22 @@
                             <p>没有遗漏的关键字段，可以按自己的需要继续补充其他内容。</p>
                         {/if}
                     </section>
+                {/if}
+
+                {#if recordEmpty}
+                    <!--
+                        整天空白的那天：先给出「标记」这条最省力的出口，再给补记。
+                        标记不要求先填任何字段，标完就从趋势与达成率里整体排除。
+                    -->
+                    <div class="xz-day-state-empty">
+                        <h3>这一天还没有任何记录</h3>
+                        <p>可以现在补记几项；如果这天本来就是没跟上、或者状态不对，直接把它标记掉就好——标记不要求先填任何东西，标完这一天就从趋势与达成率里整体排除。</p>
+                        <div class="xz-day-state-empty__actions">
+                            <button type="button" on:click|stopPropagation={() => changeDayState("chaotic")}>标记「混乱的一天」</button>
+                            <button type="button" on:click|stopPropagation={() => changeDayState("uncontrolled")}>标记「失控的一天」</button>
+                            <button type="button" on:click={() => void changeStage("all")}>开始补记</button>
+                        </div>
+                    </div>
                 {/if}
 
                 {#if stage === "morning" || stage === "all"}
@@ -1277,7 +1388,7 @@
     {:else if view === "history"}
         <section class="xz-daily-list-view">
             <header><div><span class="xz-section-kicker">插件内部数据库</span><h2>历史数据</h2></div><span>{store?.records.length ?? 0} 天</span></header>
-            {#if !store?.records.length}<div class="xz-daily-empty"><h3>还没有每日记录</h3><p>从 9 月 3 日开始手动录入即可；这里不会迁移旧文档数据。</p></div>{:else}{#each [...store.records].reverse() as record (record.date)}<button class="xz-daily-history-row" type="button" on:click={() => void openHistoryRecord(record.date)}><strong>{record.date}</strong><span>{dayTypeLabel(record.dayType)}</span><span>睡眠 {record.fields.sleepDurationMinutes === null ? "—" : `${Math.floor(record.fields.sleepDurationMinutes / 60)} 小时 ${record.fields.sleepDurationMinutes % 60} 分`}{#if record.fields.lightsOffBand === "after-midnight"}<em class="xz-daily-night-owl">熬夜</em>{/if}</span><span>精力 {record.fields.daytimeEnergy ?? "—"}</span><span>{statusFor(record)}</span></button>{/each}{/if}
+            {#if !store?.records.length}<div class="xz-daily-empty"><h3>还没有每日记录</h3><p>从 9 月 3 日开始手动录入即可；这里不会迁移旧文档数据。</p></div>{:else}{#each [...store.records].reverse() as record (record.date)}<button class="xz-daily-history-row" type="button" on:click={() => void openHistoryRecord(record.date)}><strong>{record.date}</strong><span>{dayTypeLabel(record.dayType)}{#if isDailyRecordExcluded(record)}<em class="xz-day-state-chip" data-state={record.dayState}>{dailyDayStateLabel(record.dayState).replace("的一天", "")}</em>{/if}</span><span>睡眠 {record.fields.sleepDurationMinutes === null ? "—" : `${Math.floor(record.fields.sleepDurationMinutes / 60)} 小时 ${record.fields.sleepDurationMinutes % 60} 分`}{#if record.fields.lightsOffBand === "after-midnight"}<em class="xz-daily-night-owl">熬夜</em>{/if}</span><span>精力 {record.fields.daytimeEnergy ?? "—"}</span><span>{statusFor(record)}</span></button>{/each}{/if}
         </section>
     {:else if view === "trends"}
         <TrendView

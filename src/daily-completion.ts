@@ -1,5 +1,6 @@
 import {
     deriveLightsOffAdherence,
+    isDailyRecordExcluded,
     lightsOffNightInput,
     plannedLightsOffReference,
     type DailyRecord,
@@ -33,10 +34,30 @@ export type DailyCompletion = {
 type Check = Omit<DailyMissingItem, "stage"> & { filled: boolean };
 
 /**
+ * 被标记的日子在界面上仍然列出全部阶段（界面按同一套 stage 渲染按钮），
+ * 但一律「无需检查」，所以这里给出固定的阶段顺序与标签。
+ */
+const EXCLUDED_STAGES: ReadonlyArray<readonly [DailyCompletionStage, string]> = [
+    ["morning", "早晨"],
+    ["learning", "午饭后"],
+    ["boundary", "下班"],
+    ["after-work", "下班后"],
+    ["recovery", "恢复"],
+    ["evening", "21:00"],
+];
+
+/**
  * 计算一天各阶段的完成度。`previousRecord` 是前一天的记录：昨晚是否按计划熄灯的结论需要
  * 「前一天登记的计划 + 本记录里的实际熄灯」两半，缺了它只能按「不适用」处理。
+ *
+ * 被标记为「混乱 / 失控」的日子整体不统计：所有阶段返回不适用、不产生任何待补项。
+ * 已经失控的一天再被追着补 20 项只会加重挫败，也因此界面上不再出现「检查待补」。
  */
 export function calculateDailyCompletion(record: DailyRecord, previousRecord: DailyRecord | null = null): DailyCompletion {
+    if (isDailyRecordExcluded(record)) {
+        const stages = EXCLUDED_STAGES.map(([stage, label]) => notApplicable(stage, label));
+        return { stages, missing: [], completedCount: 0, applicableCount: 0 };
+    }
     const fields = record.fields;
     const saturday = record.dayType === "saturday-reset";
     const conference = record.dayType === "conference-day";

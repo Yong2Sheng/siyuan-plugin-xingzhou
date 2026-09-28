@@ -1139,6 +1139,42 @@
 .xz-daily-context label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .xz-daily-context select { min-height: 38px; padding: 5px 26px 5px 9px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-bg); font-size: 14px; }
 .xz-daily-context p { margin: 0; color: var(--xingzhou-muted); font-size: 13px; }
+/* 两行：上排「日期类型 / 今日状态」，下排「类型说明 / 状态说明」 */
+.xz-daily-context__row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; }
+.xz-daily-context__hint { margin: 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.6; }
+.xz-day-state { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; min-width: 0; }
+.xz-day-state__label { flex: 0 0 auto; color: var(--xingzhou-muted); font-size: 13px; }
+.xz-day-state__seg { display: inline-flex; min-width: 0; overflow: hidden; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); }
+.xz-day-state__seg button { min-height: 38px; padding: 6px 13px; border: 0; border-right: 1px solid var(--xingzhou-border); color: var(--xingzhou-muted); background: var(--xingzhou-bg); cursor: pointer; font-size: 13px; white-space: nowrap; }
+.xz-day-state__seg button:last-child { border-right: 0; }
+.xz-day-state__seg button:hover { color: var(--xingzhou-text); background: var(--xingzhou-surface-light); }
+.xz-day-state__seg button.active { color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 600; }
+/* 混乱／失控的选中态用中性色，不用错误红：这只是「不统计」，不是「出错」 */
+.xz-day-state__seg button.active[data-state="chaotic"] { color: var(--xz-tone-sand-text); background: color-mix(in srgb, var(--xz-tone-sand-strip) 34%, var(--xingzhou-panel)); }
+.xz-day-state__seg button.active[data-state="uncontrolled"] { color: var(--xz-tone-rose-text); background: color-mix(in srgb, var(--xz-tone-rose-strip) 30%, var(--xingzhou-panel)); }
+.xz-day-state__note { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.55; }
+.xz-day-state__note i { flex: 0 0 auto; display: grid; width: 16px; height: 16px; place-items: center; border-radius: 50%; color: var(--xingzhou-muted); background: var(--xingzhou-surface-light); font-size: 11px; font-style: normal; }
+/* 标记生效后的说明横幅：讲清「不统计」，而不是追究那天为什么没做到 */
+.xz-day-state-banner { display: flex; flex: 0 0 auto; align-items: flex-start; gap: 10px; margin: 10px 16px 0; padding: 10px 12px; border-left: 3px solid var(--xingzhou-muted); border-radius: 0 var(--xingzhou-radius) var(--xingzhou-radius) 0; background: var(--xingzhou-panel-subtle); }
+.xz-day-state-banner[data-state="chaotic"] { border-left-color: var(--xz-tone-sand-strip); }
+.xz-day-state-banner[data-state="uncontrolled"] { border-left-color: var(--xz-tone-rose-strip); }
+.xz-day-state-banner__main { flex: 1 1 auto; min-width: 0; }
+.xz-day-state-banner__main strong { display: block; font-size: 13px; }
+.xz-day-state-banner__main p { margin: 3px 0 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.65; }
+.xz-day-state-banner__actions { display: flex; flex: 0 0 auto; gap: 6px; }
+.xz-day-state-banner__actions button { min-height: 32px; padding: 5px 10px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-panel); cursor: pointer; font-size: 12px; }
+.xz-day-state-banner__actions button.primary { border-color: var(--xingzhou-primary); color: var(--b3-theme-on-primary); background: var(--xingzhou-primary); }
+/* 记录头与历史列表里的状态小标：滚过顶部之后仍然看得出这一天被标记过 */
+.xz-day-state-chip { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-style: normal; font-weight: 600; vertical-align: 1px; }
+.xz-day-state-chip[data-state="chaotic"] { color: var(--xz-tone-sand-text); background: color-mix(in srgb, var(--xz-tone-sand-strip) 42%, var(--xingzhou-panel)); }
+.xz-day-state-chip[data-state="uncontrolled"] { color: var(--xz-tone-rose-text); background: color-mix(in srgb, var(--xz-tone-rose-strip) 40%, var(--xingzhou-panel)); }
+.xz-daily-completion-summary.is-excluded em { border-left: 0; color: var(--xingzhou-muted); }
+/* 整天空白的那天：标记是最省力的出口，所以先给标记、再给补记 */
+.xz-day-state-empty { display: grid; flex: 1 1 auto; align-content: center; justify-items: center; gap: 10px; min-height: 240px; margin: 10px 0 16px; padding: 22px; border: 1px dashed var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); text-align: center; }
+.xz-day-state-empty h3 { margin: 0; color: var(--xingzhou-text); font-size: 15px; }
+.xz-day-state-empty p { max-width: 42em; margin: 0; font-size: 12px; line-height: 1.75; }
+.xz-day-state-empty__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
+.xz-day-state-empty__actions button { min-height: 38px; padding: 7px 14px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-panel); cursor: pointer; font-size: 13px; }
 .xz-daily-progress {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -2924,3 +2960,34 @@
 .xz-plan-templates__list { display: flex; flex-wrap: wrap; gap: 6px; }
 .xz-plan-templates__save { display: flex; align-items: center; gap: 6px; width: 100%; }
 .xz-plan-templates__name { box-sizing: border-box; flex: 1 1 auto; min-width: 0; height: 28px; font-size: 12.5px; }
+
+/*
+ * 「混乱 / 失控」标记横条的窄屏行为。
+ *
+ * 用容器查询而不是媒体查询：思源标签页可以分屏、也可以被拖窄，真正决定断点的是容器宽度。
+ * 一屏放不下时 .xz-daily-context 会被改成纵向，但每一行内部仍是横向两端对齐的 flex，
+ * 于是「今日类型」会被挤成竖排、说明文字与状态区互相重叠。
+ * 这段必须放在文件末尾：同权重的规则按出现顺序决胜，写在基础规则之前会被盖掉。
+ */
+@container (max-width: 1100px) {
+    .xz-daily-context__row { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; gap: 8px; }
+    .xz-day-state { gap: 8px; }
+}
+@container (max-width: 980px) {
+    /* 状态标签与按钮各占一行；列宽用 max-content，否则三段按钮会被压得比自己还窄、
+       再被 overflow: hidden 裁掉，看起来就是按钮缺一半。 */
+    .xz-day-state { display: grid; grid-template-columns: max-content; gap: 6px; }
+    .xz-day-state__seg { justify-self: start; }
+}
+@container (max-width: 620px) {
+    .xz-daily-context__row > label { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px; }
+    .xz-day-state-banner { flex-direction: column; align-items: stretch; }
+    .xz-day-state-banner__actions button { flex: 1 1 auto; }
+}
+@container (max-width: 480px) {
+    /* 按钮上的「正常 / 混乱 / 失控」已经说明了这排是什么，省掉标签换回宽度 */
+    .xz-day-state__label { display: none; }
+    .xz-day-state__seg { max-width: 100%; }
+    .xz-day-state__seg button { padding: 6px 9px; font-size: 12.5px; }
+    .xz-day-state-empty__actions { flex-direction: column; align-items: stretch; }
+}
