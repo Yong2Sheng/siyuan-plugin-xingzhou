@@ -1,5 +1,44 @@
 # Changelog
 
+## 5.3.0 - 2026-09-28
+
+Hierarchy browsing goes from **something you have to squint at** to **something you can read at a glance**. Until now, level, type, and belonging were all carried by a single weak signal — an 18px indent. Each row also spent a fixed 20px on a drag handle and 26px on an expand arrow before the title began; titles used the same size and weight at every depth; the type badge was the loudest element in the row yet repeated on every line; nothing separated one area's subtree from the next; and the right-hand chips mixed two colour systems at inconsistent widths. The result was that "Long-term area · Writing fiction" and a third-level "Transaction · Chapter six" looked typographically identical, leaving you to count pixels to work out which level you were on.
+
+### Added
+
+- **Chapter blocks**: a long-term area, or a top-level project that belongs to no area, becomes a wrapped block — outline, faint fill, and **a role-coloured strip running down its entire left edge**. Top-level projects nested under an area become blocks of their own too (switchable through a theme variable), so "how many areas, and how many projects inside each" can be counted in one screen.
+- **Sticky block headers**: while scrolling, the area header stays at the top and a nested project header parks directly beneath it, so row 30 still tells you whose subtree you are reading.
+- **Collapsed blocks report their size**: folding a block shows "N projects · M transactions" in its header, so a collapsed block is no longer just a bare title. Only descendants visible under the current filter are counted, so the Today filter never disagrees with what expanding reveals.
+- **Consecutive identical rows fade back**: when three or more siblings in a row share exactly the same slice plan and status, their chips drop to 50% opacity — the eight "no slices yet / Not started" rows in the photo-album list stop forming a wall. Today rows are excluded so the work you actually mean to do today is never dimmed.
+
+### Changed
+
+- **Indentation and guide lines**: each level now indents 24px, carried by the child container, and draws a vertical guide line. The guide is drawn per child node, and **the segment beside a block (which already has a strip) is skipped** — a strip that runs the full height of a block already says "this branch starts here".
+- **A four-step type scale**: area 15px/700, top-level project 13.5px/650, subproject 13px/600, transaction and idea 13px/400 in a slightly recessed text colour. Row heights follow at 46 / 40 / 36 / 34px, giving the list a vertical rhythm.
+- **Transaction badges become dots**: transaction and idea rows no longer carry a full pill but a 7px role-coloured dot — the type identity stays, the competition with the title goes. The badge element and its screen-reader text are both kept, and areas, top-level projects, and subprojects keep their solid badges.
+- **Three fixed-width right-hand columns**: Today 44px, slice plan 84px, status 66px. Empty slots keep their width, so each column aligns vertically and "what am I doing today" can be read down a single column. The dependency chip `⇠N` moves from between the title and the columns to the left of the title, and "moved out of today" moves to the right of the status column.
+- **"No slices yet" is demoted**: the default state is no longer a coloured chip, only faint grey text (its slot is kept so alignment is unaffected).
+- **Sibling dividers**: a 1px hairline between rows, so consecutive transactions no longer blur into one another.
+- **Drag handle and reorder buttons appear on demand**: `⠿` and `↑ ↓` are hidden until you hover, select, or keyboard-focus the row. Their space stays reserved, so nothing jumps when they appear.
+- **Four narrow-width steps**: 1100 / 980 / 760 / 620px progressively tighten the indent and the three columns, and below 620px the subproject badge is hidden. On touch devices every row is raised to a 42px target (48px for block headers).
+
+### Data
+
+- **No data changes**: this release only touches rendering and two derived calculations. Work items, daily records, checklist, and nutrition keep their exact structures and storage version, and no migration is needed.
+- Both new derived values are computed from existing data on the fly and never written to disk: the identical-row test reads the slice plan plus status, and the block count reads the subtree structure and types.
+
+### Verification
+
+- `pnpm test`: 648 passed / 5 skipped (58 files passed, 3 skipped; one further test skips itself on Mondays by design and is unrelated to this change); `pnpm run check`: 0 errors / 0 warnings.
+- Ten new regressions: the boundaries of an identical run (three rows count, two do not, a differing status or slice plan breaks it, runs never cross parents, a today row neither joins a run nor lets one continue across it, and top-level siblings behave the same), plus cross-level and visible-only block counting. A component-level contract test locks down that the block container carries `data-role`, the dependency chip precedes the title, the transaction badge is still rendered, and `data-repeat` and the "1 project · 3 transactions" count both appear.
+- Before writing any code, clickable design pages were rendered from the real `dist/index.css` and `TreeNode.svelte` markup, covering 1440 / 980 / 760 / 620px and seven partial states (empty data, fully collapsed, an area with no projects, the Today filter, an over-long title, a missing status, and dark theme). After the implementation, the same pages were used frame by frame to re-check the built output.
+- Build and `package.zip` verification pass; publishing is triggered by pushing the `v5.3.0` tag through GitHub Actions.
+
+### Upgrade notes
+
+- Just reload the plugin after upgrading; no data migration is required and no data file is touched.
+- For a denser tree (top-level projects no longer becoming blocks of their own), delete the two `.xz-tree-node[data-depth="1"][data-role="topProject"]` rules in `src/index.scss`. Indent and header height are controlled by the `--xz-tree-indent` and `--xz-tree-block-head` variables.
+
 ## 5.2.0 - 2026-09-28
 
 Every day gains a **day state**: whether it ran as planned, fell behind, or went entirely sideways. A marked day drops out of the statistics, while **everything already written stays exactly as it is**.

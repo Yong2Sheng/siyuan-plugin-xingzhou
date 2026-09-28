@@ -1,5 +1,7 @@
 import type { WorkItem } from "./work-items";
 import { dependencyCycleIds, prerequisiteIds } from "./dependencies";
+import { executionSlicePlanSummary } from "./execution-slices";
+import { getWorkItemRole } from "./work-item-role";
 
 export type WorkItemIssue = {
     itemId: string;
@@ -139,6 +141,70 @@ export function collectDescendantIds(itemId: string, tree: WorkItemTree): Set<st
     };
     visit(itemId);
     return result;
+}
+
+/** 连续同值的兄弟行要有这么多行才值得淡化：两行相同是常态，三行起才成为一堵墙。 */
+export const REPEAT_SIBLING_MIN = 3;
+
+export type DescendantCounts = { projects: number; transactions: number };
+
+/**
+ * 找出「同一父下连续若干行，切片计划与状态完全一致」的行，供层级浏览把重复的芯片退到背景里。
+ * 今日行给唯一签名：既不参与同值段，也会把前后两段断开，避免把当天真要动手的事淡化掉。
+ */
+export function collectRepeatSiblingIds(tree: WorkItemTree, todayFocusCounts: Map<string, number> = new Map()): Set<string> {
+    const repeats = new Set<string>();
+    const siblingGroups: WorkItem[][] = [tree.roots, ...tree.children.values()];
+
+    for (const siblings of siblingGroups) {
+        let runStart = 0;
+        let runSignature: string | null = null;
+        for (let index = 0; index <= siblings.length; index += 1) {
+            const item = siblings[index];
+            const signature = item ? rowChipSignature(item, todayFocusCounts) : null;
+            if (index < siblings.length && signature === runSignature) continue;
+            if (runSignature !== null && index - runStart >= REPEAT_SIBLING_MIN) {
+                for (let mark = runStart; mark < index; mark += 1) repeats.add(siblings[mark].id);
+            }
+            runStart = index;
+            runSignature = signature;
+        }
+    }
+
+    return repeats;
+}
+
+/** 一行右侧真正显示出来的东西：切片计划 + 状态。 */
+function rowChipSignature(item: WorkItem, todayFocusCounts: Map<string, number>): string {
+    if ((todayFocusCounts.get(item.id) ?? 0) > 0) return `today:${item.id}`;
+    const plan = executionSlicePlanSummary(item);
+    return `${plan?.kind ?? "none"}\u0000${plan?.label ?? ""}\u0000${item.status}`;
+}
+
+/**
+ * 折叠一个节点时告诉用户里面有多少东西：项目数，以及非项目后代（事务／想法等）数。
+ * 判定走 `getWorkItemRole`，与树上徽章的口径保持一致。
+ * 传入 `visibleIds` 时只数当前筛选下可见的后代 —— 否则「今日」筛选里的数字会和展开后看到的对不上。
+ */
+export function countItemDescendants(itemId: string, tree: WorkItemTree, visibleIds?: Set<string>): DescendantCounts {
+    const counts: DescendantCounts = { projects: 0, transactions: 0 };
+    const seen = new Set<string>([itemId]);
+
+    const visit = (id: string) => {
+        for (const child of tree.children.get(id) ?? []) {
+            if (seen.has(child.id)) continue;
+            // 不可见的节点其整棵子树也不可见（可见集包含命中项的全部祖先），直接跳过
+            if (visibleIds && !visibleIds.has(child.id)) continue;
+            seen.add(child.id);
+            const role = getWorkItemRole(child, tree);
+            if (role === "topProject" || role === "subproject") counts.projects += 1;
+            else counts.transactions += 1;
+            visit(child.id);
+        }
+    };
+
+    visit(itemId);
+    return counts;
 }
 
 function hasParentCycle(start: WorkItem, byId: Map<string, WorkItem>): boolean {

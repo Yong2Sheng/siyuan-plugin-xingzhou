@@ -1752,6 +1752,61 @@ describe("XingzhouApp", () => {
             expect(editor()?.value).toBe(value);
         });
     });
+
+    it("层级浏览：块带角色、依赖芯片在标题前、连续同值行标记、收起时给出块内计数", async () => {
+        const now = Date.now();
+        const treeItem = (overrides: Partial<WorkItem>): WorkItem => ({
+            id: "item", rowId: overrides.id ?? "item", title: "工作项", documentId: null, detached: true,
+            type: "项目", status: "进行中", currentAction: "", nextAction: "", parentIds: [], topProjectIds: [],
+            hardPrerequisiteIds: [], softPrerequisiteIds: [], planDate: null, deadline: null, noDeadline: false,
+            durationMinutes: null, energy: "", updatedAt: now,
+            ...overrides,
+        });
+        const domain = treeItem({ id: "domain", title: "理财管理", type: "长期领域", status: "持续维持" });
+        const project = treeItem({ id: "project", title: "资产清单回顾", parentIds: [domain.id] });
+        const rows = ["a", "b", "c"].map((id) => treeItem({
+            id, rowId: id, title: `整理${id}相册`, type: "事务", status: "待开始", parentIds: [project.id],
+        }));
+        rows[0].hardPrerequisiteIds = ["b"];
+
+        component = new XingzhouApp({
+            target: document.body,
+            props: {
+                load: vi.fn().mockResolvedValue({
+                    attributeViewId: "av-id", attributeViewName: "测试数据库", viewId: "all-view",
+                    items: [domain, project, ...rows], missingFields: [], fields: {},
+                }),
+                captureInbox: vi.fn(), saveItem: vi.fn(), deleteItem: vi.fn(), openDocument: vi.fn(),
+            },
+        });
+        await vi.waitFor(() => expect(
+            document.querySelector('.xz-tree-node[data-work-item-id="project"]'),
+            document.body.innerHTML,
+        ).not.toBeNull());
+
+        // 章节块的色条与底色都吃角色变量，容器必须带上 data-role，否则整条声明会失效
+        expect(document.querySelector('.xz-tree-node[data-work-item-id="domain"]')?.getAttribute("data-role")).toBe("domain");
+        expect(document.querySelector('.xz-tree-node[data-work-item-id="project"]')?.getAttribute("data-role")).toBe("topProject");
+
+        // 依赖芯片在标题左侧：右列只剩「今日／切片／状态」三列，才能垂直对齐
+        const main = document.querySelector('.xz-tree-node[data-work-item-id="a"] .xz-tree-main');
+        const slots = [...(main?.children ?? [])].map((element) => element.className);
+        expect(slots.indexOf("xz-dependency-indicator")).toBeGreaterThan(slots.indexOf("xz-role-badge"));
+        expect(slots.indexOf("xz-dependency-indicator")).toBeLessThan(slots.indexOf("xz-tree-title"));
+        // 事务仍是「事务」角色的徽章元素，只是由 CSS 收成一个小色点，语义不丢
+        expect(document.querySelector('.xz-tree-node[data-work-item-id="a"] .xz-role-badge')?.textContent).toBe("事务");
+
+        // 同一父下连续三行同值：标记出来交给 CSS 淡化
+        for (const id of ["a", "b", "c"]) {
+            expect(document.querySelector(`.xz-tree-node[data-work-item-id="${id}"] .xz-tree-row`)?.getAttribute("data-repeat")).toBe("true");
+        }
+
+        // 收起块头时把块内规模说出来，折叠态不是只剩一行标题
+        (document.querySelector('.xz-tree-node[data-work-item-id="domain"] .xz-tree-toggle') as HTMLButtonElement).click();
+        await tick();
+        expect(document.querySelector('.xz-tree-node[data-work-item-id="domain"] .xz-count-chip')?.textContent)
+            .toBe("1 项目 · 3 事务");
+    });
 });
 
 /**

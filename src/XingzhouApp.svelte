@@ -119,7 +119,7 @@
     import { log } from "./log";
     import { getTodayFocusCounts, isTodayFocusItem } from "./today-focus";
     import TreeNode from "./TreeNode.svelte";
-    import { buildWorkItemTree, collectDescendantIds, compareWorkItemOrder, hasActiveDescendant, hasOngoingDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
+    import { buildWorkItemTree, collectDescendantIds, collectRepeatSiblingIds, compareWorkItemOrder, hasActiveDescendant, hasOngoingDescendant, isActive, isClosed, type WorkItemTree } from "./tree";
     import { dayLoadValue } from "./execution-slices";
     import { groupWeekOccurrences, isWeekOccurrenceCompact, weekDayLoads, weekOccurrenceLabel } from "./week-schedule";
     import { deriveTopProjectId, getWorkItemProfile, needsDeadlineDecision, WORK_ITEM_ROLE_LEGEND } from "./work-item-role";
@@ -391,6 +391,8 @@
     $: currentActionImageTotal = buildActionImageTotal(detailDraft.currentAction, actionImageUploads.currentAction);
     $: nextActionImageTotal = buildActionImageTotal(detailDraft.nextAction, actionImageUploads.nextAction);
     $: todayFocusCounts = getTodayFocusCounts(data?.items ?? [], tree);
+    // 同一父下连续同值的行：芯片退到背景里，重复的「未设切片／待开始」不再连成一堵墙
+    $: repeatIds = collectRepeatSiblingIds(tree, todayFocusCounts);
     // 数据换一轮（含跨午夜刷新）就推进今日锚点，使筛选与标记使用同一个「今天」
     $: { data; todayNow = Date.now(); }
     $: todayFocusCount = (data?.items ?? []).filter((item) => isTodayFocusItem(item, localDateKey(todayNow))).length;
@@ -3509,6 +3511,7 @@
                                 {expandedIds}
                                 {visibleIds}
                                 {todayFocusCounts}
+                                {repeatIds}
                                 {pinnedFocusId}
                                 {draggingId}
                                 reorderDisabled={reordering}
