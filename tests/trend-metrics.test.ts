@@ -11,6 +11,7 @@ import { createEmptyNutritionStore, type NutritionStore } from "../src/nutrition
 import {
     buildTrendChart,
     convertWeight,
+    isWithinSprintRange,
     lightsOffAdherenceSummary,
     trendDayIndex,
     trendGranularityFor,
@@ -477,5 +478,42 @@ describe("趋势指标：「混乱 / 失控」日整体退出统计", () => {
         const chart = buildTrendChart("energy", context(days.map((date, index) => record(date, { daytimeEnergy: index + 2 }))));
         expect(chart.series[0].points.map((point) => point.y)).toEqual([2, 3, 4]);
         expect(chart.coverage).toContain("3/3 天");
+    });
+});
+
+describe("紧急期区间退出统计", () => {
+    it("日期落在紧急期区间里就退出折线，即使那天没有被标记过", () => {
+        const days = [
+            record("2026-09-14", { daytimeEnergy: 4 }),
+            record("2026-09-15", { daytimeEnergy: 2 }),
+            record("2026-09-16", { daytimeEnergy: 3 }),
+        ];
+        const base = context(days, { range: "all" }, null, "2026-09-18");
+        const withoutSprint = buildTrendChart("energy", base);
+        const withSprint = buildTrendChart("energy", {
+            ...base,
+            sprintRanges: [{ startDate: "2026-09-15", endDate: "2026-09-15" }],
+        });
+        expect(withoutSprint.pointCount).toBe(3);
+        // 9/15 被摘掉：可见点数少一个，覆盖度跟着变
+        expect(withSprint.pointCount).toBe(2);
+        expect(withSprint.coverage).not.toBe(withoutSprint.coverage);
+    });
+
+    it("紧急期内的夜晚不进「计划达成」分母", () => {
+        const plan = record("2026-09-14", { bedtimePreparation: "yes", plannedLightsOffDay: "same-day", plannedLightsOffTime: "23:00" });
+        const night = record("2026-09-15", { lightsOffTime: "22:55", wakeTime: "07:00" });
+        const records = storeOf(plan, night).records;
+        expect(lightsOffAdherenceSummary(records)).toEqual({ planned: 1, met: 1 });
+        expect(lightsOffAdherenceSummary(records, [{ startDate: "2026-09-15", endDate: "2026-09-15" }])).toEqual({ planned: 0, met: 0 });
+    });
+
+    it("解析出的区间口径只认首尾（含边界日）", () => {
+        const ranges = [{ startDate: "2026-09-14", endDate: "2026-09-16" }];
+        expect(isWithinSprintRange("2026-09-13", ranges)).toBe(false);
+        expect(isWithinSprintRange("2026-09-14", ranges)).toBe(true);
+        expect(isWithinSprintRange("2026-09-16", ranges)).toBe(true);
+        expect(isWithinSprintRange("2026-09-17", ranges)).toBe(false);
+        expect(isWithinSprintRange("2026-09-15", [])).toBe(false);
     });
 });

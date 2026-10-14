@@ -11,6 +11,7 @@
         type TrendChartData,
         type TrendViewSettings,
     } from "./trend-metrics";
+    import type { PhaseStore } from "./phases";
     import {
         cloneTrendViewState,
         defaultTrendViewState,
@@ -24,6 +25,8 @@
     } from "./trend-view";
 
     export let records: DailyRecord[] = [];
+    /** 阶段数据：只用来把紧急期区间从统计里摘掉（见 trend-metrics 的 excludedTrendDates）。 */
+    export let phases: PhaseStore | null = null;
     export let loadNutrition: () => Promise<NutritionStore> = async () => createEmptyNutritionStore();
     export let loadSettings: () => Promise<TrendViewSettings | null> = async () => null;
     export let saveSettings: (state: TrendViewSettings) => Promise<void> = async () => undefined;
@@ -61,11 +64,14 @@
     });
 
     $: todayIndex = trendDayIndex(today);
+    /** 紧急期区间由阶段数据提供：那段时间整体退出折线与达成率，避免混进基线。 */
+    $: sprintRanges = (phases?.sprints ?? []).map((phase) => ({ startDate: phase.startDate, endDate: phase.endDate }));
     $: charts = loading || error ? [] : settings.metricIds.map((id) => buildTrendChart(id, {
         records,
         nutrition,
         settings,
         today: Number.isNaN(todayIndex) ? trendDayIndex(localDateKey()) : todayIndex,
+        sprintRanges,
     }));
     $: dayTypePreset = trendDayTypePreset(settings);
     $: showWeightUnit = settings.metricIds.includes("weight");

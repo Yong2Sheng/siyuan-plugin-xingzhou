@@ -45,6 +45,9 @@
     import { buildWorkItemTree, flattenWorkItemTree } from "./tree";
     import type { WorkItem, WorkItemChanges, WorkItemData } from "./work-items";
     import { createDefaultChecklistStore, updateChecklistDayState, type ChecklistStore } from "./checklist";
+    import { DEFAULT_SPRINT_ANCHORS, activeLanding, activeSprint, createEmptyPhaseStore, currentRung, landingOffersGroup, startSprint, type PhaseAnchorId, type PhaseStore } from "./phases";
+    import PhasePanel from "./PhasePanel.svelte";
+    import { portal } from "./portal";
     import { boundaryAttention, boundaryTemplateId } from "./checklist-boundary";
     import {
         calculateDailyCompletion,
@@ -61,6 +64,8 @@
     export let checklistEnabled = true;
     export let loadChecklist: () => Promise<ChecklistStore> = async () => createDefaultChecklistStore();
     export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore> = async (store) => store;
+    export let loadPhases: () => Promise<PhaseStore> = async () => createEmptyPhaseStore();
+    export let savePhases: (store: PhaseStore) => Promise<PhaseStore> = async (store) => store;
     export let loadNutrition: () => Promise<NutritionStore> = async () => createEmptyNutritionStore();
     export let saveNutrition: (store: NutritionStore) => Promise<NutritionStore> = async (store) => store;
     export let loadTrendView: () => Promise<TrendViewSettings | null> = async () => null;
@@ -126,6 +131,12 @@
      * 边界提醒：checklist 数据由本组件统一持有（面板与 Checklist 视图共用同一份），
      * 避免两个视图各持一份快照、互相用旧数据覆盖。
      */
+    let phaseStore: PhaseStore = createEmptyPhaseStore();
+    let phaseLoading = true;
+    let phaseError = "";
+    let sprintDialogOpen = false;
+    /** 进入紧急期：默认一周，可改日期；只问三件事，目标在进入后仍不可改。 */
+    let sprintDraft = { title: "", startDate: "", endDate: "" };
     let checklistStore: ChecklistStore = createDefaultChecklistStore();
     let checklistLoaded = false;
     let checklistSaving = false;
@@ -190,10 +201,70 @@
      * 被标记为「混乱 / 失控」的日子：退出统计（趋势、达成率、覆盖度），当天也不再催填。
      * 「整天空白」是另一个概念——没有任何输入、状态仍是正常，因此照常显示表单。
      */
+    /**
+     * 今天是否处在紧急期内。紧急期状态来自 phases.json（一段时间），不是某一天的属性；
+     * 它与「混乱 / 失控」并列而不是替代：三者在统计上同样退出折线，但紧急期能回看到锚点数据。
+     */
+    /*
+     * "今天是否处在紧急期"只认 `activeSprint` 这一个实现（已结束的一律不算）。
+     * 这里曾经自己写了一遍"只比日期"的判断，结果是：结束紧急期后 `endedAt` 已经写进去了，
+     * 界面却因为日期仍落在区间内而继续判定为紧急期——整张表单不渲染，页面一片空白（真实事故）。
+     * 不要在界面里复制领域规则。
+     */
+    $: sprintPhase = activeSprint(phaseStore, currentDate);
+    $: inSprint = sprintPhase !== null;
+    /**
+     * 紧急期内的记录状态统一按 `sprint` 处理：它跟「混乱 / 失控」一样退出折线与达成率，
+     * 但保留锚点数据，事后能分辨那段时间是「声明的减载」而不是「没跟上」。
+     * 这里只改内存里的草稿状态，避免每次打开页面都触发一次写入。
+     */
+    /*
+     * 紧急期内的记录统一按 `sprint` 落库：这是"这一天属于声明的减载期"的标记，
+     * 与用户是否填了锚点无关，因此由系统写入，不需要任何点击。
+     */
+    $: if (inSprint && draft.dayState !== "sprint") {
+        draft = { ...draft, dayState: "sprint" };
+        if (currentDate === localDateKey()) markDirty();
+    }
+    /**
+     * 诊断：这一天的记录被标成紧急期，但阶段数据里已经没有覆盖它的区间。
+     * 可能来自"两个窗口同时打开时旧快照覆盖"这类丢失事故。
+     * 这里必须给一个明确的出口——否则界面只剩记录里那两个字，用户找不到横幅、也找不到「结束紧急期」。
+     */
+    $: orphanSprintDay = draft.dayState === "sprint" && !sprintPhase;
+    /**
+     * 归航期当前级数（不在归航期时为 null）。
+     * 归航按阶梯逐级放开字段：第 1 级只放开"交付结果"，第 7 级走完才恢复完整表单。
+     * 理由见 phases.ts 的 landingFieldGroups 注释（用户原话：打乱之后会更倾向于乱掉的节律）。
+     */
+    $: landingPhase = activeLanding(phaseStore);
+    $: landingRungIndex = landingPhase && landingPhase.endedAt === null ? currentRung(landingPhase)?.index ?? null : null;
+    /*
+     * 当天实际级数（面板按"这一天已记录的那一级"算出来后回传）。
+     * 字段显隐必须用它：用光标会让"今天点完做完了"当天就出现下一级的字段。
+     */
+    let todayRungIndex: number | null = null;
+    /** 面板回传的"当天实际级数"：模板里不能写 TS 类型标注，所以收在脚本里。 */
+    function handleRungChange(index: number | null) {
+        todayRungIndex = index;
+    }
+    $: inLanding = landingRungIndex !== null;
+    /** 显示用的级号（1 起）；不在归航期时为 0。 */
+    $: landingRungLabel = landingRungIndex === null ? 0 : landingRungIndex + 1;
+    /** 归航第 2 级：只显示"今日起床"这一个输入（它平时嵌在"睡眠与身体"整块里）。 */
+    $: showWakeOnly = inLanding && landingOffersGroup(todayRungIndex ?? landingRungIndex ?? 0, "wake") && !stageOpen("sleep");
+    /*
+     * 归航期内、但级数还没算出来（数据刚加载完的那一瞬间）时，一律先视为"不开放"。
+     * 否则会先按"不在归航期"渲染出全部阶段，再跳成归航的少量阶段——看起来像闪一下全量表，
+     * 也会让"第 1 级不该有阶段导航"这类断言不稳定（实际遇到过）。
+     */
+    $: stageOpen = (target: string) =>
+        inLandingPending ? false : landingStageOpen(todayRungIndex ?? landingRungIndex, target);
+    /** 已经在归航期（有未结束的归航），但当前级数尚未确定。 */
+    $: inLandingPending = landingPhase !== null && landingPhase.endedAt === null && landingRungIndex === null;
     $: recordExcluded = isDailyRecordExcluded(draft);
     $: dayStateLabel = dailyDayStateLabel(draft.dayState);
     $: dayStateGuidance = dayStates.find((entry) => entry.value === draft.dayState)?.guidance ?? "";
-    $: recordEmpty = !recordExcluded && !recordHasContent(draft);
     /*
      * 边界提醒只依赖这两个字段，因此在数据源变化时只换这两个引用：
      * 模板（含边界时间）来自 templates，勾选状态来自当天 dayStates。
@@ -213,6 +284,7 @@
 
     Promise.resolve().then(() => void refresh());
     Promise.resolve().then(() => void loadChecklistState());
+    Promise.resolve().then(() => void loadPhaseState());
     Promise.resolve().then(() => scheduleBoundaryTick());
 
     onDestroy(() => {
@@ -221,6 +293,54 @@
         if (lightsOffFlashTimer !== null) clearTimeout(lightsOffFlashTimer);
         if (dirty) void saveNow();
     });
+
+    async function loadPhaseState() {
+        try {
+            phaseStore = await loadPhases();
+            phaseError = "";
+        } catch (caught) {
+            phaseError = caught instanceof Error ? caught.message : String(caught);
+        } finally {
+            phaseLoading = false;
+        }
+    }
+
+    /** 阶段数据的保存与生活节律共用同一条串行队列（插件侧已串行化）。 */
+    /** 打开「进入紧急期」：默认今天开始、一周后结束，可改。 */
+    function openSprintDialog() {
+        sprintDraft = { title: "", startDate: currentDate, endDate: shiftKey(currentDate, 7) };
+        sprintDialogOpen = true;
+    }
+
+    function shiftKey(date: string, days: number): string {
+        const parsed = new Date(`${date}T12:00:00`);
+        parsed.setDate(parsed.getDate() + days);
+        return localDateKey(parsed);
+    }
+
+    async function confirmStartSprint() {
+        const input = { ...sprintDraft };
+        try {
+            phaseStore = await persistPhaseStore(startSprint(phaseStore, {
+                title: input.title,
+                startDate: input.startDate,
+                endDate: input.endDate,
+            }));
+            sprintDialogOpen = false;
+            // 紧急期内的记录按 sprint 落库：只影响统计口径，不动任何已填字段。
+            draft = { ...draft, dayState: "sprint" };
+            markDirty();
+        } catch (caught) {
+            phaseError = caught instanceof Error ? caught.message : String(caught);
+        }
+    }
+
+    async function persistPhaseStore(next: PhaseStore): Promise<PhaseStore> {
+        const saved = await savePhases(next);
+        phaseStore = saved;
+        phaseError = "";
+        return saved;
+    }
 
     async function loadChecklistState() {
         try {
@@ -394,7 +514,42 @@
         "weightUnit", "lightsOffAt", "wakeAt", "watchSleepOnsetAt", "sleepLatencyMinutes", "plannedLightsOffAt",
     ]);
 
+    /**
+     * 这一阶段在归航的第几级之后开放：
+     * 2 级起床 → 3 级睡眠与身体 → 4 级工作边界 → 5 级下班后 → 7 级完整恢复。
+     * 不在归航期时一律开放（返回 true）。
+     */
+    function landingStageOpen(rungIndex: number | null, target: string): boolean {
+        if (rungIndex === null) return true;
+        switch (target) {
+            case "morning":
+                // 第 2 级（index 1）就是"起床时间回来"：早晨这一组必须在这一级开放，
+                // 否则界面只会多出一句级名、看不到任何输入框（真实反馈）。
+                return rungIndex >= 1;
+            case "sleep":
+                // "睡眠与身体"整块自归航第 3 级开放；第 2 级只显示"今日起床"这一个输入
+                return rungIndex >= 2;
+            case "morningWork":
+                return rungIndex >= 3;
+            case "learning":
+                return rungIndex >= 6;
+            case "boundary":
+                return rungIndex >= 3;
+            case "afterWork":
+                return rungIndex >= 4;
+            case "evening":
+                return rungIndex >= 6;
+            default:
+                return true;
+        }
+    }
+
     function recordHasContent(record: DailyRecord): boolean {
+        /*
+         * 紧急期的确认（以及混乱／失控的标记）首先算一次输入：
+         * 否则"只点了确认、什么都没填"的那天会卡在必填闸门后面，永远存不下去。
+         */
+        if (record.dayState !== "normal") return true;
         return Object.entries(record.fields).some(([key, value]) => {
             if (FIELD_NOT_USER_INPUT.has(key as keyof DailyRecordFields)) return false;
             if (typeof value === "number") return Number.isFinite(value);
@@ -840,7 +995,7 @@
     }
 </script>
 
-<section class="xz-daily-module" on:input={markDailyDirty} on:change={markDailyDirty}>
+<section class="xz-daily-module" data-in-sprint={inSprint} data-sprint-range={sprintPhase ? `${sprintPhase.startDate}~${sprintPhase.endDate}` : ""} on:input={markDailyDirty} on:change={markDailyDirty}>
     <div class="xz-daily-toolbar">
         <div class="xz-daily-date-nav">
             <button type="button" aria-label="前一天" on:click={() => void shiftDate(-1)}>‹</button>
@@ -891,11 +1046,29 @@
             </div>
             <div class="xz-daily-context__row">
                 <p class="xz-daily-context__hint">{dayGuidance} 日期类型可以覆盖每周默认。</p>
-                <span class="xz-day-state__note"><i>i</i>{dayStateGuidance}</span>
+                {#if !inSprint}
+                    <span class="xz-daily-context__slot">
+                        <button class="xz-phase-action" type="button" disabled={phaseLoading} on:click={openSprintDialog}>进入紧急期…</button>
+                    </span>
+                {/if}
+                <span class="xz-day-state__note"><i>i</i>{inSprint ? "紧急期：只记四条锚点，其余字段不补也不催。" : dayStateGuidance}</span>
             </div>
         </div>
 
-        {#if recordExcluded}
+        {#if orphanSprintDay}
+            <div class="xz-phase-recover">
+                <div>
+                    <strong>这一天被标为紧急期，但阶段数据里没有对应的区间</strong>
+                    <p>常见原因是两个窗口同时打开行舟、旧的那个把阶段数据覆盖了。可以现在补一次声明把它接回来；不想补的话，把状态改回「正常」也可以。</p>
+                </div>
+                <div class="xz-phase-recover__actions">
+                    <button class="xz-phase-action xz-phase-action--primary" type="button" on:click={openSprintDialog}>重新声明紧急期…</button>
+                    <button class="xz-phase-action" type="button" on:click={() => changeDayState("normal")}>改回正常</button>
+                </div>
+            </div>
+        {/if}
+
+        {#if recordExcluded && !inSprint && !orphanSprintDay}
             <div class="xz-day-state-banner" data-state={draft.dayState}>
                 <div class="xz-day-state-banner__main">
                     <strong>已标记「{dayStateLabel}」</strong>
@@ -907,6 +1080,52 @@
             </div>
         {/if}
 
+        {#if phaseError}
+            <div class="xz-notice xz-notice--warning">阶段数据：{phaseError}</div>
+        {/if}
+
+        <PhasePanel
+            store={phaseStore}
+            savePhaseStore={persistPhaseStore}
+            {currentDate}
+            isToday={currentDate === localDateKey()}
+            record={draft}
+            patchFields={(changes) => { draft = { ...draft, fields: { ...draft.fields, ...changes } }; markDirty(); }}
+            {loadWorkItems}
+            openWorkItem={(id) => openWorkItem(id)}
+            onRungChange={handleRungChange}
+            on:storeChanged={(event) => { phaseStore = event.detail; }}
+            on:openTrends={() => void changeView("trends")}
+        />
+
+        <!--
+            归航第 2 级只放"起床"这一件事：它原本嵌在"睡眠与身体"整块里（那一块到第 3 级才开放），
+            只解锁分组而不放出字段的话，第 2 级界面上不会多出任何东西，
+            而级名写着"起床时间回来"，就必须真的能看到起床输入框。
+        -->
+        {#if showWakeOnly}
+            <!-- data-wake-only 用于核对它是否真的渲染 -->
+            <section class="xz-daily-form-section" data-wake-only="1">
+                <h3>今日起床</h3>
+                <div class="xz-daily-fields two">
+                    <div class="xz-daily-field xz-sleep-wake">
+                        <span class="xz-daily-label-with-note">今日起床</span>
+                        <TimeSelect bind:value={draft.fields.wakeTime} ariaLabel="今日起床" />
+                    </div>
+                </div>
+            </section>
+        {/if}
+
+
+
+        <!--
+            这里只能判断"是否在紧急期"：它包住的是"整张记录表单 + 阶段导航"。
+            之前写成 `!inSprint && !inLanding`，结果归航期内整张表单都不渲染，
+            只剩横幅，点什么都没变化（真实事故）。
+            归航期要隐藏的只有五阶段进度条，它单独用 !inLanding 控制。
+        -->
+        {#if !inSprint}
+        {#if !inLanding}
         <div class="xz-daily-progress" class:holiday={!workApplicable}>
             <div><i>1</i><span><strong>早晨记录</strong><small>{isSaturdayReset ? "睡眠、身体与训练" : isConferenceDay ? "睡眠、身体与会议安排" : "睡眠、身体与科研安排"}</small></span></div>
             {#if workApplicable}
@@ -918,6 +1137,7 @@
             {/if}
             <div><i>{workApplicable ? "5" : "3"}</i><span><strong>21:00 复盘</strong><small>生活结果与明日承接</small></span></div>
         </div>
+        {/if}
 
         {#if checklistEnabled && checklistLoaded && boundaryAttentionState && boundaryAttentionState.totalCount}
             <DailyBoundaryPanel
@@ -930,7 +1150,7 @@
             />
         {/if}
 
-        <div class="xz-daily-layout">
+        <div class="xz-daily-layout" data-form-block="1" data-form-visible={!inSprint && !inLanding} data-form-sprint={inSprint} data-form-landing={inLanding}>
             <article class="xz-daily-record">
                 <header class="xz-daily-record-header">
                     <div><h2>{formatDate(currentDate)}</h2><p>{dayTypeLabel(draft.dayType)}{#if recordExcluded}<em class="xz-day-state-chip" data-state={draft.dayState}>{dayStateLabel.replace("的一天", "")}</em>{/if} · {store?.records.some((record) => record.date === currentDate) ? "已有记录" : "尚未保存"}</p></div>
@@ -940,16 +1160,20 @@
                             {#if recordExcluded}
                                 <span>完成 <strong>—</strong><em>本日不统计</em></span>
                             {:else}
-                                <span>完成 <strong>{completion.completedCount}/{completion.applicableCount}</strong>{#if completion.missing.length}<em>待补 {completion.missing.length} 项</em>{:else}<em class="complete">已补齐</em>{/if}</span>
-                                <button type="button" class:active={missingOpen} on:click={() => missingOpen = !missingOpen}>{missingOpen ? "收起待补" : "检查待补"}</button>
+                                {#if inLanding}
+                                    <span>归航第 <strong>{landingRungLabel}</strong> 级 · 只显示这一级要填的内容</span>
+                                {:else}
+                                    <span>完成 <strong>{completion.completedCount}/{completion.applicableCount}</strong>{#if completion.missing.length}<em>待补 {completion.missing.length} 项</em>{:else}<em class="complete">已补齐</em>{/if}</span>
+                                    <button type="button" class:active={missingOpen} on:click={() => missingOpen = !missingOpen}>{missingOpen ? "收起待补" : "检查待补"}</button>
+                                {/if}
                             {/if}
                         </div>
-                        <nav class="xz-daily-stage-nav" aria-label="填写阶段">
-                            <button class={`completion-${morningCompletion.state}`} class:active={stage === "morning"} data-completion={morningCompletion.badge} aria-label={`早晨，${morningCompletion.statusLabel}`} title={morningCompletion.statusLabel} type="button" on:click={() => void changeStage("morning")}>早晨</button>
-                            {#if workApplicable}<button class={`completion-${learningCompletion.state}`} class:active={stage === "learning"} data-completion={learningCompletion.badge} aria-label={`${isSaturdayReset ? "上午复盘" : "午饭后"}，${learningCompletion.statusLabel}`} title={learningCompletion.statusLabel} type="button" on:click={() => void changeStage("learning")}>{isSaturdayReset ? "上午复盘" : "午饭后"}</button><button class={`completion-${boundaryCompletion.state}`} class:active={stage === "boundary"} data-completion={boundaryCompletion.badge} aria-label={`${isSaturdayReset ? "中午下班" : isConferenceDay ? "会议结束" : "下班"}，${boundaryCompletion.statusLabel}`} title={boundaryCompletion.statusLabel} type="button" on:click={() => void changeStage("boundary")}>{isSaturdayReset ? "中午下班" : isConferenceDay ? "会议结束" : "下班"}</button><button class={`completion-${afterWorkCompletion.state}`} class:active={stage === "after-work"} data-completion={afterWorkCompletion.badge} aria-label={`${isSaturdayReset ? "自由时间" : isConferenceDay ? "会后" : "下班后"}，${afterWorkCompletion.statusLabel}`} title={afterWorkCompletion.statusLabel} type="button" on:click={() => void changeStage("after-work")}>{isSaturdayReset ? "自由时间" : isConferenceDay ? "会后" : "下班后"}</button>{:else}<button class={`completion-${recoveryCompletion.state}`} class:active={stage === "recovery"} data-completion={recoveryCompletion.badge} aria-label={`恢复，${recoveryCompletion.statusLabel}`} title={recoveryCompletion.statusLabel} type="button" on:click={() => void changeStage("recovery")}>恢复</button>{/if}
-                            <button class={`completion-${eveningCompletion.state}`} class:active={stage === "evening"} data-completion={eveningCompletion.badge} aria-label={`21:00，${eveningCompletion.statusLabel}`} title={eveningCompletion.statusLabel} type="button" on:click={() => void changeStage("evening")}>21:00</button>
+                        {#if !inLanding}<nav class="xz-daily-stage-nav" aria-label="填写阶段">
+                            {#if stageOpen("morning")}<button class={`completion-${morningCompletion.state}`} class:active={stage === "morning"} data-completion={morningCompletion.badge} aria-label={`早晨，${morningCompletion.statusLabel}`} title={morningCompletion.statusLabel} type="button" on:click={() => void changeStage("morning")}>早晨</button>{/if}
+                            {#if workApplicable}{#if stageOpen("learning")}<button class={`completion-${learningCompletion.state}`} class:active={stage === "learning"} data-completion={learningCompletion.badge} aria-label={`${isSaturdayReset ? "上午复盘" : "午饭后"}，${learningCompletion.statusLabel}`} title={learningCompletion.statusLabel} type="button" on:click={() => void changeStage("learning")}>{isSaturdayReset ? "上午复盘" : "午饭后"}</button>{/if}{#if stageOpen("boundary")}<button class={`completion-${boundaryCompletion.state}`} class:active={stage === "boundary"} data-completion={boundaryCompletion.badge} aria-label={`${isSaturdayReset ? "中午下班" : isConferenceDay ? "会议结束" : "下班"}，${boundaryCompletion.statusLabel}`} title={boundaryCompletion.statusLabel} type="button" on:click={() => void changeStage("boundary")}>{isSaturdayReset ? "中午下班" : isConferenceDay ? "会议结束" : "下班"}</button>{/if}{#if stageOpen("afterWork")}<button class={`completion-${afterWorkCompletion.state}`} class:active={stage === "after-work"} data-completion={afterWorkCompletion.badge} aria-label={`${isSaturdayReset ? "自由时间" : isConferenceDay ? "会后" : "下班后"}，${afterWorkCompletion.statusLabel}`} title={afterWorkCompletion.statusLabel} type="button" on:click={() => void changeStage("after-work")}>{isSaturdayReset ? "自由时间" : isConferenceDay ? "会后" : "下班后"}</button>{/if}{:else}<button class={`completion-${recoveryCompletion.state}`} class:active={stage === "recovery"} data-completion={recoveryCompletion.badge} aria-label={`恢复，${recoveryCompletion.statusLabel}`} title={recoveryCompletion.statusLabel} type="button" on:click={() => void changeStage("recovery")}>恢复</button>{/if}
+                            {#if stageOpen("evening")}<button class={`completion-${eveningCompletion.state}`} class:active={stage === "evening"} data-completion={eveningCompletion.badge} aria-label={`21:00，${eveningCompletion.statusLabel}`} title={eveningCompletion.statusLabel} type="button" on:click={() => void changeStage("evening")}>21:00</button>{/if}
                             <button class:active={stage === "all"} type="button" on:click={() => void changeStage("all")}>全部</button>
-                        </nav>
+                        </nav>{/if}
                     </div>
                 </header>
 
@@ -964,23 +1188,13 @@
                     </section>
                 {/if}
 
-                {#if recordEmpty}
-                    <!--
-                        整天空白的那天：先给出「标记」这条最省力的出口，再给补记。
-                        标记不要求先填任何字段，标完就从趋势与达成率里整体排除。
-                    -->
-                    <div class="xz-day-state-empty">
-                        <h3>这一天还没有任何记录</h3>
-                        <p>可以现在补记几项；如果这天本来就是没跟上、或者状态不对，直接把它标记掉就好——标记不要求先填任何东西，标完这一天就从趋势与达成率里整体排除。</p>
-                        <div class="xz-day-state-empty__actions">
-                            <button type="button" on:click|stopPropagation={() => changeDayState("chaotic")}>标记「混乱的一天」</button>
-                            <button type="button" on:click|stopPropagation={() => changeDayState("uncontrolled")}>标记「失控的一天」</button>
-                            <button type="button" on:click={() => void changeStage("all")}>开始补记</button>
-                        </div>
-                    </div>
-                {/if}
 
-                {#if stage === "morning" || stage === "all"}
+                <!--
+                    睡眠与身体整块归 stageOpen("sleep") 管：归航第 2 级只放"今日起床"那一个输入，
+                    第 3 级起才把这一整块（体重、手表睡眠、主观质量…）放回来。
+                    之前这里误用 stageOpen("morning")，导致第 2 级整块出现、"逐级回来"失效。
+                -->
+                {#if (stage === "morning" || stage === "all") && stageOpen("sleep")}
                     <section class="xz-daily-form-section">
                         <h3>睡眠与身体</h3>
                         <div class="xz-daily-fields xz-sleep">
@@ -1086,7 +1300,7 @@
                     </section>
                 {/if}
 
-                {#if stage === "morning" || stage === "all"}
+                {#if (stage === "morning" || stage === "all") && stageOpen("morningWork")}
                     <section class="xz-daily-form-section">
                         <h3>今日安排</h3>
                         {#if yesterdayFirstAction}
@@ -1118,7 +1332,7 @@
                     </section>
                 {/if}
 
-                {#if workApplicable && (stage === "learning" || stage === "all")}
+                {#if workApplicable && (stage === "learning" || stage === "all") && stageOpen("learning")}
                     <section class="xz-daily-form-section">
                         {#if isSaturdayReset}
                             <h3>上午轻量复盘</h3>
@@ -1154,7 +1368,7 @@
                     </section>
                 {/if}
 
-                {#if workApplicable && (stage === "boundary" || stage === "all")}
+                {#if workApplicable && (stage === "boundary" || stage === "all") && stageOpen("boundary")}
                     {#if isSaturdayReset && draft.fields.saturdayReviewOccurred !== "yes"}
                         <section class="xz-daily-form-section">
                             <h3>中午工作边界</h3>
@@ -1183,7 +1397,7 @@
                     {/if}
                 {/if}
 
-                {#if workApplicable && (stage === "after-work" || stage === "all")}
+                {#if workApplicable && (stage === "after-work" || stage === "all") && stageOpen("afterWork")}
                     {#if !isSaturdayReset}<section class="xz-daily-form-section">
                         <h3>{isConferenceDay ? "会议结束后工作闭环（按需）" : "下班后工作闭环（按需）"}</h3>
                         <div class="xz-daily-fields two">
@@ -1290,7 +1504,7 @@
                     </section>
                 {/if}
 
-                {#if stage === "evening" || stage === "all"}
+                {#if (stage === "evening" || stage === "all") && stageOpen("evening")}
                     <section class="xz-daily-form-section">
                         <h3>21:00 简要复盘</h3>
                         <div class="xz-daily-fields two">
@@ -1377,6 +1591,54 @@
                 <p class="xz-daily-rubric-note">规则随当前评分字段切换，填写时不必再打开评估表文档。</p>
             </aside>
         </div>
+        {/if}
+        {#if sprintDialogOpen}
+            <div class="xz-dialog-backdrop" use:portal role="presentation" on:click|self={() => (sprintDialogOpen = false)}>
+            <div class="xz-phase-dialog" role="dialog" aria-modal="true" aria-labelledby="xz-sprint-dialog-title">
+                <header><strong id="xz-sprint-dialog-title">进入紧急期</strong><small>Esc 取消</small></header>
+                <div class="xz-phase-dialog__body">
+                    <div class="xz-phase-field">
+                        <label class="xz-phase-field__label"><b>是什么事</b>（只给自己看，可留空）<input class="xz-phase-input" placeholder="例如：proposal 起草" bind:value={sprintDraft.title} /></label>
+                    </div>
+                    <div class="xz-phase-field">
+                        <span class="xz-phase-field__label"><b>到哪天为止</b>（必填，可以有结束日）</span>
+                        <!--
+                            快捷按钮必须能看出"我点的是哪一个"：原来点完只有日历数字变、按钮毫无反馈，
+                            用户会以为没点上（真实反馈）。这里按"当前结束日是否等于该档位"高亮，
+                            手动改日期时高亮自动消失。
+                        -->
+                        <div class="xz-phase-quick">
+                            {#each [{ label: "3 天后", days: 3 }, { label: "一周后", days: 7 }, { label: "两周后", days: 14 }] as preset}
+                                <button
+                                    class="xz-phase-action"
+                                    class:is-on={sprintDraft.endDate === shiftKey(sprintDraft.startDate, preset.days)}
+                                    type="button"
+                                    aria-pressed={sprintDraft.endDate === shiftKey(sprintDraft.startDate, preset.days)}
+                                    on:click={() => (sprintDraft.endDate = shiftKey(sprintDraft.startDate, preset.days))}
+                                >{preset.label}</button>
+                            {/each}
+                            <input class="xz-phase-input" style="max-width:168px" type="date" aria-label="结束日期" bind:value={sprintDraft.endDate} />
+                        </div>
+                    </div>
+                    <div class="xz-phase-field">
+                        <span class="xz-phase-field__label"><b>这段时间保护哪几条锚点</b>（默认四条；熄灯不可去掉）</span>
+                        {#each DEFAULT_SPRINT_ANCHORS as anchor}
+                            <div class="xz-phase-checkline">{anchor.label}{anchor.id === "lightsOff" ? "（必选）" : ""}</div>
+                        {/each}
+                    </div>
+                    <p class="xz-phase-core__lead" style="margin:0">进入后：其他字段全部收起，不再出现待补数量，也不会有任何催促。紧急期只在两种情况结束——<b>你按「结束」</b>，或者到了上面这个日期时问你一句「延长到哪天 / 结束」。</p>
+                    {#if phaseError}<p class="xz-phase-error">{phaseError}</p>{/if}
+                </div>
+                <footer>
+                    <p>不会改动已经写下的任何内容。目标在紧急期内不可改，只有结束日能改。</p>
+                    <div>
+                        <button class="xz-phase-action" type="button" on:click={() => (sprintDialogOpen = false)}>取消</button>
+                        <button class="xz-phase-action xz-phase-action--primary" type="button" on:click={() => void confirmStartSprint()}>进入紧急期</button>
+                    </div>
+                </footer>
+            </div>
+            </div>
+        {/if}
     {:else if view === "checklist"}
         <DailyChecklist
             date={currentDate}
@@ -1388,11 +1650,12 @@
     {:else if view === "history"}
         <section class="xz-daily-list-view">
             <header><div><span class="xz-section-kicker">插件内部数据库</span><h2>历史数据</h2></div><span>{store?.records.length ?? 0} 天</span></header>
-            {#if !store?.records.length}<div class="xz-daily-empty"><h3>还没有每日记录</h3><p>从 9 月 3 日开始手动录入即可；这里不会迁移旧文档数据。</p></div>{:else}{#each [...store.records].reverse() as record (record.date)}<button class="xz-daily-history-row" type="button" on:click={() => void openHistoryRecord(record.date)}><strong>{record.date}</strong><span>{dayTypeLabel(record.dayType)}{#if isDailyRecordExcluded(record)}<em class="xz-day-state-chip" data-state={record.dayState}>{dailyDayStateLabel(record.dayState).replace("的一天", "")}</em>{/if}</span><span>睡眠 {record.fields.sleepDurationMinutes === null ? "—" : `${Math.floor(record.fields.sleepDurationMinutes / 60)} 小时 ${record.fields.sleepDurationMinutes % 60} 分`}{#if record.fields.lightsOffBand === "after-midnight"}<em class="xz-daily-night-owl">熬夜</em>{/if}</span><span>精力 {record.fields.daytimeEnergy ?? "—"}</span><span>{statusFor(record)}</span></button>{/each}{/if}
+            {#if !store?.records.length}<div class="xz-daily-empty"><h3>还没有每日记录</h3><p>从 9 月 3 日开始手动录入即可；这里不会迁移旧文档数据。</p></div>{:else}{#each [...store.records].reverse() as record (record.date)}<button class="xz-daily-history-row" type="button" on:click={() => void openHistoryRecord(record.date)}><strong>{record.date}</strong><span>{dayTypeLabel(record.dayType)}{#if isDailyRecordExcluded(record)}<em class="xz-day-state-chip" data-state={record.dayState}>{dailyDayStateLabel(record.dayState).replace("的一天", "")}</em>{/if}{#if phaseStore.sprints.some((phase) => record.date >= phase.startDate && record.date <= phase.endDate)}<em class="xz-day-state-chip" data-state="sprint" title="这一天属于某次声明的紧急期：不进折线，但锚点数据保留">{phaseStore.sprints.find((phase) => record.date >= phase.startDate && record.date <= phase.endDate)?.title || "紧急期"}</em>{/if}</span><span>睡眠 {record.fields.sleepDurationMinutes === null ? "—" : `${Math.floor(record.fields.sleepDurationMinutes / 60)} 小时 ${record.fields.sleepDurationMinutes % 60} 分`}{#if record.fields.lightsOffBand === "after-midnight"}<em class="xz-daily-night-owl">熬夜</em>{/if}</span><span>精力 {record.fields.daytimeEnergy ?? "—"}</span><span>{statusFor(record)}</span></button>{/each}{/if}
         </section>
     {:else if view === "trends"}
         <TrendView
             records={store?.records ?? []}
+            phases={phaseStore}
             {loadNutrition}
             loadSettings={loadTrendView}
             saveSettings={saveTrendView}

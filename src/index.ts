@@ -50,6 +50,16 @@ import {
     type InternalWorkItemStore,
 } from "./internal-store";
 import { getXingzhouTabId, XINGZHOU_TAB_TYPE } from "./tab-id";
+import {
+    PHASE_STORE_FILE,
+    clonePhaseStore,
+    createEmptyPhaseStore,
+    mergePhaseStores,
+    parsePhaseStore,
+    phaseBackupFileForRevision,
+    phaseStoresMatch,
+    type PhaseStore,
+} from "./phases";
 import { describeError, log } from "./log";
 import { openLogPanel, type LogPanelHandle } from "./log-viewer";
 import { normalizeLogConfig } from "./log-config";
@@ -326,6 +336,8 @@ export default class XingzhouPlugin extends Plugin {
                             saveDaily: (record: DailyRecord) => plugin.saveDailyRecord(record),
                             loadChecklist: () => plugin.getChecklistSnapshot(),
                             saveChecklist: (store: ChecklistStore) => plugin.saveChecklistStore(store),
+                            loadPhases: () => plugin.getPhaseSnapshot(),
+                            savePhases: (store: PhaseStore) => plugin.savePhaseStore(store),
                             loadNutrition: () => plugin.getNutritionSnapshot(),
                             saveNutrition: (store: NutritionStore) => plugin.saveNutritionStore(store),
                             loadProjectViewState: () => plugin.loadProjectViewState(),
@@ -461,6 +473,45 @@ export default class XingzhouPlugin extends Plugin {
         await this.settingsReady;
         await this.mutationQueue;
         return cloneChecklistStore(await this.loadChecklistStore());
+    }
+
+    /** 阶段数据（紧急期 / 归航期）快照：界面只读它，写操作全部走 savePhaseStore。 */
+    public async getPhaseSnapshot(): Promise<PhaseStore> {
+        await this.settingsReady;
+        await this.mutationQueue;
+        return clonePhaseStore(await this.loadPhaseStore());
+    }
+
+    /**
+     * 保存阶段数据。
+     *
+     * **关键：以磁盘上的当前值为基准合并，而不是整份覆盖。**
+     * 真实事故：同时开了两个行舟（标签页 / 重启前的旧实例）时，那边读到的是空阶段数据，
+     * 一保存就把刚声明的紧急期整份盖掉——`phases.json` 变成 `sprints: []`，
+     * 界面上的横幅、延长、结束入口第二天全部消失，而每日记录里还留着"紧急期"字样。
+     *
+     * 合并规则：以磁盘上的阶段为底，用提交过来的同 id 阶段覆盖（它才是用户刚改的那个），
+     * 提交里没有的阶段保留——因此任何一份陈旧快照都不可能删掉别人的阶段。
+     * 阶段本身没有删除入口，所以这个方向是安全的。
+     */
+    public async savePhaseStore(incoming: PhaseStore): Promise<PhaseStore> {
+        return this.enqueueMutation(async () => {
+            const current = await this.loadPhaseStore();
+            const next = parsePhaseStore(incoming);
+            if (!next) throw new Error("阶段数据无法识别，已停止保存。");
+            const merged = mergePhaseStores(current, next);
+            if (merged.revision <= current.revision) merged.revision = current.revision + 1;
+            merged.updatedAt = Date.now();
+            log.verbose("phases", "phases.save.merge", {
+                currentSprints: current.sprints.length,
+                incomingSprints: next.sprints.length,
+                mergedSprints: merged.sprints.length,
+                mergedLandings: merged.landings.length,
+            });
+            await this.savePhaseAndVerify(phaseBackupFileForRevision(current.revision), current, "backup");
+            await this.savePhaseAndVerify(PHASE_STORE_FILE, merged);
+            return clonePhaseStore(merged);
+        }, "save-phases");
     }
 
     public async getNutritionSnapshot(): Promise<NutritionStore> {
@@ -683,6 +734,72 @@ export default class XingzhouPlugin extends Plugin {
         return initial;
     }
 
+    /**
+     * 阶段数据加载。不变量与其它存储一致：
+     * 主文件优先；不可识别时取三个轮换备份中修订号最高的有效副本并回写主文件；
+     * 主文件与备份都不可识别且主文件并非"不存在"时**停止写入**，绝不用空数据覆盖。
+     * 旧版本没有这个文件 → 视为「正常期」，直接建空库，不做任何迁移。
+     */
+    private async loadPhaseStore(): Promise<PhaseStore> {
+        let raw: unknown;
+        try {
+            raw = await this.loadData(PHASE_STORE_FILE);
+        } catch (error) {
+            log.error("phases", "phases.load.fail", { file: PHASE_STORE_FILE, err: describeError(error) });
+            throw new Error(`阶段数据读取失败：${errorMessage(error)}`);
+        }
+        const primary = parsePhaseStore(raw);
+        if (primary) {
+            log.info("phases", "phases.load.ok", {
+                file: PHASE_STORE_FILE,
+                revision: primary.revision,
+                sprints: primary.sprints.length,
+                landings: primary.landings.length,
+                /** 记下区间，排查"横幅为什么没出现"时一眼能看出是不是日期对不上。 */
+                ranges: primary.sprints.map((phase) => `${phase.startDate}~${phase.endDate}`).join(","),
+            });
+            return primary;
+        }
+        log.warn("phases", "phases.parse.failed", { file: PHASE_STORE_FILE, absent: isAbsentInternalStore(raw) });
+
+        const slots = [1, 2, 3];
+        const backups = await Promise.all(slots.map(async (slot) => {
+            const file = `phases.backup-${slot}.json`;
+            try {
+                const parsed = parsePhaseStore(await this.loadData(file));
+                log.verbose("phases", "phases.backup.read", { file, usable: Boolean(parsed), revision: parsed?.revision ?? null });
+                return parsed ? { file, store: parsed } : null;
+            } catch (error) {
+                log.verbose("phases", "phases.backup.read", { file, usable: false, err: describeError(error) });
+                return null;
+            }
+        }));
+        const recovered = backups
+            .filter((candidate): candidate is { file: string; store: PhaseStore } => Boolean(candidate))
+            .sort((a, b) => b.store.revision - a.store.revision)[0];
+        if (recovered) {
+            log.warn("phases", "phases.recover.fromBackup", {
+                file: PHASE_STORE_FILE,
+                backup: recovered.file,
+                revision: recovered.store.revision,
+            });
+            await this.savePhaseAndVerify(PHASE_STORE_FILE, recovered.store);
+            console.warn(`行舟已从第 ${recovered.store.revision} 版阶段数据备份恢复。`);
+            return recovered.store;
+        }
+        if (!isAbsentInternalStore(raw)) {
+            log.error("phases", "phases.write.stopped", {
+                file: PHASE_STORE_FILE,
+                reason: "主文件与三个轮换备份均不可识别，为避免覆盖已停止写入",
+                backupsChecked: slots.length,
+            });
+            throw new Error("阶段数据文件无法识别，且三个轮换备份均不可用。为避免覆盖，行舟已停止写入。");
+        }
+        const initial = createEmptyPhaseStore();
+        await this.savePhaseAndVerify(PHASE_STORE_FILE, initial);
+        return initial;
+    }
+
     private async loadChecklistStore(): Promise<ChecklistStore> {
         let raw: unknown;
         try {
@@ -880,6 +997,18 @@ export default class XingzhouPlugin extends Plugin {
             revision: store.revision,
             parse: parseChecklistStore,
             matches: checklistStoresMatch,
+        });
+    }
+
+    private async savePhaseAndVerify(file: string, store: PhaseStore, role: "primary" | "backup" = "primary"): Promise<void> {
+        await this.writeAndVerify({
+            scope: "phases",
+            file,
+            role,
+            store,
+            revision: store.revision,
+            parse: parsePhaseStore,
+            matches: phaseStoresMatch,
         });
     }
 
@@ -1092,6 +1221,7 @@ const VERIFY_REASONS: Record<string, { parse: string; mismatch: string }> = {
     daily: { parse: "生活节律数据", mismatch: "生活节律数据" },
     checklist: { parse: "Checklist 配置", mismatch: "Checklist 配置" },
     nutrition: { parse: "营养记录", mismatch: "营养记录" },
+    phases: { parse: "阶段数据", mismatch: "阶段数据" },
 };
 
 function reasonForMissingVerify(scope: string, file: string): string {

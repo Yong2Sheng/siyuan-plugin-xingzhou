@@ -4,6 +4,7 @@ import {
     createDailyRecord,
     createEmptyDailyStore,
     dailyBackupFileForRevision,
+    dailyDayStateLabel,
     defaultDayType,
     dailyStoresMatch,
     deriveLightsOffAdherence,
@@ -673,5 +674,81 @@ describe("「混乱 / 失控」日标记", () => {
         const saved = upsertDailyRecord(createEmptyDailyStore(1000), record, 2000);
         expect(saved.records[0].dayType).toBe("research-workday");
         expect(isWorkMetricApplicable(saved.records[0].dayType)).toBe(true);
+    });
+});
+
+describe("紧急期的日状态与锚点字段", () => {
+    it("`sprint` 与混乱／失控同样退出统计，但标签说明它是紧急期", () => {
+        const sprint = { ...createDailyRecord("2025-03-12"), dayState: "sprint" as const };
+        expect(isDailyRecordExcluded(sprint)).toBe(true);
+        expect(dailyDayStateLabel("sprint")).toBe("紧急期");
+        expect(dailyDayStateLabel("chaotic")).toBe("混乱的一天");
+    });
+
+    it("`sprint` 能写入并原样读回，锚点字段（正餐计数与推进两格）一起保留", () => {
+        const record = {
+            ...createDailyRecord("2025-03-12"),
+            dayState: "sprint" as const,
+            fields: {
+                ...createDailyRecord("2025-03-12").fields,
+                sprintMealCount: 2,
+                sprintProgressItemId: "work-1",
+                sprintProgressNote: "proposal 第 3 节初稿",
+                lightsOffTime: "01:20",
+                lightsOffTimeSource: "live" as const,
+            },
+        };
+        const store = upsertDailyRecord(createEmptyDailyStore(), record);
+        const parsed = parseDailyStore(JSON.parse(JSON.stringify(store)));
+        expect(parsed).not.toBeNull();
+        const saved = parsed?.records[0];
+        expect(saved?.dayState).toBe("sprint");
+        expect(saved?.fields.sprintMealCount).toBe(2);
+        expect(saved?.fields.sprintProgressItemId).toBe("work-1");
+        expect(saved?.fields.sprintProgressNote).toBe("proposal 第 3 节初稿");
+        // 当场记录的熄灯归今晚，不按"晚于起床即前一夜"推导
+        expect(saved?.fields.lightsOffAt).toBe("2025-03-12T01:20");
+        expect(saved?.fields.lightsOffBand).toBe("after-midnight");
+    });
+
+    it("存量数据没有新增字段：解析时回落为空并保持「正常」，不需要迁移", () => {
+        const legacy = {
+            version: 1,
+            revision: 5,
+            createdAt: 1,
+            updatedAt: 1,
+            records: [{
+                date: "2025-01-06",
+                dayType: "research-workday",
+                profileVersion: 1,
+                createdAt: 1,
+                updatedAt: 1,
+                fields: { wakeTime: "06:10" },
+            }],
+        };
+        const parsed = parseDailyStore(legacy);
+        expect(parsed).not.toBeNull();
+        const record = parsed?.records[0];
+        expect(record?.dayState).toBe("normal");
+        expect(record?.fields.sprintMealCount).toBeNull();
+        expect(record?.fields.sprintProgressItemId).toBe("");
+        expect(record?.fields.sprintProgressNote).toBe("");
+    });
+
+    it("正餐计数只接受 0–9 的整数，其余按空处理", () => {
+        const base = createDailyRecord("2025-03-12");
+        const build = (value: unknown) => parseDailyStore({
+            version: 1,
+            revision: 1,
+            createdAt: 1,
+            updatedAt: 1,
+            records: [{ ...base, dayState: "sprint", fields: { ...base.fields, sprintMealCount: value } }],
+        })?.records[0].fields.sprintMealCount;
+        expect(build(0)).toBe(0);
+        expect(build(3)).toBe(3);
+        expect(build("2")).toBeNull();
+        expect(build(-1)).toBeNull();
+        expect(build(12)).toBeNull();
+        expect(build(2.5)).toBeNull();
     });
 });

@@ -1175,15 +1175,17 @@ describe("生活节律：「混乱 / 失控」日标记", () => {
         expect(saveDaily.mock.calls.at(-1)?.[0].fields.bestThing).toBe("还是出门走了 20 分钟");
     });
 
-    it("整天空白的那天给出标记入口，标完不需要先填任何字段", async () => {
+    it("整天空白的那天用顶部「今日状态」直接标记，标完不需要先填任何字段", async () => {
         let store = createEmptyDailyStore(1000);
         const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
         component = new DailyRhythm({ target: document.body, props: { loadDaily: vi.fn().mockResolvedValue(store), saveDaily } });
-        await vi.waitFor(() => expect(document.querySelector(".xz-day-state-empty")).not.toBeNull());
+        // 原来那个"这一天还没有任何记录"的大块提示已按用户要求删除；
+        // 标记入口保留在一直可见的「今日状态」分段控件上，因此不再需要空状态块。
+        await vi.waitFor(() => expect(document.querySelector(".xz-day-state__seg")).not.toBeNull());
+        expect(document.querySelector(".xz-day-state-empty")).toBeNull();
 
-        expect(document.querySelector(".xz-day-state-empty")?.textContent).toContain("这一天还没有任何记录");
-        const mark = [...document.querySelectorAll(".xz-day-state-empty__actions button")]
-            .find((button) => button.textContent?.includes("失控")) as HTMLButtonElement;
+        const mark = [...document.querySelectorAll<HTMLButtonElement>(".xz-day-state__seg button")]
+            .find((button) => button.textContent?.trim() === "失控") as HTMLButtonElement;
         mark.click();
         await tick();
 

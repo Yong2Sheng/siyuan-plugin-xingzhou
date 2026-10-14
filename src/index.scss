@@ -1308,13 +1308,10 @@
 .xz-day-state-chip { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-style: normal; font-weight: 600; vertical-align: 1px; }
 .xz-day-state-chip[data-state="chaotic"] { color: var(--xz-tone-sand-text); background: color-mix(in srgb, var(--xz-tone-sand-strip) 42%, var(--xingzhou-panel)); }
 .xz-day-state-chip[data-state="uncontrolled"] { color: var(--xz-tone-rose-text); background: color-mix(in srgb, var(--xz-tone-rose-strip) 40%, var(--xingzhou-panel)); }
+/* 紧急期：中性灰，不与「混乱／失控」的暖色、红色混用——它表示"声明的减载"，不是"没跟上" */
+.xz-day-state-chip[data-state="sprint"] { color: var(--xz-phase-text); background: color-mix(in srgb, var(--xz-phase-strip) 26%, var(--xingzhou-panel)); }
 .xz-daily-completion-summary.is-excluded em { border-left: 0; color: var(--xingzhou-muted); }
 /* 整天空白的那天：标记是最省力的出口，所以先给标记、再给补记 */
-.xz-day-state-empty { display: grid; flex: 1 1 auto; align-content: center; justify-items: center; gap: 10px; min-height: 240px; margin: 10px 0 16px; padding: 22px; border: 1px dashed var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); text-align: center; }
-.xz-day-state-empty h3 { margin: 0; color: var(--xingzhou-text); font-size: 15px; }
-.xz-day-state-empty p { max-width: 42em; margin: 0; font-size: 12px; line-height: 1.75; }
-.xz-day-state-empty__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
-.xz-day-state-empty__actions button { min-height: 38px; padding: 7px 14px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-panel); cursor: pointer; font-size: 13px; }
 .xz-daily-progress {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3134,5 +3131,488 @@
     .xz-day-state__label { display: none; }
     .xz-day-state__seg { max-width: 100%; }
     .xz-day-state__seg button { padding: 6px 9px; font-size: 12.5px; }
-    .xz-day-state-empty__actions { flex-direction: column; align-items: stretch; }
 }
+
+
+/* ══════════════════════════════════════════════════════════════
+ * 阶段：紧急期 / 归航期（见 src/phases.ts 与 src/PhasePanel.svelte）
+ *
+ * 这是「一段时间」的界面，不是某一天的字段面板。三条不可动摇的规则：
+ * 1. 紧急期内不新增判断点：每天只有一次确认 + 四个锚点，其余字段默认收起；
+ * 2. 不点确认什么都不会发生——不退出、不降级、不算断、不催；
+ * 3. 延长只改结束日（目标是 hard deadline，不改不缩）；展示上不出现连续天数、不出现百分比。
+ * ══════════════════════════════════════════════════════════════ */
+
+:root {
+    --xz-phase-strip: #8e9aa8;
+    --xz-phase-accent: #6f7c8c;
+    --xz-phase-fill: #f2f4f7;
+    --xz-phase-text: #35404e;
+    --xz-phase-ember: #c2703a;
+}
+
+.xz-phase-panel { padding: 0; }
+
+.xz-daily-context__slot { flex: 0 0 auto; margin-left: auto; }
+
+/* ── 进行中横幅 ─────────────────────────────────────────────── */.xz-phase-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 10px 16px 0;
+    padding: 10px 12px;
+    border-left: 3px solid var(--xz-phase-strip);
+    border-radius: 0 var(--xingzhou-radius) var(--xingzhou-radius) 0;
+    background: color-mix(in srgb, var(--xz-phase-fill) 72%, var(--xingzhou-panel));
+}
+
+.xz-phase-banner__main { flex: 1 1 auto; min-width: 0; }
+
+.xz-phase-banner__main strong { display: block; font-size: 13px; }
+
+.xz-phase-banner__main p { margin: 3px 0 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.65; }
+
+.xz-phase-banner__actions { display: flex; flex: 0 0 auto; gap: 6px; }
+
+.xz-phase-chip {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border: 1px solid var(--xz-phase-strip);
+    border-radius: 999px;
+    color: var(--xz-phase-text);
+    background: transparent;
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: 1px;
+}
+
+.xz-phase-chip--ember { border-color: var(--xz-phase-ember); color: var(--xz-phase-ember); }
+
+.xz-phase-core { padding: 14px 16px 16px; border-top: 1px solid var(--xingzhou-border); }
+
+.xz-phase-core__lead { margin: 0 0 10px; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.7; }
+
+.xz-phase-core__lead b { color: var(--xingzhou-text); }
+
+.xz-phase-continue {
+    display: grid;
+    gap: 4px;
+    width: 100%;
+    min-height: 62px;
+    padding: 10px 14px;
+    border: 1px solid var(--xingzhou-primary);
+    border-radius: var(--xingzhou-radius);
+    color: var(--b3-theme-on-primary);
+    background: var(--xingzhou-primary);
+    cursor: pointer;
+    text-align: left;
+}
+
+.xz-phase-continue strong { font-size: 16px; }
+
+.xz-phase-continue small { opacity: .86; font-size: 11.5px; }
+
+/*
+ * 已确认状态：**看起来仍然是可以点的**。
+ * 之前它变成一块淡色提示条，用户根本不知道还能还原（真实反馈："你不说我都不知道这个能点"）。
+ * 现在保留绿色语义，但给虚线边框、下划线标题与明确的动作文案。
+ */
+.xz-phase-continue.is-done {
+    border: 1px dashed color-mix(in srgb, var(--b3-theme-success) 52%, var(--xingzhou-border));
+    color: var(--xingzhou-text);
+    background: color-mix(in srgb, var(--b3-theme-success) 8%, var(--xingzhou-panel));
+}
+.xz-phase-continue.is-done:hover { background: color-mix(in srgb, var(--b3-theme-success) 14%, var(--xingzhou-panel)); }
+.xz-phase-continue.is-done strong { text-decoration: underline; text-underline-offset: 3px; }
+
+.xz-phase-continue.is-done strong { color: var(--b3-theme-success); }
+
+.xz-phase-continue.is-done small { color: var(--xingzhou-muted); }
+
+.xz-phase-anchors {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.xz-phase-anchor {
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--xingzhou-border);
+    border-radius: var(--xingzhou-radius);
+    background: var(--xingzhou-panel);
+}
+
+.xz-phase-anchor > header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.xz-phase-anchor > header strong { font-size: 12.5px; }
+
+.xz-phase-anchor > header small { color: var(--xingzhou-muted); font-size: 11px; text-align: right; }
+
+.xz-phase-anchor__row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+
+.xz-phase-anchor__empty { margin: 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.6; }
+
+.xz-phase-anchor__note { margin: 8px 0 0; padding-top: 7px; border-top: 1px dashed var(--xingzhou-border); color: var(--xingzhou-muted); font-size: 11.5px; line-height: 1.6; }
+
+.xz-phase-anchor__note b { color: var(--xingzhou-text); font-weight: 600; }
+
+.xz-phase-anchor__done { display: inline-flex; align-items: center; gap: 5px; color: var(--b3-theme-success); font-size: 12.5px; font-weight: 600; }
+
+.xz-phase-anchor--wide { grid-column: 1 / -1; }
+
+.xz-phase-dual { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+
+.xz-phase-slot { min-width: 0; padding: 8px 10px; border: 1px dashed var(--xingzhou-border); border-radius: var(--xingzhou-radius); }
+
+.xz-phase-slot__label { display: block; margin-bottom: 7px; color: var(--xingzhou-text); font-size: 12px; font-weight: 600; }
+
+.xz-phase-slot__label span { margin-left: 6px; color: var(--xingzhou-muted); font-size: 11px; font-weight: 400; }
+
+.xz-phase-action,
+.xz-phase-ghost,
+
+.xz-phase-tap {
+    min-height: 34px;
+    padding: 6px 12px;
+    border: 1px solid var(--xingzhou-border);
+    border-radius: var(--xingzhou-radius);
+    color: var(--xingzhou-text);
+    background: var(--xingzhou-panel);
+    cursor: pointer;
+    font-size: 12.5px;
+}
+
+.xz-phase-action--primary { border-color: var(--xingzhou-primary); color: var(--b3-theme-on-primary); background: var(--xingzhou-primary); }
+
+.xz-phase-ghost { border-style: dashed; color: var(--xingzhou-muted); }
+
+.xz-phase-tap { min-width: 46px; padding: 6px 10px; font-weight: 600; }
+
+.xz-phase-tap.is-on { border-color: var(--xingzhou-primary); color: var(--b3-theme-on-primary); background: var(--xingzhou-primary); }
+
+.xz-phase-tap-group { display: flex; align-items: center; gap: 6px; }
+
+.xz-phase-time { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.xz-phase-time small { margin-left: 3px; color: var(--xingzhou-muted); font-size: 11px; font-weight: 400; }
+
+.xz-phase-tally {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin-top: 10px;
+    padding: 9px 12px;
+    border-radius: var(--xingzhou-radius);
+    background: var(--xingzhou-panel-subtle);
+    color: var(--xingzhou-muted);
+    font-size: 11.5px;
+    line-height: 1.7;
+}
+
+.xz-phase-tally b { color: var(--xingzhou-text); font-variant-numeric: tabular-nums; }
+
+.xz-phase-tally em { color: var(--xingzhou-muted); font-style: normal; }
+
+/* 浮层形态：延长面板在弹层里居中，不参与页面布局 */
+.xz-phase-extend--modal {
+    width: min(520px, 100%);
+    max-height: min(760px, calc(100vh - 48px));
+    overflow: auto;
+    box-shadow: 0 16px 48px color-mix(in srgb, var(--xingzhou-text) 28%, transparent);
+}
+
+.xz-phase-extend {
+    margin: 10px 16px 0;
+    padding: 11px 13px;
+    border-left: 3px solid var(--xingzhou-primary);
+    border-radius: 0 var(--xingzhou-radius) var(--xingzhou-radius) 0;
+    background: color-mix(in srgb, var(--xingzhou-primary-light) 62%, var(--xingzhou-panel));
+}
+
+.xz-phase-extend__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+
+.xz-phase-extend__head strong { font-size: 13px; }
+
+.xz-phase-extend__head small { color: var(--xingzhou-muted); font-size: 11.5px; }
+
+.xz-phase-extend__quick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 9px; }
+
+.xz-phase-extend__note { margin: 9px 0 0; color: var(--xingzhou-muted); font-size: 11.5px; line-height: 1.7; }
+
+.xz-phase-extend__note b { color: var(--xingzhou-text); }
+
+.xz-phase-extend__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+.xz-phase-dialog {
+    box-sizing: border-box;
+    width: min(600px, 100%);
+    max-height: min(760px, calc(100vh - 48px));
+    overflow: auto;
+    border: 1px solid var(--xingzhou-strong-border);
+    border-radius: calc(var(--xingzhou-radius) + 2px);
+    background: var(--xingzhou-panel);
+    box-shadow: var(--xingzhou-panel-shadow);
+    overflow: hidden;
+}
+
+.xz-phase-dialog > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--xingzhou-border); }
+
+.xz-phase-dialog > header strong { font-size: 14px; }
+
+.xz-phase-dialog > header small { color: var(--xingzhou-muted); font-size: 11.5px; }
+
+.xz-phase-dialog__body { display: grid; gap: 12px; padding: 14px; }
+
+.xz-phase-field { display: grid; gap: 6px; }
+
+.xz-phase-field > label { color: var(--xingzhou-muted); font-size: 12px; }
+
+.xz-phase-field > label b { color: var(--xingzhou-text); }
+
+.xz-phase-input {
+    min-height: 38px;
+    padding: 6px 10px;
+    border: 1px solid var(--xingzhou-border);
+    border-radius: var(--xingzhou-radius);
+    color: var(--xingzhou-text);
+    background: var(--xingzhou-bg);
+    font-size: 14px;
+}
+
+.xz-phase-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* 选中的快捷档位：与分段控件同一套语言（主色底 + 主色边），一眼能看出点的是哪一个 */
+.xz-phase-action.is-on,
+.xz-phase-action[aria-pressed="true"] {
+    border-color: var(--xingzhou-primary);
+    color: var(--b3-theme-on-primary);
+    background: var(--xingzhou-primary);
+    font-weight: 600;
+}
+
+.xz-phase-checkline { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); font-size: 12.5px; }
+
+.xz-phase-checkline span { color: var(--xingzhou-muted); font-size: 11.5px; }
+
+/*
+ * 页脚一律纵向：提示在上、按钮在下。
+ * 曾经写成"提示在左、按钮在右"的横向布局，560px 宽时提示会吃掉按钮的空间，
+ * 「进入紧急期」被压成竖排文字并溢出（真实截图核对时发现）。
+ * 按钮不换行、且不会被压缩，是这个页脚唯一的硬要求。
+ */
+.xz-phase-dialog > footer { display: flex; flex-direction: column; align-items: stretch; gap: 9px; padding: 11px 14px; border-top: 1px solid var(--xingzhou-border); background: var(--xingzhou-panel-subtle); }
+
+.xz-phase-dialog > footer p { margin: 0; color: var(--xingzhou-muted); font-size: 11.5px; line-height: 1.6; }
+
+.xz-phase-dialog > footer div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+
+.xz-phase-dialog > footer button { flex: 0 0 auto; white-space: nowrap; }
+
+.xz-phase-landing {
+    margin: 10px 16px 0;
+    border: 1px solid var(--xingzhou-strong-border);
+    border-radius: calc(var(--xingzhou-radius) + 2px);
+    background: var(--xingzhou-panel);
+    overflow: hidden;
+}
+
+.xz-phase-landing > header { display: flex; align-items: flex-start; gap: 10px; padding: 11px 13px; border-bottom: 1px solid var(--xingzhou-border); background: color-mix(in srgb, var(--xz-tone-mint-fill) 70%, var(--xingzhou-panel)); }
+
+.xz-phase-landing > header strong { font-size: 13px; }
+
+.xz-phase-landing > header p { margin: 3px 0 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.65; }
+
+.xz-phase-landing__body { padding: 12px 13px; }
+
+.xz-phase-landing__today { margin: 0 0 8px; font-size: 13px; }
+
+.xz-phase-landing__today b { color: var(--xingzhou-text); }
+
+.xz-phase-landing__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.xz-phase-landing__actions small { color: var(--xingzhou-muted); font-size: 11.5px; }
+
+.xz-phase-landing.is-skipped > header { background: var(--xingzhou-panel-subtle); }
+
+.xz-phase-landing__note { margin: 10px 0 0; color: var(--xingzhou-muted); font-size: 11.5px; line-height: 1.7; }
+
+.xz-phase-rungs { margin: 0; padding: 0; list-style: none; border-top: 1px dashed var(--xingzhou-border); }
+
+.xz-phase-rung { display: flex; align-items: baseline; gap: 8px; padding: 7px 0; border-bottom: 1px dashed var(--xingzhou-border); font-size: 12px; }
+
+.xz-phase-rung:last-child { border-bottom: 0; }
+
+.xz-phase-rung i { flex: 0 0 auto; width: 15px; height: 15px; display: inline-grid; place-items: center; border: 1px solid var(--xingzhou-border); border-radius: 999px; color: var(--xingzhou-muted); font-size: 9px; font-style: normal; line-height: 1; }
+
+.xz-phase-rung.is-done i { border-color: color-mix(in srgb, var(--b3-theme-success) 50%, var(--xingzhou-border)); color: var(--b3-theme-success); }
+
+.xz-phase-rung.is-done span { color: var(--xingzhou-muted); }
+
+.xz-phase-rung.is-now { font-weight: 600; }
+
+.xz-phase-rung.is-now span { color: var(--xingzhou-text); }
+
+.xz-phase-rung.is-wait span { color: var(--xingzhou-muted); }
+
+.xz-phase-rung em { margin-left: auto; flex: 0 0 auto; color: var(--xingzhou-muted); font-size: 11px; font-style: normal; }
+
+.xz-phase-rung.is-done em { color: var(--b3-theme-success); }
+
+.xz-phase-return { display: grid; gap: 8px; }
+
+.xz-phase-return__item { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); }
+
+.xz-phase-return__item > span { flex: 1 1 220px; min-width: 0; font-size: 12.5px; line-height: 1.55; }
+
+.xz-phase-return__item > span small { display: block; margin-top: 2px; color: var(--xingzhou-muted); font-size: 11px; }
+
+.xz-phase-return__item.is-resolved { background: var(--xingzhou-panel-subtle); }
+
+.xz-phase-return__item.is-resolved > span { color: var(--xingzhou-muted); text-decoration: line-through; }
+
+.xz-phase-return__choices { display: flex; flex: 0 0 auto; gap: 5px; }
+
+.xz-phase-return__choices button { min-height: 30px; padding: 4px 10px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-panel); cursor: pointer; font-size: 12px; }
+
+.xz-phase-return__choices button.is-on { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 600; }
+
+.xz-phase-fact { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+
+.xz-phase-fact > div { padding: 10px 11px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel-subtle); }
+
+.xz-phase-fact strong { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+
+.xz-phase-fact span { display: block; margin-top: 2px; color: var(--xingzhou-muted); font-size: 11.5px; line-height: 1.5; }
+
+.xz-phase-backfill { display: grid; gap: 6px; }
+
+.xz-phase-backfill__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); font-size: 12.5px; }
+
+.xz-phase-backfill__row > b { flex: 0 0 92px; font-variant-numeric: tabular-nums; }
+
+.xz-phase-backfill__row > span { flex: 1 1 160px; color: var(--xingzhou-muted); font-size: 11.5px; }
+
+.xz-phase-trend { width: 100%; height: auto; }
+
+.xz-phase-trend text { fill: var(--xingzhou-muted); font-size: 9px; font-family: var(--b3-font-family); }
+
+.xz-phase-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 8px; color: var(--xingzhou-muted); font-size: 11.5px; }
+
+.xz-phase-legend i { display: inline-block; width: 16px; height: 9px; margin-right: 5px; border-radius: 2px; vertical-align: -1px; }
+
+.xz-phase-legend i.sprint { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--xz-phase-strip) 30%, transparent) 0 3px, transparent 3px 6px); border: 1px solid var(--xz-phase-strip); }
+
+.xz-phase-legend i.chaotic { background: color-mix(in srgb, var(--xz-tone-sand-strip) 55%, transparent); border: 1px solid var(--xz-tone-sand-strip); }
+
+.xz-phase-legend i.uncontrolled { background: color-mix(in srgb, var(--xz-tone-rose-strip) 48%, transparent); border: 1px solid var(--xz-tone-rose-strip); }
+
+.xz-phase-landing--compact {
+    margin: 10px 16px 0;
+    border: 1px solid var(--xingzhou-strong-border);
+    border-left: 3px solid var(--b3-theme-success);
+    border-radius: 0 var(--xingzhou-radius) var(--xingzhou-radius) 0;
+    background: color-mix(in srgb, var(--xz-tone-mint-fill) 62%, var(--xingzhou-panel));
+}
+
+.xz-phase-landing--compact .xz-phase-landing__body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 13px; }
+
+.xz-phase-landing--compact .xz-phase-landing__head { flex: 1 1 320px; min-width: 0; }
+
+.xz-phase-landing--compact .xz-phase-landing__head strong { display: block; font-size: 13px; }
+
+.xz-phase-landing--compact .xz-phase-landing__head p { margin: 3px 0 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.6; }
+
+.xz-phase-landing--compact .xz-phase-landing__actions { flex: 1 1 100%; flex-wrap: wrap; }
+
+.xz-phase-landing--compact .xz-phase-ghost { min-height: 30px; padding: 4px 10px; font-size: 12px; }
+
+.xz-phase-landing--compact .xz-phase-landing__actions small { display: none; }
+
+.xz-phase-keep { padding: 10px 0; border-bottom: 1px dashed var(--xingzhou-border); }
+
+.xz-phase-keep:last-of-type { border-bottom: 0; }
+
+.xz-phase-keep__q { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+
+.xz-phase-keep__q span { color: var(--xingzhou-muted); font-size: 11.5px; font-weight: 400; }
+
+.xz-phase-keep__choices { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.xz-phase-keep__input { width: 100%; min-height: 88px; resize: vertical; font-size: 12.5px; line-height: 1.7; }
+
+.xz-phase-keep__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+
+.xz-phase-keep__actions small { color: var(--xingzhou-muted); font-size: 11.5px; }
+
+
+/* 窄屏：锚点单列、双格上下堆叠、事实卡单列、归航横幅按钮换行 */
+@container (max-width: 700px) {
+    .xz-daily-context__row { flex-direction: column; align-items: stretch; }
+    .xz-daily-context__slot { margin-left: 0; }
+    .xz-daily-context__slot .xz-phase-action { width: 100%; min-height: 38px; }
+    .xz-phase-banner { flex-direction: column; }
+    .xz-phase-banner__actions { align-self: stretch; }
+    .xz-phase-anchors { grid-template-columns: minmax(0, 1fr); }
+    .xz-phase-dual { grid-template-columns: minmax(0, 1fr); }
+    .xz-phase-landing--compact .xz-phase-landing__actions { width: 100%; }
+}
+
+@container (max-width: 460px) {
+    .xz-phase-fact { grid-template-columns: minmax(0, 1fr); }
+    .xz-phase-return__choices { width: 100%; }
+    .xz-phase-return__choices button { flex: 1 1 auto; }
+}
+
+/* 极窄兜底：生产样式在 420px 以下不换行，会让今日状态按钮压住右侧说明文字 */
+@container (max-width: 420px) {
+    .xz-daily-context__row { flex-wrap: wrap; align-items: flex-start; }
+    .xz-daily-context__row > label { flex: 1 1 100%; }
+    .xz-day-state { flex-wrap: wrap; }
+    .xz-day-state__note { display: block; flex: 1 1 100%; }
+}
+
+/* 阶段（紧急期 / 归航期）表单标签：控件在标签内部，避免额外包一层 */
+.xz-phase-field__label { display: grid; gap: 6px; color: var(--xingzhou-muted); font-size: 12px; }
+.xz-phase-field__label b { color: var(--xingzhou-text); }
+
+/* 阶段数据丢失时的救援条：说明原因 + 两个明确出口（补声明 / 改回正常） */
+.xz-phase-recover {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 14px;
+    margin: 10px 16px 0; padding: 11px 13px;
+    border-left: 3px solid var(--xz-phase-ember);
+    border-radius: 0 var(--xingzhou-radius) var(--xingzhou-radius) 0;
+    background: color-mix(in srgb, var(--xz-tone-sand-fill) 82%, var(--xingzhou-panel));
+}
+.xz-phase-recover strong { display: block; font-size: 13px; }
+.xz-phase-recover p { margin: 3px 0 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.65; }
+.xz-phase-recover__actions { display: flex; flex: 0 0 auto; gap: 6px; }
+
+/* 归航第 1 级的交付结果 + 交接记录：这一段很小，取代了原来一次性拍回来的整张表 */
+.xz-phase-delivery {
+    display: grid; gap: 9px;
+    margin: 10px 16px 0; padding: 11px 13px;
+    border-left: 3px solid var(--b3-theme-success);
+    border-radius: 0 var(--xingzhou-radius) var(--xingzhou-radius) 0;
+    background: color-mix(in srgb, var(--xz-tone-mint-fill) 70%, var(--xingzhou-panel));
+}
+.xz-phase-delivery__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.xz-phase-delivery__head strong { font-size: 13px; }
+.xz-phase-delivery__head small { color: var(--xingzhou-muted); font-size: 11.5px; }
+.xz-phase-delivery__choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.xz-phase-delivery__note { display: grid; gap: 6px; }
+.xz-phase-delivery__note span { color: var(--xingzhou-muted); font-size: 12px; }
+.xz-phase-delivery__note textarea {
+    width: 100%; resize: vertical; padding: 7px 9px;
+    border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius);
+    color: var(--xingzhou-text); background: var(--xingzhou-bg); font: inherit; font-size: 12.5px; line-height: 1.7;
+}
+.xz-phase-delivery__hint { margin: 0; color: var(--xingzhou-muted); font-size: 11.5px; }

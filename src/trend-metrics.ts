@@ -125,7 +125,30 @@ export type TrendChartContext = {
     settings: TrendViewSettings;
     /** 今天的连续天序号，用于本周/今年这类相对范围。 */
     today: number;
+    /**
+     * 紧急期区间（来自 phases.json）。落在区间里的日子整体退出统计：
+     * 与「混乱 / 失控」不同，紧急期是**声明的减载**，不是没跟上；但两者都不进折线与达成率。
+     * 这里按区间判断而不是按记录上的 dayState，是因为那些天可能根本没确认过，
+     * 只要日期落在声明的紧急期里，就不该混进基线。
+     */
+    sprintRanges?: Array<{ startDate: string; endDate: string }>;
 };
+
+/** 日期是否落在某个紧急期区间内（含首尾）。 */
+export function isWithinSprintRange(date: string, ranges: TrendChartContext["sprintRanges"]): boolean {
+    return Boolean(ranges?.some((range) => date >= range.startDate && date <= range.endDate));
+}
+
+/** 参与统计前要摘掉的日期：被标记的日子 + 落在紧急期里的日子。 */
+export function excludedTrendDates(context: Pick<TrendChartContext, "records" | "sprintRanges">): Set<string> {
+    const dates = new Set(context.records.filter(isDailyRecordExcluded).map((record) => record.date));
+    if (context.sprintRanges?.length) {
+        for (const record of context.records) {
+            if (isWithinSprintRange(record.date, context.sprintRanges)) dates.add(record.date);
+        }
+    }
+    return dates;
+}
 
 type RawSeries = {
     id: string;
@@ -544,7 +567,7 @@ export function buildTrendChart(metricId: TrendMetricId, context: TrendChartCont
      * 因此折线、覆盖度分母、竖带、达成率与营养聚合自动一致——不需要每个指标各自再判断一次。
      * 已写入的数字仍然留在记录里，只是不参与统计。
      */
-    const excludedDates = new Set(context.records.filter(isDailyRecordExcluded).map((record) => record.date));
+    const excludedDates = excludedTrendDates(context);
     const countingRecords = context.records.filter((record) => !excludedDates.has(record.date));
     const countingNutrition = nutritionWithoutExcludedDays(context.nutrition, excludedDates);
     const counting: TrendChartContext = { ...context, records: countingRecords, nutrition: countingNutrition };
@@ -638,8 +661,8 @@ function adherenceNight(context: TrendChartContext, record: DailyRecord) {
  * 被标记为「混乱 / 失控」的日子整体不统计——当晚登记计划的那天、或者次日早晨给结论的那天
  * 只要有任意一天被标记，这一晚就不进分母：否则「昨晚到底熄没熄灯」会变成一次追责。
  */
-export function lightsOffAdherenceSummary(records: DailyRecord[]): { planned: number; met: number } {
-    const excluded = new Set(records.filter(isDailyRecordExcluded).map((record) => record.date));
+export function lightsOffAdherenceSummary(records: DailyRecord[], sprintRanges: TrendChartContext["sprintRanges"] = []): { planned: number; met: number } {
+    const excluded = excludedTrendDates({ records, sprintRanges });
     let planned = 0;
     let met = 0;
     for (const record of records) {
@@ -666,7 +689,7 @@ function coverageFor(
     const granularityLabel = granularity === "day" ? "按日" : granularity === "week" ? "按周" : "按月";
     switch (metricId) {
         case "sleepWindow": {
-            const adherence = lightsOffAdherenceSummary(context.records);
+            const adherence = lightsOffAdherenceSummary(context.records, context.sprintRanges);
             const adherenceLabel = adherence.planned
                 ? `计划达成 ${adherence.met}/${adherence.planned} 晚（容差 ${LIGHTS_OFF_TOLERANCE_MINUTES} 分钟）`
                 : `计划达成 0 晚（窗口内没有登记过计划熄灯）`;

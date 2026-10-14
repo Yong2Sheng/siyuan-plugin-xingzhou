@@ -6,6 +6,7 @@
     import DailyRhythm from "./DailyRhythm.svelte";
     import type { ActionImageCopyTarget } from "./image-clipboard";
     import { createEmptyNutritionStore, type NutritionStore } from "./nutrition";
+    import { createEmptyPhaseStore, type PhaseStore } from "./phases";
     import XingzhouApp from "./XingzhouApp.svelte";
     import type { TrendViewSettings } from "./trend-metrics";
     import type { ActionTemplate } from "./action-templates";
@@ -31,6 +32,8 @@
     export let saveDaily: (record: DailyRecord) => Promise<DailyRecordStore>;
     export let loadChecklist: () => Promise<ChecklistStore> = async () => createDefaultChecklistStore();
     export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore> = async (store) => store;
+    export let loadPhases: () => Promise<PhaseStore> = async () => createEmptyPhaseStore();
+    export let savePhases: (store: PhaseStore) => Promise<PhaseStore> = async (store) => store;
     export let loadNutrition: () => Promise<NutritionStore> = async () => createEmptyNutritionStore();
     export let saveNutrition: (store: NutritionStore) => Promise<NutritionStore> = async (store) => store;
     export let loadTrendViewState: () => Promise<TrendViewSettings | null> = async () => null;
@@ -135,7 +138,7 @@
                 {saveActionTemplates}
             />
         {:else}
-            <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} checklistEnabled={true} {loadChecklist} {saveChecklist} {loadNutrition} {saveNutrition} loadTrendView={loadTrendViewState} saveTrendView={saveTrendViewState} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
+            <DailyRhythm bind:this={dailyRhythm} {loadDaily} {saveDaily} checklistEnabled={true} {loadChecklist} {saveChecklist} {loadNutrition} {saveNutrition} {loadPhases} {savePhases} loadTrendView={loadTrendViewState} saveTrendView={saveTrendViewState} loadWorkItems={load} saveWorkItem={saveItem} openWorkItem={openWorkItemFromRhythm} />
         {/if}
     </div>
 </div>

@@ -33,8 +33,12 @@ export type ClosureNeed = "needed" | "not-needed" | "";
  *
  * 被标记的日子会从趋势、达成率与覆盖度里整体排除（见 isDailyRecordExcluded）；
  * 已写入的字段一律原样保留，不是清空、也不是「填错了」。
+ *
+ * `sprint`（紧急期）与 `chaotic` / `uncontrolled` 的区别在**起因**：
+ * 前两者是个人状态导致的没跟上，紧急期是外部任务（proposal、deadline）导致、而且是自己声明进入的减载。
+ * 三者在统计上同样退出折线与达成率，但回看时必须能分辨——因此单独一档，不合并。
  */
-export type DailyDayState = "normal" | "chaotic" | "uncontrolled";
+export type DailyDayState = "normal" | "chaotic" | "uncontrolled" | "sprint";
 
 export type DailyWorkItemLink = {
     workItemId: string;
@@ -78,6 +82,16 @@ export type DailyRecordFields = {
     personalProjectPlan: string;
     personalProjectNoteDraft: string;
     restAndLifePlan: string;
+    /** 紧急期的「今天吃上饭」：正餐次数 0–3+，默认空。只做计数，不进营养统计。 */
+    sprintMealCount: number | null;
+    /** 紧急期「今天推进了什么」的个人事务格：挂靠到今天安排过切片的事务。 */
+    sprintProgressItemId: string;
+    /** 紧急期「今天推进了什么」的科研进展格：自由文字，不读也不写别的插件的数据。 */
+    sprintProgressNote: string;
+    /** 归航第 1 级的交付确认：这次交付完成了吗（已完成 / 部分交付 / 还差一点 / 空）。 */
+    landingDeliveryState: "" | "done" | "partial" | "short";
+    /** 归航第 1 级的"后面还等着什么"：数据、脚本、筛选过程、复现步骤等中间产物。 */
+    landingHandoverNote: string;
     professionalStudyPlanned: PresenceState;
     studyMaterial: string;
     studyTopic: string;
@@ -201,6 +215,7 @@ export function isDailyRecordExcluded(record: Pick<DailyRecord, "dayState">): bo
 export function dailyDayStateLabel(dayState: DailyDayState): string {
     if (dayState === "chaotic") return "混乱的一天";
     if (dayState === "uncontrolled") return "失控的一天";
+    if (dayState === "sprint") return "紧急期";
     return "正常";
 }
 
@@ -460,7 +475,9 @@ function emptyDailyFields(): DailyRecordFields {
         plannedWorkEndTime: "", importantWorkPlan: "", saturdayReviewOccurred: "", hasDayAdjustments: "", dayAdjustments: "", trainingPlan: "",
         personalAffairsPlanned: "", personalProjectLinks: [],
         hasPersonalProjectNote: "", personalProjectPlan: "", personalProjectNoteDraft: "",
-        restAndLifePlan: "", professionalStudyPlanned: "", studyMaterial: "", studyTopic: "", studyPlan: "",
+        restAndLifePlan: "", sprintMealCount: null, sprintProgressItemId: "", sprintProgressNote: "",
+        landingDeliveryState: "", landingHandoverNote: "",
+        professionalStudyPlanned: "", studyMaterial: "", studyTopic: "", studyPlan: "",
         studyResult: "", actualWorkEndTime: "", keyWorkResult: "", trainingCompleted: "",
         importantWorkResult: "", personalProjectDurationMinutes: null, daytimeEnergy: null,
         workEfficiency: null, promotingStress: null, depletingStress: null, closureNeed: "", closureObject: "",
@@ -544,6 +561,8 @@ function normalizeDailyRecord(value: unknown): DailyRecord | null {
             afterHoursWorkReason: normalizedAfterHoursWork === "yes" ? textValue(fields.afterHoursWorkReason) : "",
             hasAnomalyOrObservation: normalizedAnomaly,
             anomalyOrObservation: normalizedAnomaly === "yes" ? textValue(fields.anomalyOrObservation) : "",
+            sprintMealCount: nullableIntegerInRange(fields.sprintMealCount, 0, 9),
+            landingDeliveryState: landingDeliveryState(fields.landingDeliveryState),
             bedtimePreparation: bedtimePreparation(fields.bedtimePreparation),
             lightsOffBand: lightsOffBand(fields.lightsOffBand),
             lightsOffTimeSource: lightsOffTimeSource(fields.lightsOffTimeSource),
@@ -561,6 +580,7 @@ function stringFields(fields: Partial<DailyRecordFields>): Partial<DailyRecordFi
         "actualWorkEndTime", "importantWorkResult", "closureObject", "closureNextStep", "personalLifeResult", "bestThing",
         "obstacleOrCost", "afterHoursWorkReason", "tomorrowFirstAction", "anomalyOrObservation", "plannedLightsOffTime", "plannedLightsOffAt",
         "lightsOffAdherenceReason", "watchSleepOnsetTime", "watchSleepOnsetAt",
+        "sprintProgressItemId", "sprintProgressNote", "landingHandoverNote",
     ];
     return Object.fromEntries(keys.map((key) => [key, typeof fields[key] === "string" ? fields[key] : ""])) as Partial<DailyRecordFields>;
 }
@@ -603,7 +623,12 @@ function isDayType(value: unknown): value is DailyDayType {
  * 非法值同样回落「正常」——最坏情况是这一天照常进统计，而不是整份数据无法解析。
  */
 function dayState(value: unknown): DailyDayState {
-    return value === "chaotic" || value === "uncontrolled" ? value : "normal";
+    return value === "chaotic" || value === "uncontrolled" || value === "sprint" ? value : "normal";
+}
+
+/** 归航第 1 级的交付确认：非法值一律回落为空，不影响解析。 */
+function landingDeliveryState(value: unknown): DailyRecordFields["landingDeliveryState"] {
+    return value === "done" || value === "partial" || value === "short" ? value : "";
 }
 
 function triState(value: unknown): TriState {
@@ -700,6 +725,12 @@ function nullableScore(value: unknown): number | null {
 function nullableNonnegativeNumber(value: unknown): number | null {
     const number = finiteNumber(value);
     return number !== null && number >= 0 ? number : null;
+}
+
+/** 只接受整数：正餐次数这类计数出现小数没有任何意义，宁可回落为空。 */
+function nullableIntegerInRange(value: unknown, minimum: number, maximum: number): number | null {
+    const number = finiteNumber(value);
+    return number !== null && Number.isInteger(number) && number >= minimum && number <= maximum ? number : null;
 }
 
 function nullableBoundedNumber(value: unknown, minimum: number, maximum: number): number | null {
