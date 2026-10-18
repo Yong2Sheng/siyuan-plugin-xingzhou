@@ -948,7 +948,8 @@
 
     /** 读取当前草稿值：旧的行动字段在顶层，细则字段在 detail 子对象里。 */
     function draftOf(field: EditorField): string {
-        if (!isDetailField(field)) return draftOf(field);
+        // 这里曾误写成 draftOf(field) 自我调用：任何从顶层字段打开的编辑都会无限递归爆栈
+        if (!isDetailField(field)) return detailDraft[field];
         return detailDraft.detail[field.slice("detail:".length) as ActionDetailField];
     }
 
