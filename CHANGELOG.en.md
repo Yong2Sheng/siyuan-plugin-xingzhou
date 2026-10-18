@@ -1,5 +1,18 @@
 # Changelog
 
+## 5.4.1 - 2026-10-18
+
+Fixes a batch of **layout problems in narrow panes**. Inside SiYuan, Xingzhou only occupies part of the viewport (4K half-screen: viewport 1950px, pane 685px), but several breakpoints measured the browser viewport instead — the viewport is always wide enough, so the rules never fired and narrow panes were laid out as if they were wide.
+
+### Fixed
+
+- **Sleep section column count follows the pane width**: at a 980px pane it still used three columns of 195px, so the 1–5 buttons of "subjective sleep quality" did not fit and were painted on top of "watch sleep onset"; at 1312px the left column was only 272px. Now it follows the section's own width: single column below 620, two columns from 620, three from 1000.
+- **Daily record and rubric card**: they used to sit side by side at every width; now they only do so at panes of 1100px and wider, otherwise the rubric sits above the record card.
+- **Top day-type bar**: the two rows used to be laid out side by side in one line, so the day-type description floated on top of the "normal / chaotic / out of control" buttons and "day type" was squeezed into a vertical stack. It is now genuinely two rows, each wrapping by its own needs, and only returns to one line at panes of 1400px and wider.
+- **Today's plan**: switches to two columns only at 820px and wider, no longer squeezing "work start / planned end" into one cell.
+- **Project toolbar**: buttons are no longer squeezed into one-character-wide vertical stacks ("ex…/pa…/co…"), the row wraps instead; at a 760px pane the toolbar drops from 211px with horizontal overflow to 169px without.
+- **"Expand all / Collapse all"**: now styled as buttons (they were transparent, borderless text, so they did not look clickable).
+
 ## 5.4.0 - 2026-10-14
 
 Adds the **sprint period** and the **landing period**. During a high-intensity stretch such as proposal season, the daily record works against you: there are many fields, every field is a small decision, and once a day slips it is easy to drop the whole day and then weeks. The sprint period reduces the record to four protective anchors; the landing period brings the fields back one rung per day.
