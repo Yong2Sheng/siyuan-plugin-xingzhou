@@ -45,3 +45,672 @@ Adds the **sprint period** and the **landing period**. During a high-intensity s
 - Completing a rung used to advance the same day to the next rung: the displayed rung and the visible fields now come from the rung recorded for that day instead of the cursor.
 - The sprint UI no longer disappears when a date other than today is open; neither it nor the landing banner depends on `isToday` any more.
 - The *delivery result* panel no longer lingers until rung 4: it belongs to rung 1 only.
+
+## 5.3.0 - 2026-09-28
+
+Hierarchy browsing goes from **something you have to squint at** to **something you can read at a glance**. Until now, level, type, and belonging were all carried by a single weak signal — an 18px indent. Each row also spent a fixed 20px on a drag handle and 26px on an expand arrow before the title began; titles used the same size and weight at every depth; the type badge was the loudest element in the row yet repeated on every line; nothing separated one area's subtree from the next; and the right-hand chips mixed two colour systems at inconsistent widths. The result was that "Long-term area · Writing fiction" and a third-level "Transaction · Chapter six" looked typographically identical, leaving you to count pixels to work out which level you were on.
+
+### Added
+
+- **Chapter blocks**: a long-term area, or a top-level project that belongs to no area, becomes a wrapped block — outline, faint fill, and **a role-coloured strip running down its entire left edge**. Top-level projects nested under an area become blocks of their own too (switchable through a theme variable), so "how many areas, and how many projects inside each" can be counted in one screen.
+- **Sticky block headers**: while scrolling, the area header stays at the top and a nested project header parks directly beneath it, so row 30 still tells you whose subtree you are reading.
+- **Collapsed blocks report their size**: folding a block shows "N projects · M transactions" in its header, so a collapsed block is no longer just a bare title. Only descendants visible under the current filter are counted, so the Today filter never disagrees with what expanding reveals.
+- **Consecutive identical rows fade back**: when three or more siblings in a row share exactly the same slice plan and status, their chips drop to 50% opacity — the eight "no slices yet / Not started" rows in the photo-album list stop forming a wall. Today rows are excluded so the work you actually mean to do today is never dimmed.
+
+### Changed
+
+- **Indentation and guide lines**: each level now indents 24px, carried by the child container, and draws a vertical guide line. The guide is drawn per child node, and **the segment beside a block (which already has a strip) is skipped** — a strip that runs the full height of a block already says "this branch starts here".
+- **A four-step type scale**: area 15px/700, top-level project 13.5px/650, subproject 13px/600, transaction and idea 13px/400 in a slightly recessed text colour. Row heights follow at 46 / 40 / 36 / 34px, giving the list a vertical rhythm.
+- **Transaction badges become dots**: transaction and idea rows no longer carry a full pill but a 7px role-coloured dot — the type identity stays, the competition with the title goes. The badge element and its screen-reader text are both kept, and areas, top-level projects, and subprojects keep their solid badges.
+- **Three fixed-width right-hand columns**: Today 44px, slice plan 84px, status 66px. Empty slots keep their width, so each column aligns vertically and "what am I doing today" can be read down a single column. The dependency chip `⇠N` moves from between the title and the columns to the left of the title, and "moved out of today" moves to the right of the status column.
+- **"No slices yet" is demoted**: the default state is no longer a coloured chip, only faint grey text (its slot is kept so alignment is unaffected).
+- **Sibling dividers**: a 1px hairline between rows, so consecutive transactions no longer blur into one another.
+- **Drag handle and reorder buttons appear on demand**: `⠿` and `↑ ↓` are hidden until you hover, select, or keyboard-focus the row. Their space stays reserved, so nothing jumps when they appear.
+- **Four narrow-width steps**: 1100 / 980 / 760 / 620px progressively tighten the indent and the three columns, and below 620px the subproject badge is hidden. On touch devices every row is raised to a 42px target (48px for block headers).
+
+### Data
+
+- **No data changes**: this release only touches rendering and two derived calculations. Work items, daily records, checklist, and nutrition keep their exact structures and storage version, and no migration is needed.
+- Both new derived values are computed from existing data on the fly and never written to disk: the identical-row test reads the slice plan plus status, and the block count reads the subtree structure and types.
+
+### Verification
+
+- `pnpm test`: 648 passed / 5 skipped (58 files passed, 3 skipped; one further test skips itself on Mondays by design and is unrelated to this change); `pnpm run check`: 0 errors / 0 warnings.
+- Ten new regressions: the boundaries of an identical run (three rows count, two do not, a differing status or slice plan breaks it, runs never cross parents, a today row neither joins a run nor lets one continue across it, and top-level siblings behave the same), plus cross-level and visible-only block counting. A component-level contract test locks down that the block container carries `data-role`, the dependency chip precedes the title, the transaction badge is still rendered, and `data-repeat` and the "1 project · 3 transactions" count both appear.
+- Before writing any code, clickable design pages were rendered from the real `dist/index.css` and `TreeNode.svelte` markup, covering 1440 / 980 / 760 / 620px and seven partial states (empty data, fully collapsed, an area with no projects, the Today filter, an over-long title, a missing status, and dark theme). After the implementation, the same pages were used frame by frame to re-check the built output.
+- Build and `package.zip` verification pass; publishing is triggered by pushing the `v5.3.0` tag through GitHub Actions.
+
+### Upgrade notes
+
+- Just reload the plugin after upgrading; no data migration is required and no data file is touched.
+- For a denser tree (top-level projects no longer becoming blocks of their own), delete the two `.xz-tree-node[data-depth="1"][data-role="topProject"]` rules in `src/index.scss`. Indent and header height are controlled by the `--xz-tree-indent` and `--xz-tree-block-head` variables.
+
+## 5.2.0 - 2026-09-28
+
+Every day gains a **day state**: whether it ran as planned, fell behind, or went entirely sideways. A marked day drops out of the statistics, while **everything already written stays exactly as it is**.
+
+It started from a concrete loop — **once a few items slip, the rest of the day is abandoned, and then even the record stops being written**. Until now "this day fell apart" and "nothing was planned for this day" looked identical in the data: both were blank stretches on the trend chart, and both counted as a miss in the adherence rate. The mark is not there to punish a bad day; it is there so that day can **step out of the statistics with dignity**. It was never a failure to be averaged in.
+
+### Added
+
+- **A three-way day state (Life Rhythm › Today's record, top bar)**: beside the day type, defaulting to **Normal**, with **Chaotic** (a record exists but the plan was not followed) and **Out of control** (the day went wrong, or there is barely any record). One click applies it and saves automatically: the mark itself counts as input, so it **saves without filling in a single field**.
+- **A marked day is no longer chased for fields**: the completion summary reads `Complete — · not counted today`, the stage badges all become “—” (nothing to check), and the to-fill list and its “Check missing” button disappear — a day that already went sideways should not be chased for twenty more fields. A banner at the top explains that the day stays out of the trends, adherence, and coverage denominators while all content is kept, and offers **“Back to Normal”**.
+- **A way out for a completely blank day**: previously an empty day could only be filled in field by field; now the form area offers **“Mark Chaotic / Mark Out of control / Start filling in”**, and marking requires no input at all.
+- **State chips**: the record header and the History list show a small “Chaotic” or “Out of control” chip, so a marked day stays recognisable after scrolling past the top bar. Chaotic uses sand, Out of control uses rose; neither uses error red — this means “not counted”, not “wrong”.
+
+### Changed
+
+- **A marked day leaves every statistic**: the trend lines, the coverage denominator, the late-night bands, the denominator of “plan met x/y nights”, and the nutrition lines with their “N entries per day”. When a window contains nothing but marked days, the chart reports an empty state instead of drawing a pretend line. If either the evening that recorded a plan or the next morning that gives the verdict is marked, that night leaves the adherence denominator — otherwise “did I actually turn the lights off last night” turns into an interrogation.
+- **A marked day is exempt from the required “reason for missing the plan”**: that night's verdict never reaches the adherence rate anyway, so a mandatory sentence must not block the act of marking the day.
+
+### Data
+
+- Daily records gain a `dayState` field (`normal` / `chaotic` / `uncontrolled`). **No migration needed**: a record without the field parses as Normal, invalid values fall back to Normal, and the storage version is unchanged. Marking **never clears or validates** any filled field, and switching back to Normal puts the day straight back into the statistics.
+- The nutrition structure is untouched: intake on a marked day stays out of the statistics while `nutrition.json` keeps its structure, revision rule, rotating backups, and read-after-write verification.
+
+### Verification
+
+- `pnpm test`: 639 passed / 4 skipped (57 files passed, 3 skipped); `pnpm run check`: 0 errors / 0 warnings.
+- Sixteen new regressions: default and invalid values for the new field, legacy record parsing, a marked day surviving a save round-trip and returning to Normal, marking a completely blank day, completion becoming “all not applicable”, exclusion from the trend lines, coverage denominator, bands, adherence denominator, and nutrition, plus the component-level path “click the mark → no more chasing → saves immediately”.
+- The real `daily-records.json` on disk (22 days, revision 1476) was read with the new parser: every record parses, all read as Normal, and every filled field keeps its exact value.
+- Build and `package.zip` verification pass; publishing is triggered by pushing the `v5.2.0` tag through GitHub Actions.
+
+### Upgrade notes
+
+- Just reload the plugin after upgrading; no data migration is required. Existing records all count as Normal, so behaviour is exactly as before.
+- Only a day you deliberately mark steps out of the statistics.
+
+---
+
+## 5.1.0 - 2026-09-27
+
+Execution slices gain a **reschedule** path, and rescheduling now leaves a visible trace: orange means this slice was moved here from another date. The meaning of a make-up completion is settled too — it only ever means "I did it that day but forgot to tick it".
+
+### Added
+
+- **Rescheduling slices (work item detail → execution-slice calendar)**: right-clicking a past, today, or future slice opens a two-step menu — the first action is still completion (make-up / complete / complete early), the second is **“Reschedule to…”**, which turns the menu into a 14-day date panel; taken dates and dates past the deadline stay listed but greyed out with the reason. Previously **only the week view could change a date**, and a past slice in the calendar offered nothing but a make-up completion.
+- **The week view's “Move to…” is open to past slices**: a missed red card can now be rescheduled (previously only non-expired slices had that dropdown). It does not offer “Cancel schedule” — a past slice is the record of work not done that day, and cancelling it would delete that record.
+- **A “rescheduled” state colour (orange)**: a rescheduled slice is drawn with an orange border plus a left bar in the calendar; in the week view the card gets an orange border, a **“Rescheduled” badge and the original date**, and the calendar summary adds “N slice(s) rescheduled” with its own legend entry. Orange appears only while the slice is **rescheduled and still undone**: completing turns it green, abandoning turns it dashed grey. A rescheduled slice that has since expired **stays orange** — it is not merely "not done", it is "moved once and still not done", which is exactly when it should be visible.
+- **A second-reschedule warning**: moving the same slice a second time puts the cost at the top of the panel — "this slice has already been rescheduled once (originally 24 September); moving it again makes it the second time — either do it today, or shrink it to something you can start right now" — together with the alternatives at hand: **“Shrink to 15 minutes”** (sets that slice's estimated duration to 15 minutes; repeated rescheduling usually means the slice is too big to start) and **“Abandon this slice”**. The first reschedule stays quiet.
+
+### Changed
+
+- **A make-up completion is now dated to the slice's original day**: a make-up means "I did it that day but forgot to tick it", so the completion belongs to the original day rather than to the day the button was pressed. Previously a make-up always wrote the click time, making "made it up on Tuesday for Monday" indistinguishable from "actually did Monday's work on Tuesday".
+- **A rescheduled slice returns to “Scheduled”**: rescheduling means "not done that day, moved to this day", so the new date should hold a clean to-do slice. Previously the missed state was carried over, leaving the new date red, offering only a make-up completion on the day, and expiring again on the next load.
+- **One undo wording**: a make-up and an on-the-spot completion both land in “Completed”, so the context menu now always says “Undo completion” instead of guessing from the date (a slice completed on time used to be labelled “Undo this make-up completion”).
+
+### Data
+
+- Slices gain an optional `rescheduledFrom` field (written on the first reschedule, kept unchanged afterwards so the UI can recognise a second move). **No migration needed**: a slice without the field is treated as never rescheduled, and invalid values are ignored rather than lighting up the orange state. The origin date is kept after completion or abandonment, so undoing a completion never loses it.
+
+### Verification
+
+- `pnpm test`: 621 passed / 4 skipped (60 files); `pnpm run check`: 0 errors / 0 warnings.
+- New regression coverage: a make-up dated to the original day, reschedule state and origin, the completed/abandoned/expired readings, legacy data degradation, the calendar's orange cell and hover text, the second-move warning with “Shrink to 15 minutes”, the silent first move, and the orange badge after a week-view reschedule.
+
+This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
+
+## 5.0.0 - 2026-09-25
+
+### Added
+
+- **Lights-out plan adherence (Daily Rhythm › Today)**: tapping **Lights out now** in Bedtime preparation records the real clock time on the spot (it never touches the next day's record, and it belongs to that same night), and the next morning you answer one question: **"Did I follow last night's lights-out plan?"** When a plan exists and a measured time was recorded, the verdict is derived automatically (15-minute tolerance, going to bed early always counts as met). Only "plan recorded but no measured time" asks once, and a "missed" verdict requires one sentence explaining why. The morning no longer asks you to recall the actual lights-out time: the old required time box could only be guessed — 12 of 20 days got a value and the rest were left as "after midnight (late night)". A night without a number is no longer a night without data. The verdict is a derived value computed at read time and never stored, so existing data needs no migration and a stored verdict can never contradict the measured time. The sleep-window summary in Trends now reports "plan met x/y nights (15-minute tolerance)".
+- **Watch sleep-onset time (optional)**: it belongs to watch data, so it sits in the same group as the watch sleep score and sleep duration, and it derives **how long it took to fall asleep** (midnight crossing wraps by a whole day: lights out 23:45, asleep 00:40 = 55 minutes). Sleep onset is **recorded only and never judged**: lights out is what you control, falling asleep is not under direct voluntary control, and judging it would punish something you cannot govern. The interface gives it neutral copy and no red/green. Sleep duration moved into that group as well: setting the watch switch to "No" collapses duration, score and onset together.
+
+### Changed
+
+- **The Sleep & body section was restructured**: it is now a read-only **review bar** (last night's plan, the verdict, the measured time) plus a **fill area** (wake time, morning weight, subjective sleep quality, and the watch sleep data group). Breakpoints are now `<620px` one column, `≥620px` two columns, `≥1100px` three columns, and every control in the section is capped at 320px (previously plain selects and the score input stretched across the full column, so one column mixed very wide and very narrow controls). The read-only measured time is plain text in the review bar; a **Change** button reveals the time picker.
+- **Last night's lights-out no longer requires an exact time**: you can mark only "before midnight / after midnight (late night)". Records that already have a time can still be edited from the review bar (editing marks it as recalled).
+- **Boundary reminder cards are now headlined by the actual item**: all three card groups (to confirm / not yet due / confirmed) used to be headlined with the checklist entry title — the phase name, such as "Lunch" — while the thing you actually had to do ("fish oil with the meal; don't work while eating") sat in 10px grey text. Confirming a card moved it to the confirmed group with the same "Lunch" headline, which looked like a data bug. The headline is now the **actual item** (split at the first semicolon: the first clause becomes the title, the rest becomes a supporting line; a single-clause reminder is used whole), with the phase name, status and remaining clauses on the supporting line. Section headlines use the actual item too ("Next up is fish oil with the meal at 12:10"). When the headline already is the phase name (for example "Get up") the supporting line does not repeat it. Title size went 12px/500 → 13px/600, supporting line 10px → 11px, and "not yet due" no longer greys out the title.
+
+### Fixed
+
+- **A required field could block autosave without any message**: choosing "did not follow the plan" makes the reason required, but the save bar stayed on "Waiting to autosave…", which looked like saving had broken. It now states what is missing.
+- **Narrow-screen card layout**: at `≤980px` the boundary reminder card merges the time and title into one cell and lets the button span two rows on the right, so the headline is no longer squeezed out.
+- **Every detail field editor was titled "Next Action"**: opening the editor from Prompt, Background & constraints or any other detail field showed a window titled Next Action, which looked like the wrong field had opened (the text and the saved field were always correct). The window title, accessible name and content now all name the field being edited, and only Next Action reads "Next Action".
+
+- **Every detail field editor was titled "Next Action"**: opening the editor from Prompt, Background & constraints or any other detail field showed a window titled Next Action, which looked like the wrong field had opened (the text and the saved field were always correct). The window title, accessible name and content now all name the field being edited, and only Next Action reads "Next Action".
+- **Switching work items left the previous item's Current Action Details on screen**: the field cards read their content through `isFilled(fieldName)` / `preview(fieldName)`, and Svelte only re-renders a piece of DOM when a variable appearing in its expression changes — `actionDetail` was not one of them, so after selecting another transaction the labels, one-line previews and expanded text of Guidance & ideas and the other fields still belonged to the previous item (Current State showing "Fill in" next to written content had the same cause). Field values now come straight from `actionDetail`, so every field follows the selection. Two same-root annoyances went with it: switching work items no longer carries over the previous item's staged-result draft, template name, or open template panel.
+
+## 4.1.0 - 2026-09-21
+
+Current Action Details is now a set of structured fields, and Transactions gained an item-level to-do list.
+
+### Added
+
+- **A to-do list on Transactions and Ideas**: three states (check = done, **✕ = dropped in place and restorable**, delete is a separate confirmation), progress reads "done x/y" with **dropped items excluded from the denominator**; each row expands into notes/results and reference links (both accept pasted images), "Put into today" turns that item into today's execution slice, and "Multi-select" drops or schedules several at once. The footer box adds continuously on Enter, and **pasting multiple lines creates multiple items**. Only Transactions and Ideas show the list; Projects and Areas do not.
+- **Finishing a Transaction now requires an explicit decision**: with unfinished slices or to-dos, marking it complete opens a confirmation layer that lists them and asks you to drop everything and complete, keep them as outstanding (one leftover note is written into Current State), or record why you are closing it. With nothing unfinished it completes directly, with no extra step. It is deliberately not a hard block: a slice marked missed or abandoned can never become completed again, so blocking would leave deletion as the only way to close such a transaction.
+- **Current Action Details is structured** (replacing the single long block): **Current State** (an automatic line with slice progress, to-do progress, last update and days to the deadline, plus a hand-written "where I stopped / what blocks me"), **Background & constraints**, **Prompt** (copyable), **Staged results** (dated entries, newest first), **Guidance & ideas**, and a collapsed **Definition of done**. Next Action remains a separate field rendered as the last field card, so "what is next" is written exactly once.
+- **Action detail templates**: save the current structure as a template (field text only, no staged results) and apply it from any Transaction or Idea; applying only fills **empty** fields and never overwrites what is written. Templates live in the plugin's own `action-templates.json`.
+- Every detail field supports the large editor window: long text, pasted or dropped screenshots, Markdown rendering, and Cmd/Ctrl+Enter to save. Filled fields show a one-line preview until expanded; empty ones take a single line.
+
+### Changed
+
+- **Data model extended**: items in `work-items.json` gained `todos` and `actionDetail`. The old `currentAction` long text is migrated once into "Guidance & ideas", with a "legacy details migrated" line left in Current State. The migration is idempotent, overwrites nothing already written, and the original field is kept as compatible text (image cleanup, storage checkup and the missing-field notice still read it).
+- **The "task" type is retired**: it no longer appears in creation options, the type select, the role legend, or parent candidates; the hierarchy is Area → Project → Transaction/Idea. Any legacy task still renders as "task (legacy type)" and can be re-typed by hand — no item's type is changed automatically.
+- The details panel was re-laid out: the to-do list sits above the action details, each detail field is its own small card, redundant labels were removed, and empty fields no longer reserve a dashed box.
+- Image cleanup and the storage checkup now scan every detail field, staged results and to-do notes, de-duplicated by path.
+
+### Fixed
+
+- **The to-do list stopped rendering entirely**: while reworking the details panel the `<TodoListCard>` tag was removed by accident, yet its import and logic remained, so the build and type check passed while the list was invisible. Restored, with three regression tests (position above the action details, immediate save on check, Ideas have it and Projects do not).
+- **Saving a template failed silently**: the name was asked through `window.prompt`, which the Electron renderer does not support (it returns null), so the "if null then return" guard made the button do nothing. It now uses an input inside the panel, and applying a template reports how many empty fields were filled.
+
+## 4.0.0 - 2026-09-21
+
+### Added
+
+- **Boundary reminder panel (Life Rhythm › Today's Record)**: surfaces, by time of day, the scattered events that fall through the cracks even when you know the overall routine by heart — fish oil with meals, glasses into the backpack, meals on time, and the end-of-work shutdown. The panel sits at the top of the record card, before the missing-fields panel: it answers "what should I do now", not "what do I still need to fill in".
+  - **Tiered display**: overdue items (within 3 hours) and items due within 60 minutes come first, marked with a red or primary-coloured bar and "should be done · 32 minutes ago" / "in 28 minutes". Later items are **listed outright** (muted, up to three) and can be confirmed early; anything further out is only counted, and moves to the front when its time comes.
+  - **It never goes invisible**: the panel is always present, and when nothing is due the headline reads "Next up: lunch at 12:10". It collapses to a single line only when nothing is configured for the day, or when everything is confirmed and nothing else remains.
+  - **One-tap confirmation**: "○ Done" writes into the checklist's day state and tapping again undoes it. It shares one copy of data and check state with the Daily Checklist view, so confirming in either place updates the other immediately; "Go to today's Checklist ›" jumps straight there.
+  - **Non-intrusive**: no system notifications, no sound, no modal dialogs. Time-based judgement applies to today only — on other dates the panel merely lists what was configured and marks it as not a reminder.
+  - **Advances every minute**: the window is recomputed once a minute (about 3 µs of pure in-memory work — no I/O, no polling). Items more than three hours overdue stop being pushed, so the evening does not nag about the morning.
+- **Reminders now have a stable identity: a boundary time is bound to *which reminder*, not to *which row***. This fixes a problem hit in practice — with row numbers as the anchor, inserting a row above a reminder, deleting one, or reordering silently moved the time onto a different task, and it still looked perfectly normal. Each reminder now carries its own id, so **inserting, deleting, reordering and rewording never displace a time**; only deleting the reminder itself removes its time.
+- **Default templates ship with boundary times** (one set each for workdays, Saturdays, Sundays): fish oil with meals at 08:45 / 12:10 / 18:00, clocking off at 17:00, casein at 20:00, glasses into the backpack at 20:15, and weekend training ending at 07:30.
+- **Inline add and delete for reminders in the Checklist**: each entry's reminder list ends with "＋ Add a reminder", which **expands an input in place** (no dialog); Enter saves and keeps it open for consecutive entries, Esc cancels. Hovering a row reveals "×" on the right; one tap turns it into "Confirm delete" and a second tap deletes (always visible on touch devices). Deleting a reminder also removes its boundary time.
+- **Entry type labels**: four types — Plain, Rhythm cue, Preparation, Boundary — are marked in the Xingzhou view by a vertical colour block on the left, over a very faint entry tint. **The colour identity lives in the small label block**: the tint sits at only 1.04–1.09 contrast against the white card, so a full screen of entries stays restful. A legend under "Today's progress" defines all four; on narrow screens it collapses into a "?" button with a popover, and the paper view reuses the same palette.
+- **The boundary-time entry moved in front of the state selector**: it used to sit at the end of the row, which on a wide screen meant scanning across the whole line and then working out which row it belonged to. Each row now reads "time → state → reminder text", so the time sits in the same line of sight as the reminder it annotates. When unset it is only a faint dashed placeholder with no `--:--`; once set it becomes a solid chip. The separate time column was removed and its width returned to the content.
+
+### Changed
+
+- **Checklist data model upgrade**: `reminders` and `trainingChoices` changed from string arrays to `{ id, text }`, and entries gained an optional `boundaries` map keyed by `${entryId}::${reminderId}`. Upgrades migrate automatically: legacy positional keys are resolved to the id of **the reminder that was there at the time**, and legacy check-state keys migrate alongside, so **boundary times and check state already in effect are not lost once during the upgrade**. Invalid times, out-of-range indices and keys that resolve to no reminder are dropped rather than guessed.
+- **Tighter default-merging rule**: defaults are applied only when the whole `boundaries` field is absent (genuinely old data). If the field exists but lacks a given default key, the user deleted that reminder or cancelled its time — **defaults are no longer pushed back in**.
+- **`wd-prepare` / `sat-prepare` / `sun-prepare` split "glasses into the backpack" onto its own line**, with the boundary time aligned to it (it used to be buried inside the "fill the water purifier" sentence and could not be reminded separately).
+- **Visual rework of the Checklist in the Xingzhou view**: entries became individual rounded cards (the outer container frame is gone); type text is 12px with 4px letter spacing; the gap between the colour block and the content is 17px on wide screens and 13px on narrow ones.
+
+### Fixed
+
+- **Style edits silently overridden**: `.xz-checklist-native-content` and `.xz-checklist-native-entries` each had two duplicate rules, the later one overriding the earlier (which showed up as "I changed the spacing and nothing happened"). Merged — one rule per class now.
+- **Deleting a boundary reminder let the default bring it back**: any missing key used to be treated as "old data that has not been configured yet" and refilled from defaults. Now handled by the tighter rule above.
+- **Rewording a reminder lost its time**: the reconciliation logic preserved ids by exact text match, so changing one character looked like "deleted the old one and added a new one". It is now a two-step pairing — text match first (stable across inserts, deletes and moves), then one-to-one pairing by key position for the remainder (a reword keeps its id), and only then are new ids issued.
+- **Early-morning runs no longer treat last night's times as today's overdue items**: opening the panel at 02:00 no longer reports a 20:15 boundary as "5 hours 45 minutes ago".
+
+### Tests
+
+- Tests grew from 478 to 527, with four new files: boundary windows and wording (`tests/checklist-boundary.test.ts`), a **binding regression suite proving edits do not displace times** (`tests/checklist-boundary-binding.test.ts`, starting from legacy-format data and running read → edit → save → read again while asserting inserts, deletes, moves, rewords and row removal), panel rendering and interaction (`tests/DailyBoundaryPanel.test.ts`), and Today's Record integration including confirmation write-back and cross-view consistency (`tests/DailyRhythmBoundary.test.ts`).
+- Added a self-check on default data: every default boundary reminder must resolve to a reminder that actually exists, so defaults cannot be edited into pointing at the wrong row.
+- Fixed a pre-existing test that **failed only on Mondays**: the week view offers "make up for it" only on slices scheduled earlier in the current week, and on a Monday the week starts that same day, so the case could never pass. It now skips on Mondays, and `tests/WeekMakeupFixedClock.test.ts` covers the same behaviour deterministically by pinning the system clock to a Wednesday.
+- Component tests cover the full inline-add flow (expand → Enter to add → stays open and cleared → Esc to collapse), the two-step inline delete and the "keep at least one reminder" rule, unchanged boundary binding after adding or deleting, and the four type labels and legend rendering by tone.
+
+## 3.0.0 - 2026-09-20
+
+### Added
+
+- **Trend view (Life Rhythm › Trend, the seventh view)**: turns the numeric fields of the daily and nutrition records into line charts that answer "which way is this going?". Thirteen metrics are available; three are shown by default — Sleep window, Morning weight, and Daytime energy — and the rest (sleep duration, watch sleep score, subjective sleep quality, depleting stress, promoting stress, work efficiency, work boundary, closure duration, and recorded protein/calories) can be ticked on.
+  - **Convention 1: night anchoring with 24-hour notation.** Sleep metrics use the evening the night started as their X value, so a 01:00 lights-off never jumps to the next column. The Y axis is continuous in 24-hour notation (01:00 plots as 25.0), which is why averaging 23:30 and 00:30 gives 00:00 rather than 12:00, and why an extreme 13:10 wake-up still lands correctly instead of folding back at midnight. Lights-off, wake-up, and planned lights-off share one chart; the plan is dashed, and the vertical gap between the two lines is the bedtime delay.
+  - **Convention 2: bands instead of verdicts.** The late-night danger zone covers only **24:00–05:00** — colouring the whole after-midnight stretch red would paint the 06:00–08:00 wake-up target red as well — while 06:00–08:00 gets its own green band. Scores are banded by their own direction: energy, work efficiency, and subjective sleep quality are green at 4–5, grey at 3, red at 1–2; depleting stress is green below **3** and red above; promoting stress is green in the **3–4** band (1–2 means "no drive formed", which also counts as not met). Dashed boundaries and a text legend accompany the colours, with a separate palette for the dark theme.
+  - **Convention 3: missing data is never filled.** Days without a record break the line instead of becoming zero, and a night marked only as "after midnight" without a time becomes a red band rather than a guessed value.
+  - **Aggregation**: day, week, or month, defaulting to automatic (day up to 45 days, week up to 180, month beyond) and stepping down to a finer grain when the data is concentrated — under a "this year" window with data in a single month it falls back to weeks instead of compressing twelve days into one point. Mean and median are switchable (scores default to median), bins follow calendar weeks (starting Monday) and calendar months, bins with fewer than three days are drawn hollow, and every chart reports its coverage and how many days in the window actually have records.
+  - **Filtering and interaction**: range (this week, last week, 30 days, 90 days, this year, all, custom), granularity, and statistic are switchable; day types can be excluded (all, research workdays only, exclude holidays, exclude weekends) while excluded points stay visible in grey and out of the average; clicking any dot opens that day's record; the weight target (65 kg by default) is editable and clearable right on the chart, and the unit switches between kg and lb (each record stores its own unit, so mixed units are converted before plotting).
+  - **Persistence**: display settings live in `trend-view.json` and fall back field by field when damaged or invalid.
+- Metric definitions are centralised in the registry of `src/trend-metrics.ts` — each declares its source field, unit, direction, bands, and reference lines — so adding a metric is a registration rather than a rendering change. `src/trend-chart.ts` computes specification → geometry as pure data that can be tested without starting the UI.
+
+### Notes
+
+- This release only adds a read-only view: it **writes no daily records and no nutrition records** and takes no part in the revision or rotating-backup flow. `trend-view.json` is non-critical UI state, and a failed write is reported without blocking anything.
+- **No new dependencies**: the charts are hand-drawn SVG, and the new code is three pure-function domain modules plus two Svelte components.
+- The test suite grew from 409 to 478 passing tests (69 new: 28 metric conventions, 13 geometry, 12 settings, 13 component, 3 layout invariants), together with an "implemented-geometry audit" that renders the real component at 1440/1100/980/760/620/420 and in a "this year (monthly aggregation)" state, then checks overflow, text overlap, zero-size elements, tap-target size, and whether a band label is covered by a data point.
+- Edge cases handled during development rather than after release: late-night bands must aggregate with the chosen granularity (otherwise nightly bands pile into one blob on long ranges); band labels are painted above the data points and placed to avoid them; automatic granularity steps down by data distribution on long windows; the empty state is decided by "days with data" rather than by aggregated point count, and a single aggregated point prompts for a finer granularity; and the trend view is its own scroll container, otherwise the module's `overflow: hidden` clips it.
+
+## 2.4.0 - 2026-09-18
+
+### Added
+
+- **A general-purpose logging utility**: a uniform record of "who did what, when" that reconstructs a causal timeline when something goes wrong. It is an always-on recorder rather than a probe instrumented for one feature: the instrumentation sits on the critical paths, so a bug can no longer fall outside the list of instrumented places.
+  - **View, copy, and export inside the interface**: a "Log" button now sits next to "插件内部数据" in the header and shows a red unread count when new warnings or errors appear. The panel filters by level (verbose / info / warn / error) and by source, searches by keyword, offers "warnings and errors only", follows the newest entries (pausing when you scroll up), and supports **copy all**, **download .txt / .json**, and **clear**.
+  - The **export header** states the export time, the SiYuan kernel version, the levels in effect with their per-source overrides, the buffer size, and **how many entries were discarded by level** — so "why is the log empty?" is answerable too.
+  - A **self-test** button writes one entry and really throws an exception nobody catches, confirming that "record → unread badge → export" works without DevTools.
+  - **Automatic instrumentation** covers: plugin lifecycle and settings reads/writes; SiYuan API endpoint names, durations, success/failure, and readable failure reasons; for all four data files the revision increment (with action and the list of changed field names), backup rotation before writing, the write, the full read-back comparison, recovery from the valid backup with the highest revision, and the branch that stops writing when primary and backups are all unusable; the main user actions (opening the editor window, successful/failed saves, deleting items, editing fields and dependencies, quick capture, image upload, filter and page switches); and `window.onerror` plus unhandled promise rejections with source file, line/column, and a truncated stack.
+  - **Cost and switches**: only warnings and errors are recorded by default — entries below the level skip string building, field construction, and the buffer, and merely bump a discarded counter. When investigating, switch the relevant sources to "verbose" in the panel; the change applies immediately and is written to the plugin settings (the `log` field of `settings.json`), surviving a reload. The in-memory ring buffer holds 2000 entries by default (adjustable 200–10000), writes nothing to disk, sends nothing over the network, and is cleared on unload.
+  - **Privacy**: logs never contain note text — content-bearing fields are masked by name and keep only length and type, and other strings are truncated. Keystrokes are not recorded; only save actions and field names are.
+  - **Limits**: at the default level, successful lifecycle events (plugin load, tab init) are intentionally hidden; switch "lifecycle" to verbose to inspect startup. Logging is side-channel only: revisions, backup rotation, read-back verification, corruption recovery, the stop-writing branch, and the serial write queue all behave exactly as before.
+
+## 2.3.2 - 2026-09-17
+
+### Removed
+
+- **Removed the "Action editor diagnostics" entry and its recording module.** It was a temporary evidence-gathering tool added in 2.3.0 to pin down the large editor window's problems (it logged editor mount/unmount, `value` writes, selection changes, scroll positions, and their call sites in time order). It could only see the places that had been instrumented in advance, and its maintenance cost no longer matched its value; a broader general-purpose logging utility will replace it. The module, its styles, its menu entry, and its tests are all gone, and the built package no longer contains that code. Editing behaves exactly as in 2.3.1.
+
+## 2.3.1 - 2026-09-17
+
+### Changed
+
+- **Performance work in the large editor window** (behaviour essentially unchanged, cost clearly lower):
+  - The window's textarea no longer auto-sizes its height. It already fills the window and scrolls once the content outgrows it, so every keystroke no longer reads `scrollHeight` (a forced synchronous layout), and the "collapse to `auto`, then measure" step is gone along with the width change, text reflow, and mis-measured height it could cause. Long notes now scroll inside the editor itself, with its own scrollbar on the right.
+  - Placing the caret no longer creates an invisible measuring textarea: the click point is converted against the real editor once the window is open, which removes a forced layout and stops disturbing the document. The fallback that estimates the line from line height is kept for environments that do not report a textarea caret position, so the caret can never fall back to the very end by accident.
+  - Typing no longer reassigns all seven window props unconditionally: they are synced only when they actually change, which removes a full scan and a child re-render on every keystroke.
+- Cleanup: the whole synchronisation mechanism left behind by the removed inline editor (editor node and last-synced value records, the mount action, the caret plan) is gone, shrinking `XingzhouApp.svelte` by roughly 150 lines.
+
+### Fixed
+
+- Fixed an error thrown on the frame after "open the editor window, then close it immediately": placing the caret is scheduled on an animation frame, and by then the window may already be gone (save, cancel, an outside click, or the host destroying the dialog), so reading the editor's layout failed with `Cannot read properties of null`. That frame now confirms the window is still there and skips a destroyed node. In a browser this showed up as a quiet console error; in automated tests it made the test process exit with a failure code.
+
+### Notes
+
+- This release only changes performance and implementation: saving, cancelling, "click outside saves", the draft fallback, pinyin input, and undo all behave exactly as before.
+- No manual migration: no data shape, read/write path, revision number, rotating backup, or write-then-verify flow changed.
+
+## 2.3.0 - 2026-09-17
+
+### Added
+
+- **Current Action Details now edits in a large editor window.** Clicking an action card no longer expands an inline text box inside the card; it opens an editor window covering roughly 82% × 82% of the screen, with the whole note scrollable and room to write long text.
+  - This removes the two problems that plagued long-form editing: the view **jumping** on entry, and the caret landing somewhere other than the clicked line. The cause was structural — with inline editing, mounting the text box first changes the card layout, so the line you clicked has already moved. A window is an overlay: the card and the page never move, and the caret offset is computed against the window's own layout before it opens.
+  - Opening the window carries over any previous draft. **Save** with the button or ⌘/Ctrl+Enter, **cancel** with the button or Esc, and **clicking outside saves** (the rule the inline editor always used). A failed save keeps the window open, states the reason, and never loses the text.
+  - Image paste and drag-in, thumbnails, upload progress, and the remove button all live in the window and behave as before.
+- **Action editor diagnostics** (work item "⋯" menu → "Action editor diagnostics…"): keeps the editor's key events in memory (up to 600 entries) with one-click copy or clear. It records editor mount/unmount, `value` writes, selection changes, `focus/focusin/focusout`, scroll positions, and the **call site** behind each one — for tracking down editor problems that only appear on one machine. Nothing is written to disk or sent over the network.
+
+### Fixed
+
+- Fixed the input box **jumping up and down** while typing Chinese (pinyin), and every keystroke rewriting the textarea: input no longer triggers any programmatic write-back, and ordered-list numbering is rewritten in place, minimally.
+- Fixed **⌘Z not undoing**: every keystroke used to reassign the whole textarea value, which wiped the browser's native undo stack. The typing path no longer touches the DOM, so undo works again.
+- Fixed the **view jumping around** while editing long notes, and clicks landing on the wrong line:
+  - The editor no longer grows an inner scrollbar; it expands to the full content height like read mode, with an allowance for line-height rounding (the visible height used to fall 1–2px short of the content height, so the browser scrolled a little on every keystroke to follow the caret, which felt like being dragged to the bottom of the visible area).
+  - The auto-height measurement is now synchronous, so there is no collapsed frame for a click to land in, and the caret lands on the clicked line: clicking inside the text starts there, and clicking the upper part of a card starts at the beginning or the end depending on which half you hit.
+- Fixed **silent text loss**:
+  - The textarea is no longer disabled while saving (previously clicking away greyed it out and swallowed everything typed in that window), and a completed save never overwrites what you are writing with an older snapshot.
+  - Only genuine external changes (image insert, upload completion, item switch) write back into the textarea, and whenever the textarea is ahead of the draft, the textarea wins.
+  - Nothing is written back during IME composition — including the gap between `compositionend` and the final `input` — so just-committed candidates are never clobbered.
+  - Added a **local draft fallback**: what you type is snapshotted to session storage, and if it is newer than the saved value when you reopen, it is restored with a "restored your unsaved draft (local snapshot)" notice. A failed save falls back to the draft and reports the error instead of failing silently.
+- Fixed the **stuck editing state after the window is closed externally**: SiYuan dialogs can be dismissed by clicking outside, but that does not notify the plugin, so the card kept claiming it was being edited and could never be reopened. The dialog's destroy callback now resets the editing state (and treats an outside click as a save).
+
+### Changed
+
+- While editing, the action card now reads **"Editing in the large editor window · ⌘/Ctrl+Enter to save"** instead of the no-longer-true "click away to save · Esc to cancel".
+- The inline card textarea and its height cap are gone; long-form editing always goes through the large editor window.
+
+## 2.2.0 - 2026-09-12
+
+### Added
+
+- Execution slices support **undoing a completion**, today is marked with **今**, and **filling every target slice no longer ends the transaction by itself** (correcting the 2.1.0 behaviour): clicking a completed cell or using its context menu undoes it — today returns to Scheduled, a past date to Missed, a transaction you marked Done by hand falls back to In Progress, and abandoned slices stay read-only. With every target slice done the calendar only asks "Target slices are all done — is the transaction done too?", and the state changes when you press Complete transaction. Today's cell shows 今 on the same line as the date, so the marker costs no extra height.
+- Hierarchy browsing (the All page) gained a **Today view** in the filter group (first position, with a badge counting today's slots, and with the count of transactions that still have unfinished slices today): only transactions that still have unfinished execution slices today stay visible, so nothing else competes for attention. A matching transaction keeps its full area → project → task → transaction path as context, while only the transaction itself carries the blue Today marker; the sidebar scope groups, the toolbar toggles, and expand/collapse all follow the filter. The list previously only had the inline Today marker with no matching filter entry; both now share one rule (`isTodayFocusItem`), so the marker and the filter can never disagree.
+- The Today view is remembered with the rest of the view state: reopening the plugin returns to the filter you left (the filter allow-list in `ui-state.json` was extended to match).
+- Images in Current Action Details gained a **context menu**: right-click a thumbnail, an image in the read-mode text, or the enlarged original in the preview dialog to **Copy original image** or **Copy asset path**.
+  - Copy original image writes the **original file bytes** from the SiYuan asset library: a PNG screenshot is never decoded or resampled, so size and pixels match the image you originally pasted. It can be pasted straight into an AI conversation for pixel-level comparison instead of taking a new screenshot (which loses resolution).
+  - Non-PNG images (jpg / webp / gif / svg) are transcoded to PNG at their original size first: only the container changes, never the pixels, and an animated GIF keeps its first frame.
+  - The confirmation carries size and pixel dimensions (for example "Copied original image · 1280×800 · 611 KB"), and an unavailable clipboard, an unreadable asset, or a failed transcode each report their own reason instead of failing silently.
+  - Copy asset path copies `assets/...` as text so the same image can be referenced in prose. Only the image itself is a hit target: the size badge and the "×" remove button do not open the menu.
+
+### Changed
+
+- **Cancelling today's slice no longer jumps to another transaction.** Previously, clearing today's cell in the detail pane dropped the transaction out of the filter immediately, and the UI switched you to another transaction (most unfinished slices today, then tree order) — while the slice calendar reset to the current month when the transaction changed, so the view looked almost identical and inviting repeated clicks. The selection is now **pinned in place**: the transaction and its ancestor path stay visible with a "moved out of today" marker (hover explains why), the detail pane and calendar never switch items, and you can schedule the slice back onto today to restore it. The pin is released only when you actively select another item, switch filter or scope, or delete the item; after a deletion the original fallback still applies.
+- The slice card's **information block lost a full row**: when the card is wide enough (≥620px) the scheduling note and the Complete / Abandon this slice actions merge into the "0% transaction progress + progress bar" row; on narrower cards they sit on the row under the bar, but the buttons always stay on the same line as the note instead of wrapping or jumping with width or state changes. Buttons shrank from 30px to 22px (3px padding plus a 14px line height), and a long note is truncated with an ellipsis and shown in full on hover.
+- Slice-card copy now states facts: with a slice scheduled today it reads **"1 slice scheduled today"**, and the previous "unhandled by the end of today is automatically recorded as missed" is gone — that sentence never said whether it meant the transaction or the slice, and its timing was inaccurate (past-dated slices are settled on the next load, and only the slice status changes, never the transaction).
+- Keeping a selection in hierarchy browsing no longer inserts an explanation banner or rewrites the panel subtitle: the banner appearing and disappearing was itself shifting the tree, so the explanation now lives in the hover text of the "moved out of today" marker.
+
+### Fixed
+
+- Fixed the buttons jumping to the next line: the note and the buttons used to switch between side-by-side and stacked based on container width, so resizing the window moved the buttons. The layout no longer switches within a tier.
+- Fixed detail thumbnails **always collapsing to one per row**: when the container content box is ≤620px wide the thumbnail width is `calc(50% - 4px)`, and adding the 1px border made the real outer box `50% - 2px`, so two thumbnails plus the 8px gap exceeded 100% and every image ended up on its own line. At a 1440px pane the detail content box is exactly 568px, which is inside that range, so this was the everyday path. Measuring against `border-box` now restores two per row (both the `132×96` and `calc(50% - 4px) × 88` tiers render at their declared size), guarded by a layout-invariant test.
+
+## 2.1.0 - 2026-09-11
+
+### Added
+
+- **A transaction is complete once its target slices are done**: finishing the last slice now completes the transaction itself — the This Week board's Complete / Backfill complete / Complete early buttons, the slice calendar and today actions in the transaction detail, and Complete in Life Rhythm's Today's personal schedule all share one rule, so you no longer have to reopen the detail and press Complete transaction; undoing a slice completion that drops the item below its target moves it back to In Progress. Transactions that already ended (Done / Failed / Cancelled / Abandoned) are never rewritten by slice actions.
+- Each row in Life Rhythm's Today's personal schedule gained **Cancel arrangement**: it removes only today's slice and leaves the transaction itself untouched; the row disappears immediately and the daily record's personal-schedule snapshot is updated with it.
+- Actual lights-off gained a **bedtime band** selector (before midnight / after midnight · stayed up), shown inside the label row and vertically centred with the label:
+  - After midnight can be recorded with one click and **without inventing an exact minute**: the time row turns into "no exact time", and "Add time" expands it when you do know;
+  - When a time is filled in, the band is derived from it (an after-midnight clock time means after midnight), and the conflicting band is disabled so contradictory values cannot be stored;
+  - Clearing a stored time only happens when you press "Clear" yourself; the band marker survives and the field returns to "no exact time";
+  - The history list shows a "stayed up" badge after sleep duration, and the missing-field check accepts the after-midnight marker instead of asking for a time forever.
+- The bedtime band is stored next to the exact time. Records written by earlier versions have no such field and get it derived from their existing time; revision numbers, rotating backups and read-after-write verification are unchanged.
+
+### Changed
+
+- Rows in Today's personal schedule now show the transaction's own end state: when the transaction is Done / Failed / Cancelled / Abandoned the **row stays visible** with a "Transaction done / Transaction cancelled" badge and its Complete, Abandon and Cancel arrangement actions are disabled, so a cancelled transaction can no longer look pending and actionable.
+- The Today's personal schedule box switched from a fixed 76px height to an **adaptive** one: about three rows at minimum, then in-box scrolling past roughly five rows. The empty state matches the height of a filled one, so adding or cancelling an arrangement no longer makes the section jump.
+
+### Fixed
+
+- Fixed slice actions bypassing image-cleanup registration: when a slice completes its transaction, the images are registered for cleanup exactly like Mark as complete; undoing the completion back to In Progress clears that registration.
+- Fixed daily-record form controls being **22px wider than their own grid column**: they were sized as content-box, so `width:100%` was followed by another horizontal padding and border. At a 1440px window "the most important work today" overlapped the right column's "Adjustment details" by 12×94px, and at 1100px the watch sleep score input pushed into the neighbouring column. Inputs, selects and textareas now use `border-box`, so control edges line up with column edges.
+- Fixed the actual-lights-off label sitting 3px lower than the other labels in the same grid row because of the selector next to it.
+
+- **Correction (later version)**: the "a transaction is complete once its target slices are done" rule above was changed back to **your confirmation** — filling every target slice no longer ends the transaction by itself, the slice calendar only asks "Target slices are all done — is the transaction done too?", and the state changes when you press Complete transaction. The detail slice calendar also gained an **undo** entry (click a completed cell or use its context menu: today returns to Scheduled, a past date to Missed, and a transaction you had marked Done by hand falls back to In Progress). The undo side of the rule shipped here (falling back to In Progress when the item is no longer full) is still in place. See the 2.2.0 section.
+
+## 2.0.0 - 2026-09-10
+
+### Added
+
+- Images in the current-action field: paste a screenshot (Cmd/Ctrl+V) or drop an image file on the card. Images are stored in the SiYuan asset library at **original resolution** (no re-encoding, no compression); the action text keeps only an `assets/...` path reference, so image bytes never enter the plugin data.
+- Images are named after their content fingerprint and de-duplicated: pasting the same image twice stores one copy, and the SiYuan kernel itself reuses existing assets by content.
+- Edit mode shows thumbnails below the input: a spinner while uploading, red state on failure, a size badge, and per-image removal. Read mode renders images through Lute, capped in height, and clicking one opens the original.
+- When an item ends (Done / Failed / Cancelled / Abandoned) its images are registered for cleanup: the item plus all its descendants are queued with a 7-day grace period. During the grace period text and images stay untouched, and the item shows a "image cleanup · N days left" badge.
+- New "Image cleanup" page (toolbar entry with a count badge):
+  - Lists every pending item with thumbnails, image count, status and countdown; due items sort first and are highlighted;
+  - "Clean up now" opens an in-page confirmation step to pick items and individual images; images still referenced by other unfinished items are marked with the referencing item and cannot be selected;
+  - After confirmation, Xingzhou removes its own references first, then checks SiYuan's "unreferenced assets" list and deletes only files SiYuan considers unused. Images referenced by documents, databases or other plugins are always kept;
+  - Deletion goes through SiYuan's single-asset API, which copies the file into the history folder first, so it can be recovered from History. The result (deleted, kept, failures) is shown on the page.
+- New "Storage health" section: counts distinct images referenced by Xingzhou, space used by unfinished items, space pending cleanup, and the whole asset library, with a segmented usage bar and a per-item usage ranking (collapsible, top 20). Sizes are queried through SiYuan's asset API, cached, and can be refreshed manually.
+
+### Changed
+
+- The cleanup entry moved from an always-visible panel under the toolbar to a toolbar button plus a dedicated page: it no longer consumes vertical space and is no longer constrained by dialog width.
+- Cleanup confirmation moved from a dialog into a second in-page step; the checkbox sits above the thumbnail with a fixed "Delete / Cannot delete" label, and clicking the thumbnail toggles deletion too.
+- Thumbnails are shown complete and in their original aspect ratio (no cropping, no stretching), so tall screenshots stay readable.
+- View state now remembers the cleanup page, so reopening Xingzhou returns to it.
+
+### Fixed
+
+- Fixed a missing field on newly created items that made **every write fail the integrity re-check**: `addStoredWorkItem` now initialises `imageCleanup` explicitly so written and re-read data match. The error message now reports the first differing position when a re-check fails.
+- Fixed several image interaction defects:
+  - Pasting several images in a row inserted the next one into the middle of the previous image syntax and split it (cursor offset computed in the wrong direction);
+  - Blank lines appeared between consecutive images;
+  - Removing a thumbnail did not refresh the list because the Svelte dependency sat inside a `map` callback and was not tracked;
+  - Blurring while an upload was still running could save a half-finished path; it now refuses and removes the placeholder;
+  - Switching items before an upload finished could write the result into the new item (stale-draft and ownership checks added);
+  - The placeholder pattern missed the form that carries a file name, so a successful upload was not substituted back;
+  - Unchecking an image made it impossible to select again (selection was derived instead of tracked); selection is now maintained independently;
+  - "Cannot delete" was wrongly shown because deletability was coupled to selection; it now depends only on whether another unfinished item references the image.
+
+## 1.3.0 - 2026-09-09
+
+### Added
+
+- The Execution Slice calendar and the Week page now show a "To do" duration: the total length of slices still scheduled (not yet finished) on that day. When everything committed for a day is done or finished early, the cell shows a green "To do 0 min" and the whole cell turns green, so it is obvious the day is free for other transactions; the original "Total X min · N slices" (scheduled + completed) stays beside it, and reading the two together rules out mistaking "To do" for free capacity.
+- The Execution Slice calendar header gained a summary row and a wording legend (outstanding total from today, committed total, and how many whole days are cleared), explaining that "To do = slices scheduled for that day that are not finished yet".
+- Reopening Xingzhou now restores the previous Projects & Tasks view state (page, filters, hierarchy expansion, selected transaction, and scroll position). If the previously selected item is completed or hidden, the selection falls back deterministically to the transaction with the most unfinished slices today (ties by tree order), otherwise to the first visible transaction in tree order.
+- Life Rhythm's morning Today Plan now shows a read-only hint: the “first action when work starts tomorrow” written in the previous evening's 21:00 review appears automatically the next morning for reference. The hint is not editable and stays hidden when the previous day's note is missing or empty.
+- Life Rhythm's personal-task note now asks Yes/No first: the text box appears only for Yes, and choosing No collapses it without holding any height. The same decision applies in all four places: research workday / Sunday half-day, Saturday, holiday, and Conference Day after the meeting.
+
+### Changed
+
+- Execution Slice calendar days now use a two-line time block: "To do X min" on the first line and "Total X min · N slices" on the second. Past dates show only "Total" (pending work no longer means anything there; missed slices are still shown by the red dot, red border and the "missed" wording). Slices without an estimate render "To do unestimated", and partially estimated days render "To do ≥X min".
+- Day cells adapt to their container width: a wide cell reads "To do 240 min", a medium one drops the spaces around the number ("To do 240min"), and the narrowest (~41px) drops the unit from the first line and keeps it on the "Total 240min" line, so no width ever shows a bare number.
+- The Week page date row is now three fixed slots: weekday + date on the left, a slot reserved for "Today" in the middle (empty on other days), and the "To do" chip always flush right, so the chip no longer jumps between middle and right. Narrow columns drop the "min" unit from the chip and restore it when the window widens.
+- Removed the hover tooltips from execution slice day cells and the week-board "To do" chip (screen-reader labels keep the full wording), and deleted the "this transaction: N slices · M done" line that could never appear: a transaction may hold only one slice per day, enforced when scheduling and moving.
+- Reshaped the color system of hierarchy browsing: type badges use a calm Morandi low-saturation palette (gray-khaki, gray-green, gray-teal, gray-blue, terracotta, gray-purple), while status and slice indicator chips use a vivid summer palette (vivid green for ongoing, sky blue for pending, vivid orange for focused, bright yellow for paused, turquoise for future, vivid indigo for maintaining, vivid red for blocked, bright amber for needs-scheduling, deep blue for arranged/today, gray for terminal states), all as square chips with a colored outline and a 3px left color bar. Shape and color temperament now separate the two dimensions, so type and status can no longer be confused.
+- The Life Rhythm top toolbar is now left-aligned: the date navigation and the six view-switcher buttons sit side by side on the left with blank space on the right, reducing pointer travel on wide screens. Narrow screens still stack them vertically.
+- Compressed the Transaction Execution Slices card vertically: the header now fits on one line (the “slices are not work items” note moved into an ⓘ hover hint), and the completion percentage sits on the same row as the progress bar and the planning summary, wasting no space on small screens.
+- The Target Slice Count label now states the 366 input cap, making it clear that a single transaction can hold at most 366 slices.
+- Reworked the personal-task area into a left column holding the decision plus the box it opens, and a right column holding today's personal schedule, so the Yes/No selector and its text box sit directly above and below each other instead of one spanning the row and the other landing at the bottom right. Choosing No saves an empty note but keeps the text as a draft that comes back when Yes is chosen again, and notes already stored by earlier versions are recognized as Yes so they are never hidden.
+
+## 1.2.0 - 2026-09-08
+
+### Added
+
+- Added a Conference Day profile for conferences, talks, and collaborative meetings. It does not assume free time before the event ends, asks whether personal tasks should be scheduled afterward, and explicitly skips nutrition logging for that day.
+- Added Partial and Missed outcomes to Daily Checklist, forming a four-state flow with Pending and Completed. Partial outcomes contribute half credit, while legacy checks remain Completed.
+- Added an automatically generated Relationship Graph under Projects & Tasks. It shows unfinished projects and transactions with their long-term-area context, hierarchy links, hard prerequisites, and should-stay-ahead relationships.
+- Added transaction slice indicators to hierarchy browsing: Not configured, N to schedule, X/Y scheduled, and X/Y completed.
+- Added context-menu completion actions to transaction calendars: complete future slices early, complete today's slice, or correct a missed past slice. The keyboard Context Menu key and Shift+F10 are supported as well.
+- Added explicit Yes/No availability decisions before Watch Sleep Score and Morning Weight, so days without a watch or scale no longer appear incomplete.
+
+### Changed
+
+- The Today badge now appears only on Transactions that still have an unfinished slice today. It disappears after completion and no longer rolls up to area or project ancestors. Ongoing, Focused, and Today indicators use green, red, and blue respectively.
+- Dependency pickers now list only Ready and In Progress transaction candidates, reducing noise from closed or currently irrelevant work items.
+- Completing a future slice early now preserves its planned date and the one-slice-per-transaction-per-day scheduling rule. Week also shows a separate achievement on the actual completion date without counting it as that day's scheduled workload.
+- Relationship edges now use explicit directional labels such as “A completed → B starts” and “A stays ahead → B.” Node spacing, related-item highlighting, blank-canvas clearing, and inspector typography were also refined.
+- Reworked the Research Workday Today Plan layout: work start and planned end remain in one left-hand row, while adjustments and their conditional details stay aligned on the right.
+
+### Fixed
+
+- Fixed the Relationship Graph rendering an empty canvas despite loaded data, overlapping dependency arrows, ambiguous edge direction, and status pills that diverged from the intended design.
+- Fixed Complete Early in Week doing nothing or removing the planned card. The original date now retains a completed card while the actual completion date receives a separate achievement.
+- Fixed transaction calendars showing only one visual slice while reporting confusing totals when legacy data contains multiple slices for the same transaction and date. The day cell now reports both slice and completed counts.
+- Fixed stale Life Rhythm stage status and layout shifts after conditional Today Plan fields appeared.
+
+### Compatibility
+
+- No manual migration is required for work items, execution slices, Life Rhythm, Checklist, or nutrition data, and existing planned slice dates are not rewritten.
+- Legacy Checklist `checkedKeys` are normalized to Completed. Existing sleep-score and weight values are used to infer their new availability decisions.
+
+## 1.1.0 - 2026-09-06
+
+### Changed
+
+- Professional study after lunch now begins with a No / Yes decision. Book, topic, plan, and result fields appear only when study is planned, and explicitly selecting No clears details that no longer apply.
+- Today's Life Rhythm record now shows stage completeness and a missing-fields review. Free-form navigation remains available, stage buttons distinguish not started, incomplete, complete, and no-check-needed states, and each key omission can jump to and focus its field; ordinary notes remain optional.
+- The nutrition manager now separates Daily Goals and Food Templates into distinct cards: side by side on wide panes and stacked on tablets or narrow panes, making goal settings clearly separate from template entry.
+- Removed the redundant global Add button, Inbox navigation, standalone Inbox page, and Inbox review step. New items now come from typed creation entry points and default to Ready, while legacy Inbox-status data remains visible in All for compatibility.
+- Split the Review investment check into Focused long-term areas and Ongoing top-level projects, clearly separating what matters now from what is actively being done.
+- Persisted Checklist completion and weekend training/rest choices by date, so progress now survives plugin restarts and device sync without requiring migration of existing templates.
+- Made Today's Intake an independently scrollable region with a persistent header. Desktop panes now use the available viewport height, while tablet single-column layouts keep a tighter cap so long entry lists do not stretch the entire page.
+- Restored execution-slice completion actions in Week: today's slices can be completed or abandoned, missed past slices can be corrected as completed, and future slices can be completed early by atomically moving them to today.
+
+## 1.0.0 - 2026-09-06
+
+### Added
+
+- Added a standalone Nutrition Intake page to Life Rhythm, totaling calories, protein, carbohydrates, and fat by day without requiring meal categories.
+- Added optional daily calorie and protein goals with progress, remaining allowance, and over-target feedback. Carbohydrates and fat remain secondary metrics, with approximate macro calorie shares calculated at 4/4/9 kcal per gram.
+- Added user-defined food templates with create, edit, and delete flows. A template can be logged instantly at its base amount or recorded with a temporary actual weight, volume, or quantity; all four nutrition values scale proportionally.
+- Daily entries expose their actual consumed amount directly, with unit-aware adjustment steps. Editing or deleting a template never rewrites historical nutrition snapshots.
+- Nutrition uses an independent `nutrition.json` store protected by revisions, three rotating backups, read-after-write verification, and corruption recovery.
+- Every execution-slice calendar now shows the number of scheduled slices and estimated minutes per day, making workload visible before adding another slice. Compact layouts prioritize estimated time.
+
+### Changed
+
+- Compacted the plugin header while preserving the original Projects & Tasks / Life Rhythm button styling and leaving the existing content UI intact.
+- Consolidated total investment, the status legend, same-day guidance, and slice actions into a tighter execution-slice header, and reduced the gap between configuration and the calendar.
+- Redesigned responsive behavior for tablets and narrow panes: detail fields wrap predictably, hierarchy rows waste less width, and Nutrition switches by actual pane width between two-column, single-column, and bottom-sheet amount layouts.
+- Enlarged touch targets while retaining keyboard, trackpad, context-menu, and desktop-density behavior.
+- Completing an execution slice can now promote an unstarted transaction to In Progress without overriding paused, blocked, or closed states.
+
+### Fixed
+
+- Increased execution-calendar text, border, and workload contrast, and fixed side guidance consuming most of the usable calendar width on tablets.
+- Fixed compressed detail fields, Deadline / Required Energy misalignment, and hierarchy titles being reduced to only one or two visible characters on HarmonyOS tablets.
+- Restored left alignment for transaction detail titles and kept overflow-menu and touch operations available in narrow panes.
+- Fixed existing execution records incorrectly preventing a deadline from being cleared. Saving is blocked only when a new concrete deadline would precede an existing slice.
+
+### Compatibility
+
+- Upgrading creates `nutrition.json` on first use and does not read or modify any SiYuan document to derive nutrition data.
+- Legacy nutrition templates and entries using servings / serving descriptions are normalized on read into equivalent base amounts, units, and consumed amounts.
+
+## 0.8.0 - 2026-09-05
+
+### Added
+
+- Added a standalone Daily Checklist page under Life Rhythm with the same workday, Saturday, and Sunday reminders as the paper edition, excluding fields that previously required handwriting.
+- Added shared Xingzhou and Paper views. Both use the same templates and same-day checks, remember the preferred view, and always use the paper layout for printing.
+- Checklist time nodes, titles, reminder text, and paper-section styling are editable. Time nodes can also be added, removed, and reordered; configuration uses its own file with three rotating backups and read-after-write verification.
+- Checklist checks are temporary, date-scoped session state and never enter history. Switching views or modules keeps them, while moving to a new date clears the old state.
+- Added Free arrangement for bedtime, allowing users to intentionally skip bedtime preparation and a planned lights-off value while still recording actual sleep the next morning.
+- Added Same evening / Next day selection for planned lights-off and persist the resulting full local date-time, removing ambiguity after midnight.
+
+### Changed
+
+- After-hours work and anomaly/observation prompts in the 21:00 review now use Pending / No / Yes decisions. Explanation fields appear only for Yes, while No clears details that no longer apply.
+- Closure next steps now use Pending / No / Yes; the next-step text field appears only when Yes is selected.
+- Reworked the two-column 21:00 and bedtime layouts so paired decisions, conditional details, and lights-off date/time controls remain aligned.
+- Life Rhythm now places Daily Checklist before Today, following a reminders-first and records-afterward reading order.
+- Paper view now keeps the same main-checklist plus progress-sidebar structure as Xingzhou view. Titles, time labels, reminders, and checkboxes are larger in both views, while printing still outputs only the paper checklist.
+
+### Fixed
+
+- Fixed the first Checklist write being falsely reported as an integrity failure when JSON property order changed after normalization.
+- Fixed Paper view abruptly centering the checklist and removing the progress sidebar when switching from Xingzhou view.
+
+### Compatibility
+
+- Existing after-hours reasons, anomaly observations, and closure next-step text are inferred as Yes; legacy placeholders such as “none” are normalized to explicit No states.
+- Existing planned lights-off times gain a date using nighttime semantics: before midnight means the same evening, while after midnight means the next day.
+
+## 0.7.0 - 2026-09-04
+
+### Added
+
+- Added execution slices for Transactions. Set a target count and per-slice estimate, then schedule each slice independently from the detail calendar without creating child work items.
+- Added Scheduled, Completed, Missed, and Abandoned slice states. Progress is the percentage of target slices completed; missed and abandoned attempts remain in history while releasing a replacement slot.
+- Week now presents explicitly scheduled slices and supports completion and undo. Slice-enabled transactions are no longer duplicated mechanically across every date from planned start through deadline.
+- Life Rhythm automatically displays personal slices scheduled for the current date and can add a same-day slice from an in-progress transaction with immediate synchronization back to Projects & Tasks.
+- Transactions without a deadline can schedule and move slices from today onward; when present, a deadline remains the latest allowed date.
+
+### Changed
+
+- Daily records now use debounced autosave. Pending edits are flushed before changing dates, stages, or top-level modules; a failed save keeps the current view available for retry.
+- Research workdays now follow five stages: Morning, After lunch, Clock-out, After work, and 21:00. Clock-out contains boundary and status evaluation, while After work contains closure and personal tasks.
+- Training completion moved to Morning before training details. Details appear only when training is marked complete and are cleared when marked incomplete or as a rest day.
+- Returning from Life Rhythm restores the previous Projects & Tasks page, filters, hierarchy scope and expansion, selected work item, and scroll position. Links from daily tasks still focus their exact target.
+- Stabilized responsive widths and alignment for time, score, weight, personal-task, and result controls throughout Life Rhythm.
+
+### Fixed
+
+- Fixed the calendar remaining disabled after saving a slice count and eliminated transient calendar/detail layout shifts while scheduling.
+- Fixed controlled result selectors failing to show their first selection and removed layout movement caused by a temporary score-clear button.
+- Fixed the daily personal-task picker using a different order from hierarchy browsing, and fixed module switching unexpectedly selecting an item or narrowing the hierarchy to one area.
+- Fixed execution-slice calendars being unavailable for transactions without a deadline.
+
+## 0.6.0 - 2026-09-03
+
+### Added
+
+- Added per-row Up and Down controls plus drag handles for persistent manual sibling ordering in the hierarchy browser.
+- Changed Week completion to per-date records: completing one dated card no longer closes the other dates or the whole work item. Completed dates remain visible, can be undone, and stay available in historical weeks after the item itself is closed.
+- Added Life Rhythm as a top-level module beside Projects & Tasks; All, Week, Inbox, and Review remain second-level project views.
+- Added Today, History, Rubrics, and Timeline views with research-workday, Saturday-reset, Sunday-half-day, and holiday profiles.
+- Added staged daily forms, hour/minute selectors, kg/lb weight units, automatic work-boundary evaluation, and five in-context scoring rubrics.
+- Added Pending / Not needed / Needed states for optional after-work closure. Detail fields appear only when needed, and not-needed durations are stored as null rather than zero.
+- Added a separate `daily-records.json` with three rotating backups and read-after-write verification. It starts empty and never migrates the old daily document.
+- Added read-only date-range and rubric interfaces for future weekly, monthly, and AI analysis.
+- Week now shows work items across their full planned-start-to-deadline interval, distinguishing Start, Ongoing, Deadline, Carry-over, and Continues-next-week states. Weekly totals remain deduplicated by work item, estimated duration is shown only on the start day, and multi-day start dates can only be changed from the first card without crossing the deadline.
+- Hierarchy browsing now highlights work that starts today, ends today, or spans today, and rolls the count up through its project path while retaining the original lifecycle status in a quieter style.
+- Current Action Details and Next Action now render basic Markdown directly through SiYuan's Lute renderer while not being edited, including headings, emphasis, lists, blockquotes, code, links, tables, and task lists, while preserving ordinary text line breaks. Editing and storage continue to use the original Markdown text.
+- Action text editors now continue numbered, bulleted, and task lists automatically. Pressing Enter again on an empty list item exits the list.
+- Action text editors now expand to fit their full content on entry and continue adapting after content or window-width changes, preventing a sudden size drop between viewing and editing.
+
+### Fixed
+
+- Improved Life Rhythm typography, responsive control widths, and column alignment so time, score, and weight controls no longer stretch awkwardly on wide windows.
+- Lights-off and wake values now retain explicit dates for cross-day sleep. Also corrected the placement of actual work-end time, watch sleep score, and rubric links.
+- Fixed the first Key Work Result selection still appearing blank, and made a second click on an active score clear it without inserting a layout-shifting button.
+- Fixed SiYuan's internal block ID attribute marker appearing in rendered Markdown previews.
+- Fixed ordered-list source numbers diverging from the rendered result after inserting or deleting an item. Following sibling numbers now normalize immediately after typing, deletion, cutting, or pasting.
+
+## 0.5.0 - 2026-09-02
+
+### Added
+
+- Xingzhou now stores complete work items in plugin-managed internal storage. A legacy SiYuan Attribute View is read only once as an optional migration source.
+- Migration preserves fields, hierarchy, linked-document references, and cross-project dependencies, and creates a private migration snapshot.
+- Every mutation rotates three private backups and verifies the saved store by reading it back. A corrupt primary store recovers from the newest valid backup.
+- Added cross-project dependencies independent of the hierarchy. `完成后开始` (hard prerequisite) and `需先行` (should stay ahead) are stored directly by the plugin and require no database fields.
+- Added dependency editing, reverse references, tree indicators, unfinished hard-prerequisite hints, cycle prevention, and deletion warnings without automatically changing work-item status.
+
+### Changed
+
+- Capture, editing, scheduling, completion, and deletion no longer write to the legacy Attribute View. Once migrated, deleting that view or its containing document does not remove Xingzhou's work items.
+
+### Fixed
+
+- Correctly treats SiYuan's empty-object response for a missing plugin data file as first-run state instead of corruption.
+
+## 0.4.0 - 2026-09-01
+
+### Changed
+
+- Removed Planned from selectable execution statuses and clarified the `计划日期` UI label as Planned Start Date.
+- Future starts now show a subtle Scheduled hint; Ready and legacy Planned items automatically become In Progress when their start date arrives, while blocked, paused, and closed states remain untouched.
+- Legacy Planned values remain readable and are normalized to Ready or In Progress according to their planned start date.
+- Review no longer treats a past planned start as stale, preventing normal multi-day work from being repeatedly flagged.
+- Inbox is now a triage-only stage and no longer appears among project or execution status options; contextually created and classified items start as Ready.
+- Added upward hierarchy progression: any In Progress descendant promotes project ancestors still in Inbox/Ready, without overriding areas or explicit paused, blocked, someday, and closed states, and without automatic demotion.
+
+### Fixed
+
+- Prevented executable items already scheduled in the visible week from appearing again in the left-side Active Window; unscheduled items and cross-week window reminders remain unchanged.
+- Prevented narrow sidebar cards from wrapping statuses such as Completed into vertical character stacks.
+
+### Added
+
+- Added a persisted Include Closed toggle beside the top filters. All hides closed items by default, while the dedicated Closed filter always shows the complete result.
+- Preserved closed ancestors required as hierarchy context for open descendants when closed items are hidden.
+
+## 0.3.0 - 2026-08-31
+
+This release turns creation, hierarchy recognition, and completion into a clearer workflow that feels native to SiYuan.
+
+### Added
+
+- Added a global “+ Add” entry in the header, available from All, Week, Inbox, and Review, with `Cmd/Ctrl + Shift + I` support.
+- Added contextual child creation from area/project details and native context menus, prefilling the direct parent and derived top project.
+- Added compact `+` actions to all three sidebar groups for creating an area/idea, a top-level project with an optional area, or an independent transaction.
+
+### Changed
+
+- Removed the redundant all-items sidebar entry and grouped All-page navigation into Areas & Ideas, Top-level Projects, and Independent Transactions, with an uncategorized fallback when needed.
+- Made All expand the full hierarchy by default, while Active Projects exposes executable items along active paths.
+- Replaced the custom creation overlay with SiYuan's native `Dialog`, removing the GPU-heavy live backdrop blur and inheriting native form, button, theme, and window behavior.
+- Replaced the misleading project-only selector in Top-level Project creation with an explicit distinction between the top-level role and the underlying Project database type.
+- Replaced redundant hierarchy dots with colored text role badges, sharing one label and palette across the hierarchy legend, middle tree, and detail pane.
+- Moved the completion shortcut into the role row, renamed it to “Mark as completed,” and restyled it as a soft green secondary action so it cannot be mistaken for title-edit confirmation; an eight-second Undo action follows completion.
+
+### Fixed
+
+- Kept the current area or project scope after creating a descendant inside it, instead of forcing navigation to the new item's direct parent.
+
+## 0.2.0 - 2026-08-30
+
+The detail view now exposes only information applicable to each work-item role, while deadlines explicitly distinguish Pending, None, and a concrete date.
+
+### Changed
+
+- Switched the work-item context menu to SiYuan's native `Menu`, matching the task center's icon, warning action, hover behavior, theme, and dark-mode treatment.
+- Made the detail view role-aware so areas, top-level projects, subprojects, tasks, transactions, and ideas expose only applicable fields.
+- Derived the top project from the direct-parent chain, displayed it read-only, and updated it together with explicit parent changes.
+
+### Added
+
+- Added `无截止日期` checkbox support and a Pending / None / Concrete date deadline control. Review warns about unconfirmed deadlines but skips explicitly deadline-free items.
+
+## 0.1.1 - 2026-08-30
+
+Adds a protected work-item deletion flow on top of the first public testing release.
+
+### Added
+
+- Added one consistent right-click menu across All, Inbox, Week, and Review work-item surfaces for deleting areas, projects, tasks, transactions, and ideas.
+- Added a second confirmation with explicit warnings when descendants or top-project references remain.
+
+### Safety
+
+- Deletion removes only the target Attribute View row. A bound SiYuan document is merely unbound and is never deleted.
+- Descendants are not deleted recursively, relation references are not silently rewritten, and the Attribute View is reloaded to verify every deletion.
+
+## 0.1.0 - 2026-08-30
+
+The first complete release for real-world use and continued testing. A pre-release audit against the design report found roughly 94% coverage of the first-release requirements.
+
+### Added
+
+- Created the SiYuan plugin project, installable package, bilingual documentation, and the skiff–moving-star–gradient-water visual identity.
+- Kept the native Attribute View as the single source of truth and implemented four primary pages: All, Week, Inbox, and Review.
+- Added long-term areas, project hierarchy, independent items, active-path expansion, collapse-all, and All/Active Projects/Someday/Closed filters.
+- Added direct editing with post-write verification for title, type, status, parent, top project, dates, duration, and energy.
+- Added independent click-to-edit Current Action and Next Action cards with blur-to-save, Escape cancellation, and Cmd/Ctrl+Enter saving.
+- Added name-only capture, Inbox listing, success/error feedback, and detached database-row details.
+- Added an actual-date Week page with previous/current/next navigation, an executable backlog, active date-window reminders, moving, unscheduling, and quick completion.
+- Added a five-step weekly Review covering Inbox, active top-level projects, action details, stale dates, and this week's results, with per-item priority deduplication.
+- Added Planned semantics and derived Today/Overdue hints without allowing dates to overwrite actual progress.
+- Added linked-document/native-database navigation and non-destructive hierarchy validation.
+- Added SiYuan theme tokens, dark-mode and narrow-layout support, plus Attribute View and database block settings.
+
+### Changed
+
+- Unified editable statuses as Inbox, Ready, Planned, In Progress, Blocked, Paused, Someday, Completed, Failed, Cancelled, and Abandoned while preserving legacy reads.
+- Moved type and status into the metadata panel; placed the equal-height completion control beside the title and hid it after completion.
+- Put the Week backlog on the far left and limited it to unscheduled executable Transactions and Ideas.
+- Limited dated Week columns to unfinished items; completed work is summarized by the Review page instead.
+- Strengthened panel and card boundaries, fills, shadows, and theme-aware accent rails.
+- Standardized concise All and Someday labels across navigation and filters.
+
+### Fixed
+
+- Fixed silent blank pages caused by custom-tab registration and overly strict mount-container checks.
+- Fixed exact Inbox detail selection and stale hierarchy results after capture.
+- Restored the default database block ID when older settings contain an empty value.
+- Restored text selection in details and clarified that detached items do not require documents.
+- Fixed action-editor layout shifts, empty Review grid tracks, and missing accent rails in themes without warning tokens.
+- Fixed duplicate Review entries when one item had both stale dates and missing action details.
+
+### Known limitations
+
+- Xingzhou never creates, removes, or migrates database fields or status options automatically.
+- Tree expansion and default-page preferences are not persisted yet.
+- Drag-and-drop scheduling, concurrent-edit conflict feedback, precise native-row navigation, automatic document creation, and a hierarchy widget are not included.
