@@ -1,5 +1,15 @@
 # Changelog
 
+This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
+
+## Unreleased
+
+### Added
+
+### Changed
+
+### Fixed
+
 ## 5.4.1 - 2026-10-18
 
 Fixes a batch of **layout problems in narrow panes**. Inside SiYuan, Xingzhou only occupies part of the viewport (4K half-screen: viewport 1950px, pane 685px), but several breakpoints measured the browser viewport instead — the viewport is always wide enough, so the rules never fired and narrow panes were laid out as if they were wide.
