@@ -1264,23 +1264,36 @@
 .xz-daily-stage-nav button.completion-incomplete::after { color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 11%, var(--xingzhou-panel)); }
 .xz-daily-stage-nav button.completion-complete::after { color: var(--b3-theme-success); background: color-mix(in srgb, var(--b3-theme-success) 12%, var(--xingzhou-panel)); }
 .xz-daily-stage-nav button.completion-not-applicable::after { color: var(--xingzhou-muted); background: transparent; }
+/*
+ * 顶部「今日类型 / 今日状态 / 类型说明 / 进入紧急期 / 状态说明」。
+ * 它是两行（注释原本就是这么写的），默认纵向堆叠；面板足够宽才并排放回一行。
+ * 之前这里写的是 display:flex（横向），而改成纵向的规则挂在 @media (max-width: 620px)（视口）上——
+ * 思源面板几乎永远窄于视口（4K 半屏：视口 1950、面板 685），那条永远不触发，
+ * 于是四个块硬塞一行：类型标签被挤成竖排、类型说明浮到「正常/混乱/失控」按钮上。
+ */
 .xz-daily-context {
     display: flex;
     flex: 0 0 auto;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
     margin: 12px 16px 0;
     padding: 10px 12px;
     border-left: 3px solid var(--xingzhou-primary);
     border-radius: 0 var(--xingzhou-radius) var(--xingzhou-radius) 0;
     background: var(--xingzhou-panel);
 }
+@container (min-width: 1400px) {
+    .xz-daily-context { flex-direction: row; align-items: center; justify-content: space-between; gap: 14px; }
+}
 .xz-daily-context label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .xz-daily-context select { min-height: 38px; padding: 5px 26px 5px 9px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-bg); font-size: 14px; }
 .xz-daily-context p { margin: 0; color: var(--xingzhou-muted); font-size: 13px; }
 /* 两行：上排「日期类型 / 今日状态」，下排「类型说明 / 状态说明」 */
-.xz-daily-context__row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; }
+/* 第 1 行靠左排（纵向堆叠时两端对齐会把「今日状态」甩到最右边）；
+   第 2 行里按钮与状态说明要靠右，保持两端对齐。 */
+.xz-daily-context__row { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px 14px; min-width: 0; }
+.xz-daily-context__row:nth-child(2) { justify-content: space-between; }
 .xz-daily-context__hint { margin: 0; color: var(--xingzhou-muted); font-size: 12px; line-height: 1.6; }
 .xz-day-state { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; min-width: 0; }
 .xz-day-state__label { flex: 0 0 auto; color: var(--xingzhou-muted); font-size: 13px; }
@@ -1328,7 +1341,22 @@
 .xz-daily-progress strong, .xz-daily-progress small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .xz-daily-progress strong { font-size: 14px; }
 .xz-daily-progress small { color: var(--xingzhou-muted); font-size: 12px; }
-.xz-daily-layout { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(250px, .72fr); gap: 10px; overflow: auto; padding: 0 16px 16px; }
+/*
+ * 「今日记录 + 评分规则」默认单列，面板真的够宽才并排。
+ * 断点用容器查询而不是媒体查询：思源标签页可以分屏、也可以被拖窄，
+ * 真正决定能不能并排的是插件面板拿到的宽度，不是浏览器视口。
+ * 之前用 @media，视口 1830px 时面板只有 1312px 也照样并排，
+ * 记录卡被压到 884px，睡眠区再被切成三列，「主观睡眠质量」只剩 272px。
+ */
+.xz-daily-layout { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; overflow: auto; padding: 0 16px 16px; }
+/* 单列时评分规则排在记录卡上方。这条必须写在下面 @container 之前：
+   同优先级按出现顺序决胜，写在后面会把宽屏的 order:0 盖掉，
+   评分卡就会一直顶到左边那一列、把记录卡挤成 385px。 */
+.xz-daily-rubric-card { order: -1; }
+@container (min-width: 1100px) {
+    .xz-daily-layout { grid-template-columns: minmax(0, 1.65fr) minmax(250px, .72fr); }
+    .xz-daily-rubric-card { order: 0; }
+}
 .xz-daily-record, .xz-daily-rubric-card, .xz-daily-list-view { border: 1px solid var(--xingzhou-strong-border); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-panel); box-shadow: var(--xingzhou-panel-shadow); }
 .xz-daily-record { min-width: 0; align-self: start; overflow: hidden; }
 .xz-daily-record-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--xingzhou-border); background: var(--xingzhou-panel-subtle); }
@@ -1361,13 +1389,23 @@
 .xz-daily-missing-panel > div > button i { color: var(--xingzhou-muted); font-size: 16px; font-style: normal; }
 .xz-daily-missing-panel > p { margin: 10px 0 0; color: var(--xingzhou-muted); font-size: 13px; }
 .xz-daily-field-focus { outline: 2px solid color-mix(in srgb, var(--xingzhou-primary) 65%, transparent); outline-offset: 4px; border-radius: var(--xingzhou-radius); transition: outline-color .2s ease; }
-.xz-daily-form-section { padding: 14px; }
+/*
+ * 每个填写区块自己就是查询容器（容器查询量内容盒，正好等于去掉 14px 内边距后的可用宽度）。
+ * 睡眠区、今日安排的列数必须按「区块自身宽度」算，不能拿面板宽度推算：
+ * 面板 1100px 时主布局是单列、睡眠区有 1038px；面板 1200px 时主布局两列、睡眠区只剩 776px，
+ * 和面板宽度不是单调关系。
+ */
+.xz-daily-form-section { padding: 14px; container: xz-section / inline-size; }
 .xz-daily-form-section + .xz-daily-form-section { border-top: 1px solid var(--xingzhou-border); }
 .xz-daily-form-section h3 { margin: 0 0 11px; font-size: 16px; }
 .xz-daily-fields { display: grid; gap: 10px; }
 .xz-daily-fields.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .xz-daily-fields.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.xz-daily-fields.xz-daily-flow-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+/* 今日安排：默认单列，区块 ≥820px 才分左右两栏（820 = 两列各 405px，够并排放两个时间选择器） */
+.xz-daily-fields.xz-daily-flow-columns { grid-template-columns: minmax(0, 1fr); align-items: start; }
+@container xz-section (min-width: 820px) {
+    .xz-daily-fields.xz-daily-flow-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .xz-daily-flow-column { min-width: 0; display: grid; align-content: start; gap: 10px; }
 .xz-daily-time-pair { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 10px; }
 .xz-daily-fields label, .xz-daily-field, .xz-daily-score { min-width: 0; display: grid; align-content: start; gap: 6px; color: var(--xingzhou-muted); font-size: 14px; }
@@ -1477,7 +1515,7 @@
 .xz-daily-adherence-reason > textarea { min-height: 64px; max-width: 620px; }
 .xz-daily-adherence-reason > span b { color: var(--xingzhou-danger); font-weight: 600; }
 
-/* 填写栅格：<620px 单列 · ≥620px 两列 · ≥1100px 三列 */
+/* 填写栅格：按区块宽度 <620 单列 · ≥620 两列 · ≥1000 三列（断点见下面两个 @container 块） */
 .xz-daily-sleep-fill { min-width: 0; display: grid; gap: 16px 18px; grid-template-columns: minmax(0, 1fr); align-items: start; }
 /* 窄控件不撑满整行，避免「控件之间是空白而不是关系」 */
 /*
@@ -1526,17 +1564,32 @@
 .xz-daily-watch-group > .xz-daily-time-select,
 .xz-daily-watch-group > .xz-daily-duration-select { width: min(100%, 300px); }
 
-@media (min-width: 620px) {
+/*
+ * 睡眠区：按区块自身宽度决定列数。
+ *   内容宽 <620 单列 · 620–999 两列 · ≥1000 三列
+ * 1000 是算出来的：三列每列要放得下 320px 的控件，320×3 + 两条 18px 间距 = 996。
+ * 之前用 @media（620 / 1100 两个视口断点），而思源面板几乎永远小于视口：
+ * 视口 1830px、面板 980px 时也照样排三列，每列 195px，
+ * 「主观睡眠质量」的 1–5 按钮（5×38px + 间距 = 206px）塞不进去，直接压到右边手表组上。
+ */
+@container xz-section (min-width: 620px) {
     .xz-daily-sleep-fill { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .xz-daily-sleep-fill > .xz-sleep-quality { grid-column: 1 / -1; }
+    /* 主观睡眠质量留在左列第 3 行，与「今日起床 / 晨起体重」同一条动线；
+       跨两列会掉到手表组下面，和上面两格断开。 */
+    .xz-daily-sleep-fill > .xz-sleep-quality { grid-column: 1; grid-row: 3; }
     .xz-daily-sleep-fill > .xz-sleep-watch { grid-column: 2; grid-row: 1 / span 3; }
 }
-@media (min-width: 1100px) {
+@container xz-section (min-width: 1000px) {
     .xz-daily-sleep-fill { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .xz-daily-sleep-fill > .xz-sleep-wake { grid-column: 1; grid-row: 1; }
     .xz-daily-sleep-fill > .xz-sleep-weight { grid-column: 1; grid-row: 2; }
     .xz-daily-sleep-fill > .xz-sleep-quality { grid-column: 1; grid-row: 3; }
     .xz-daily-sleep-fill > .xz-sleep-watch { grid-column: 2 / 4; grid-row: 1 / span 3; }
+    /* 手表组占两列时内部排成两列，控件仍是 320px 上限，避免右侧一大片空白 */
+    .xz-sleep-watch { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
+    .xz-sleep-watch > header,
+    .xz-sleep-watch > .xz-daily-onset-note,
+    .xz-sleep-watch > .xz-daily-field-note { grid-column: 1 / -1; }
 }
 
 .xz-daily-lights-off-skip { width: min(100%, var(--xz-daily-structured-width)); min-height: 42px; display: flex; align-items: center; gap: 8px; }
@@ -1853,7 +1906,6 @@
     .xz-project-toolbar { overflow-x: auto; }
     .xz-main-nav { padding-inline: 12px; }
     .xz-secondary-bar { flex: 1 0 auto; padding-right: 12px; }
-    .xz-daily-layout { grid-template-columns: 1fr; }
     .xz-daily-record-header { align-items: flex-start; flex-wrap: wrap; }
     .xz-daily-header-actions { width: 100%; justify-items: stretch; }
     .xz-daily-completion-summary { justify-content: flex-start; padding-bottom: 1px; }
@@ -1861,7 +1913,6 @@
     .xz-daily-stage-nav { overflow-x: auto; padding-bottom: 2px; }
     .xz-daily-stage-nav button { flex: 0 0 auto; }
     .xz-daily-missing-panel > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .xz-daily-rubric-card { order: -1; }
     .xz-daily-fields.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xz-workspace { grid-template-columns: 180px minmax(250px, 1fr); }
     .xz-detail { grid-column: 1 / -1; }
@@ -1885,7 +1936,7 @@
 }
 
 @media (max-width: 620px) {
-    .xz-daily-toolbar, .xz-daily-context, .xz-daily-record-header { align-items: stretch; flex-direction: column; }
+    .xz-daily-toolbar, .xz-daily-record-header { align-items: stretch; flex-direction: column; }
     .xz-shell-brand { display: none; }
     .xz-module-nav { overflow-x: visible; }
     .xz-module-nav button { min-width: 130px; }
@@ -2756,6 +2807,46 @@
 .xz-project-toolbar__scroll { display: flex; min-width: 0; flex: 1 1 auto; align-items: stretch; overflow-x: auto; }
 .xz-project-toolbar__aside { display: flex; flex: 0 0 auto; align-items: center; padding: 5px 14px 5px 10px; border-left: 1px solid var(--xingzhou-border); background: var(--xingzhou-panel); }
 
+/*
+ * 工具栏按钮不再被压缩，放不下就换行。
+ *
+ * 中文按钮的 min-content 就是「一个字宽」，普通 flex 子项一被挤就压成竖排：
+ * 全/部/展/开、活/跃/项/目；「包含已结束」还会被 overflow 裁成「包含已…」。
+ * 工具栏自己的 overflow-x:auto 也兜不住——按钮先被压扁了，内容根本没机会溢出。
+ * 这里只做两件事：按钮不收缩、容器允许换行。与断点无关，任何面板宽度都不会再变形。
+ */
+.xz-main-nav button,
+.xz-segmented button,
+.xz-include-closed-toggle,
+.xz-secondary-actions button,
+.xz-cleanup-entry { flex: 0 0 auto; white-space: nowrap; }
+.xz-project-toolbar__scroll,
+.xz-secondary-bar,
+.xz-filter-controls,
+.xz-segmented { flex-wrap: wrap; }
+.xz-secondary-bar { row-gap: 6px; }
+
+/*
+ * 「全部展开 / 全部收起」是能点的动作，但 .xz-link-button 是透明无边框的文字样式，
+ * 看起来像说明文字。工具栏里这一组单独给成按钮外形（有边框、有底、有 hover），
+ * 只限定在 .xz-secondary-actions 内——页面里其它地方的同名类（例如空状态的引导链接）保持原样。
+ */
+.xz-secondary-actions > .xz-link-button {
+    min-height: 30px;
+    padding: 4px 10px;
+    border: 1px solid var(--xingzhou-border);
+    border-radius: var(--xingzhou-radius);
+    color: var(--xingzhou-text);
+    background: var(--xingzhou-panel);
+    font-size: 12px;
+}
+.xz-secondary-actions > .xz-link-button:hover {
+    border-color: var(--xingzhou-primary);
+    color: var(--xingzhou-primary);
+    background: var(--xingzhou-primary-light);
+}
+.xz-secondary-actions > .xz-link-button:active { background: var(--xingzhou-surface-light); }
+
 .xz-cleanup-entry { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 10px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel); cursor: pointer; font-size: 12px; white-space: nowrap; }
 .xz-cleanup-entry:hover { border-color: color-mix(in srgb, var(--b3-theme-warning, #d9a441) 60%, var(--xingzhou-border)); color: var(--xingzhou-text); }
 .xz-cleanup-entry--idle { opacity: .82; }
@@ -3104,16 +3195,32 @@
 .xz-plan-templates__name { box-sizing: border-box; flex: 1 1 auto; min-width: 0; height: 28px; font-size: 12.5px; }
 
 /*
- * 「混乱 / 失控」标记横条的窄屏行为。
- *
- * 用容器查询而不是媒体查询：思源标签页可以分屏、也可以被拖窄，真正决定断点的是容器宽度。
- * 一屏放不下时 .xz-daily-context 会被改成纵向，但每一行内部仍是横向两端对齐的 flex，
- * 于是「今日类型」会被挤成竖排、说明文字与状态区互相重叠。
+ * 顶部条每行内部的拆行断点：按「这行自己需要多宽」分档，而不是一刀切。
+ *   第 1 行（今日类型 + 今日状态）约需 440px
+ *   第 2 行（类型说明 + 进入紧急期 + 状态说明）约需 840px
+ * 4K 半屏面板 685px 时：第 1 行还放得下（并排），只有第 2 行拆成单列——
+ * 这样不会为了照顾长说明，把「今日类型 / 今日状态」也压成两行、白占高度。
  * 这段必须放在文件末尾：同权重的规则按出现顺序决胜，写在基础规则之前会被盖掉。
  */
-@container (max-width: 1100px) {
-    .xz-daily-context__row { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; gap: 8px; }
+@container (max-width: 899.98px) {
+    .xz-daily-context__row:nth-child(2) { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; }
+}
+@container (max-width: 519.98px) {
+    .xz-daily-context__row:nth-child(1) { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; }
     .xz-day-state { gap: 8px; }
+}
+/*
+ * 顶部视图切换（今日 / 每日 Checklist / 营养摄入 / 历史数据 / …）。
+ * 同一类问题：换行规则原本挂在 @media (max-width: 620px)（视口）上，
+ * 4K 半屏视口 1950、面板 685 时永不触发，于是每个标签被压成两行字
+ * （「每日 / Checklist」「营养 / 摄入」），既看不懂也点不准。
+ * 按钮改成不压缩 + 允许换行：面板窄时整行换行，文字保持一行。
+ */
+@container (max-width: 899.98px) {
+    .xz-daily-date-nav,
+    .xz-daily-view-nav,
+    .xz-daily-stage-nav { flex-wrap: wrap; }
+    .xz-daily-view-nav button { flex: 0 0 auto; }
 }
 @container (max-width: 980px) {
     /* 状态标签与按钮各占一行；列宽用 max-content，否则三段按钮会被压得比自己还窄、
