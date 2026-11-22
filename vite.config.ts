@@ -27,6 +27,7 @@ export default defineConfig({
                 { src: "./preview.png", dest: "./" },
                 { src: "./icon.png", dest: "./" },
                 { src: "./public/i18n/*.json", dest: "./i18n" },
+                { src: "./public/idle-stickers/*", dest: "./idle-stickers" },
             ],
         }),
     ],

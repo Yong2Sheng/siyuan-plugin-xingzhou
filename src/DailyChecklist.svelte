@@ -7,7 +7,6 @@
         boundaryKeyFor,
         pruneEntryBoundaries,
         reconcileReminders,
-        setChecklistBoundary,
         updateChecklistDayState,
         updateChecklistStore,
         type ChecklistEntry,
@@ -25,8 +24,8 @@
     export let dayType: DailyDayType | null = null;
     /**
      * 数据来源：默认由本组件自加载。
-     * 「今日记录」里的边界提醒面板会用同一个 checklist.json 写入勾选状态，
-     * 那时由父组件传入同一个 loader，让两个视图共用一份数据，避免各持旧快照互相覆盖。
+     * 「今日记录」用同一个 checklist.json 读写当日状态，父组件可以传入同一个 loader，
+     * 让两边共用一份数据，避免各持旧快照互相覆盖。
      */
     export let loadChecklist: (() => Promise<ChecklistStore>) | undefined = undefined;
     export let saveChecklist: (store: ChecklistStore) => Promise<ChecklistStore>;
@@ -91,7 +90,7 @@
     });
 
     /*
-     * 父组件换了数据源（边界提醒面板写入后 loadChecklist 会返回新快照）就重新读取。
+     * 父组件换了数据源（loadChecklist 会返回新快照）就重新读取。
      * 用序号丢弃过期结果：连续两次写入时，先到的旧快照不能盖掉后到的新快照。
      */
     $: if (!loading && loadChecklist) void reloadFromSource(loadChecklist);
@@ -137,12 +136,12 @@
         void persistDayState();
     }
 
-    /** 当前模式下实际显示的提醒，各自带上状态键与边界时间。 */
-    function visibleReminderRows(item: ChecklistEntry, mode: ChecklistTrainingMode): Array<{ key: string; reminderId: string; text: string; at: string }> {
-        return visibleReminderGroups(item, mode).flatMap((group) => group.reminders.map((reminder) => {
-            const key = boundaryKeyFor(item.id, reminder.id);
-            return { key, reminderId: reminder.id, text: reminder.text, at: item.boundaries?.[key] ?? "" };
-        }));
+    /** 当前模式下实际显示的提醒，各自带上状态键。 */
+    function visibleReminderRows(item: ChecklistEntry, mode: ChecklistTrainingMode): Array<{ key: string; text: string }> {
+        return visibleReminderGroups(item, mode).flatMap((group) => group.reminders.map((reminder) => ({
+            key: boundaryKeyFor(item.id, reminder.id),
+            text: reminder.text,
+        })));
     }
 
     function visibleReminderGroups(item: ChecklistEntry, mode: ChecklistTrainingMode): Array<{ mode: "common" | "training" | "rest"; reminders: ChecklistReminder[] }> {
@@ -223,14 +222,6 @@
             event.preventDefault();
             cancelAdding();
         }
-    }
-
-    /**
-     * 设置或清空某条提醒的边界提醒时间。
-     * 绑定在提醒 id 上，因此调整清单顺序不会让时间跑到别的事情上。
-     */
-    async function editBoundaryTime(item: ChecklistEntry, reminderId: string, value: string) {
-        await persist(setChecklistBoundary(store, template.id, { entryId: item.id, reminderId, at: value }));
     }
 
     async function changeViewMode(viewMode: ChecklistViewMode) {
@@ -452,15 +443,6 @@
                                     <div class="xz-checklist-native-reminders">
                                         {#each visibleReminderRows(item, trainingMode) as reminder (reminder.key)}
                                             <label class:completed={reminderState(reminder.key) === "completed"} class:partial={reminderState(reminder.key) === "partial"} class:missed={reminderState(reminder.key) === "missed"}>
-                                                <input
-                                                    class="xz-checklist-boundary-time"
-                                                    class:is-set={Boolean(reminder.at)}
-                                                    type="time"
-                                                    value={reminder.at}
-                                                    title="边界提醒时间：填了以后，这条会在「今日记录」里到点浮出来"
-                                                    aria-label={`“${reminder.text}”的边界提醒时间`}
-                                                    on:change={(event) => void editBoundaryTime(item, reminder.reminderId, event.currentTarget.value)}
-                                                />
                                                 <select class="xz-checklist-state-select" aria-label={`设置“${reminder.text}”状态`} value={reminderState(reminder.key)} on:change={(event) => changeReminderState(reminder.key, event.currentTarget.value)}>
                                                     <option value="">○ 待处理</option>
                                                     <option value="completed">✓ 已完成</option>
@@ -563,10 +545,7 @@
                                                     <option value="partial">◐ 部分完成</option>
                                                     <option value="missed">× 未完成</option>
                                                 </select>
-                                                <span>{reminder.text}{#if reminder.at}<em class="xz-checklist-boundary-badge">边界 {reminder.at}</em>{/if}</span>
-                                                {#if reminder.at}
-                                                    <button type="button" class="xz-checklist-boundary-clear" title="取消这条的边界提醒" on:click={() => void editBoundaryTime(item, reminder.reminderId, "")}>×</button>
-                                                {/if}
+                                                <span>{reminder.text}</span>
                                             </label>
                                         {/each}
                                     </section>

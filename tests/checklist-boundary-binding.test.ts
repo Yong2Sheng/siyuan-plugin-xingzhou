@@ -10,18 +10,15 @@ import {
     type ChecklistEntry,
     type ChecklistStore,
 } from "../src/checklist";
-import { boundaryAttention } from "../src/checklist-boundary";
 
 /*
  * 「编辑清单不能让时间错位」的回归测试。
  *
  * 用户的原始数据（已发布版本写下的 checklist.json）里，提醒只是字符串数组、没有 boundaries 字段，
  * 因此这里刻意从那种形态出发，走一遍真实的读取 → 编辑 → 保存 → 再读取，
- * 断言每条边界时间始终跟着原来那件事的文本。
+ * 断言每条边界时间始终跟着原来那件事的文本。边界提醒面板已经移除，但这层数据不变量仍要保留：
+ * 用户磁盘上已经写过的时间不能被编辑清单的动作弄丢或错位。
  */
-
-const DATE = "2026-09-21";
-const DAY_TYPE = "research-workday";
 
 /** 模拟用户磁盘上的文件：提醒是字符串数组、没有 boundaries。 */
 function legacyStore(): Record<string, unknown> {
@@ -137,16 +134,6 @@ describe("编辑清单后边界时间不错位", () => {
         const edited = PREPARE_DEFAULT.map((text, index) => (index === 1 ? "平光镜与充电器放进书包" : text));
         const after = saveEdited(before, "wd-prepare", edited);
         expect(timeToText(after, "wd-prepare")).toEqual({ "20:15": "平光镜与充电器放进书包" });
-        // 面板上也显示新文字
-        const template = after.templates.find((candidate) => candidate.id === "workday")!;
-        const attention = boundaryAttention(template, new Map(), {
-            date: DATE,
-            dayType: DAY_TYPE,
-            now: new Date("2026-09-21T20:16:00").getTime(),
-        });
-        const item = [...attention.items, ...attention.later].find((candidate) => candidate.entryId === "wd-prepare");
-        expect(item?.at).toBe("20:15");
-        expect(item?.reminder).toBe("平光镜与充电器放进书包");
     });
 
     it("删掉边界提醒本身（在 Checklist 里删掉那一行），时间随之消失且不会被默认值复活", () => {

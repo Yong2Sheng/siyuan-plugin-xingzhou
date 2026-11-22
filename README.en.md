@@ -78,6 +78,15 @@ The build creates `dist/` and an installable `package.zip`.
 
 Xingzhou contains no remote service. Work items, daily records, nutrition records, the migration snapshot, and rotating backups use SiYuan's plugin-private data mechanism. Images in Current Action Details live in the SiYuan asset library (`data/assets/`); the plugin data stores only reference paths. Those images count toward your SiYuan cloud quota, and both cleanup and Storage Health only act on images referenced by Xingzhou, never on other assets in your notes. The plugin accesses local SiYuan content only for one-time legacy migration or when opening a linked document, and it never creates or deletes documents automatically.
 
+## Idle sticker assets and license
+
+In stages that have no scoring fields, the right column shows community-made chibi "Big Fat Fish" stickers. Their source and license are separate from the plugin code:
+
+- Source: [diwer/ai-biaoqingbao](https://github.com/diwer/ai-biaoqingbao); base whale-girl character by 上善无形; DeepSeek maid redesign by ZipZipPipe; GIF redraw, frame cleanup and captions by ming
+- License: CC BY-NC-SA 4.0 (Attribution–NonCommercial–ShareAlike), https://creativecommons.org/licenses/by-nc-sa/4.0/deed.en
+- Scope: non-commercial personal plugin only; no sales, paid downloads, or commercial promotion; not an official DeepSeek work and not endorsed by DeepSeek or the original authors
+- License boundary: the sticker assets under `public/idle-stickers/` are licensed separately under CC BY-NC-SA 4.0 and are **not** covered by this repository's MIT license. Full notice: [public/idle-stickers/NOTICE.md](public/idle-stickers/NOTICE.md)
+
 ## License
 
 [MIT](LICENSE)

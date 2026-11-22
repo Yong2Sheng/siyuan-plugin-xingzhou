@@ -1224,7 +1224,17 @@
 .xz-relationship-empty { min-height: 360px; flex: 1; align-content: center; }
 .xz-relationship-empty h3 { margin: 12px 0 0; color: var(--xingzhou-text); }
 
+/*
+ * 生活节律模块自己就是「插件面板宽度」的尺寸容器。
+ *
+ * 这个模块里的断点（今日记录 + 评分规则两栏、顶部今日类型与状态并排、表单区块内栅格）
+ * 都写成 @container，它们要求最近祖先上有 container-type。真实 AppShell 的链条是
+ * .xz-app-shell > .xz-shell-content > .xz-daily-module，中间没有其它尺寸容器。
+ * 5.4.1 把 .xz-daily-layout 改成「默认单列、@container ≥1100px 才两栏」时漏了这里，
+ * 于是所有按面板宽度的断点都不生效，评分规则卡一直置顶占满整行（真实回归）。
+ */
 .xz-daily-module {
+    container-type: inline-size;
     --xz-daily-structured-width: 320px;
     height: 100%;
     min-height: 0;
@@ -1349,13 +1359,13 @@
  * 记录卡被压到 884px，睡眠区再被切成三列，「主观睡眠质量」只剩 272px。
  */
 .xz-daily-layout { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; overflow: auto; padding: 0 16px 16px; }
-/* 单列时评分规则排在记录卡上方。这条必须写在下面 @container 之前：
+/* 单列时右栏（大肥鱼说 + 评分规则）排在记录卡上方。这条必须写在下面 @container 之前：
    同优先级按出现顺序决胜，写在后面会把宽屏的 order:0 盖掉，
-   评分卡就会一直顶到左边那一列、把记录卡挤成 385px。 */
-.xz-daily-rubric-card { order: -1; }
+   右栏就会一直顶到左边那一列、把记录卡挤成 385px。 */
+.xz-daily-right { order: -1; }
 @container (min-width: 1100px) {
     .xz-daily-layout { grid-template-columns: minmax(0, 1.65fr) minmax(250px, .72fr); }
-    .xz-daily-rubric-card { order: 0; }
+    .xz-daily-right { order: 0; }
 }
 .xz-daily-record, .xz-daily-rubric-card, .xz-daily-list-view { border: 1px solid var(--xingzhou-strong-border); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-panel); box-shadow: var(--xingzhou-panel-shadow); }
 .xz-daily-record { min-width: 0; align-self: start; overflow: hidden; }
@@ -1460,6 +1470,41 @@
 .xz-daily-rubric-card li b { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: var(--xingzhou-surface-light); }
 .xz-daily-rubric-card li.active { color: var(--xingzhou-text); font-weight: 600; }
 .xz-daily-rubric-card li.active b { color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); }
+/*
+ * 右栏「大肥鱼说」：始终存在的嘴替卡片；有评分字段时，评分规则接在这张卡下面。
+ * 表情包素材来自社区 Q 版大肥鱼 GIF（CC BY-NC-SA 4.0，仅非商业使用），
+ * 来源与许可见 public/idle-stickers/NOTICE.md。
+ * 布局：表情包在最左侧，标题、台词、按钮在右侧，共享竖向空间，卡片不会因为加图变高。
+ */
+.xz-daily-right { display: grid; gap: 10px; align-self: start; }
+.xz-daily-idle-column { min-width: 0; }
+.xz-daily-idle-card { overflow: hidden; border: 1px solid var(--xingzhou-strong-border); border-radius: calc(var(--xingzhou-radius) + 2px); background: var(--xingzhou-panel); box-shadow: var(--xingzhou-panel-shadow); }
+.xz-daily-idle-body { display: flex; align-items: flex-start; gap: 14px; padding: 14px; }
+.xz-daily-idle-sticker { flex: 0 0 auto; width: 120px; height: 120px; padding: 0; border: 0; border-radius: 10px; background: transparent; box-shadow: 0 8px 18px color-mix(in srgb, var(--xingzhou-text) 18%, transparent); cursor: pointer; user-select: none; transition: transform .18s ease; transform: rotate(-4deg); }
+.xz-daily-idle-sticker img { display: block; width: 100%; height: 100%; border-radius: 10px; }
+.xz-daily-idle-sticker.is-poked { animation: xz-idle-sticker-shake .38s ease; }
+@keyframes xz-idle-sticker-shake {
+    25% { transform: rotate(-8deg) scale(1.02); }
+    60% { transform: rotate(6deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .xz-daily-idle-sticker.is-poked { animation: none; }
+}
+.xz-daily-idle-content { min-width: 0; flex: 1 1 auto; display: grid; gap: 2px; align-content: start; }
+.xz-daily-idle-title h3 { margin: 0; font-size: 18px; }
+.xz-daily-idle-title p { margin: 2px 0 0; color: var(--xingzhou-muted); font-size: 12px; }
+.xz-daily-idle-line { margin: 8px 0 0; font-size: 15px; line-height: 1.75; }
+.xz-daily-idle-note { margin: 0; color: var(--xingzhou-muted); font-size: 12px; }
+.xz-daily-idle-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
+.xz-daily-idle-more { flex: 0 0 auto; min-height: 26px; padding: 3px 9px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel); cursor: pointer; font-size: 12px; white-space: nowrap; }
+.xz-daily-idle-more:hover { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); }
+/* 窄面板：仍是一张卡、左图右文，图缩小；评分规则接在下面 */
+@container (max-width: 1099.98px) {
+    .xz-daily-idle-body { gap: 10px; padding: 12px; }
+    .xz-daily-idle-sticker { width: 96px; height: 96px; }
+    .xz-daily-idle-note { display: none; }
+}
+
 .xz-daily-rubric-note { margin: 8px 14px 14px; padding: 10px; border-left: 3px solid var(--xingzhou-primary); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 12px; line-height: 1.6; }
 .xz-daily-closure-choice { width: min(100%, var(--xz-daily-structured-width)); }
 .xz-daily-closure-details { margin-top: 12px; }
@@ -1754,7 +1799,7 @@
 .xz-checklist-add-reminder__box button { min-height: 28px; padding: 3px 10px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); background: var(--xingzhou-panel); cursor: pointer; font-size: 12px; white-space: nowrap; }
 .xz-checklist-add-reminder__box button.primary { border-color: var(--xingzhou-primary); color: var(--b3-theme-on-primary, #fff); background: var(--xingzhou-primary); }
 .xz-checklist-add-reminder__box button:disabled { opacity: 0.55; cursor: wait; }
-.xz-checklist-native-reminders label { min-width: 0; display: grid; grid-template-columns: auto 102px minmax(0, 1fr) auto; align-items: center; gap: 9px; }
+.xz-checklist-native-reminders label { min-width: 0; display: grid; grid-template-columns: 102px minmax(0, 1fr) auto; align-items: center; gap: 9px; }
 .xz-checklist-paper section > label { min-width: 0; display: grid; grid-template-columns: 86px minmax(0, 1fr); align-items: start; gap: 7px; }
 .xz-checklist-native-reminders label { padding: 5px 6px 5px 0; border-radius: var(--xingzhou-radius); color: var(--xingzhou-text); font-size: 14px; line-height: 1.55; }
 .xz-checklist-native-reminders label:hover { background: var(--xingzhou-surface-light); }
@@ -2689,59 +2734,6 @@
     .xz-trend-summary { gap: 3px 10px; }
 }
 
-/* ===== 边界提醒面板（今日记录内联，按时间浮出易漏的离散事件） ===== */
-.xz-daily-boundary-panel { padding: 11px 14px 13px; border-bottom: 1px solid var(--xingzhou-border); background: color-mix(in srgb, var(--xingzhou-primary) 5%, var(--xingzhou-panel)); }
-.xz-daily-boundary-panel.is-empty { padding: 8px 14px; background: transparent; }
-.xz-boundary-empty { margin: 0; color: var(--xingzhou-muted); font-size: 12px; }
-.xz-daily-boundary-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.xz-daily-boundary-panel > header > div { display: grid; gap: 2px; }
-.xz-daily-boundary-panel > header strong { font-size: 14px; }
-.xz-daily-boundary-panel > header small { color: var(--xingzhou-muted); font-size: 12px; }
-.xz-boundary-link { flex: 0 0 auto; padding: 4px 8px; border: 0; border-radius: var(--xingzhou-radius); color: var(--xingzhou-primary); background: transparent; cursor: pointer; font-size: 12px; }
-.xz-boundary-note { margin: 8px 0 0; color: var(--xingzhou-muted); font-size: 12px; }
-.xz-boundary-error { margin: 8px 0 0; padding: 6px 9px; border-radius: var(--xingzhou-radius); color: var(--xingzhou-danger); background: color-mix(in srgb, var(--xingzhou-danger) 10%, transparent); font-size: 12px; }
-.xz-boundary-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }
-.xz-boundary-item { position: relative; min-width: 0; min-height: 44px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 9px 7px 12px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); background: var(--xingzhou-panel); }
-.xz-boundary-item::before { content: ""; position: absolute; top: 7px; bottom: 7px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: transparent; }
-.xz-boundary-item.is-overdue { border-color: color-mix(in srgb, var(--xingzhou-danger) 32%, var(--xingzhou-border)); }
-.xz-boundary-item.is-overdue::before { background: var(--xingzhou-danger); }
-.xz-boundary-item.is-soon::before { background: var(--xingzhou-primary); }
-.xz-boundary-item.is-later::before { background: color-mix(in srgb, var(--xingzhou-muted) 45%, transparent); }
-.xz-boundary-item.is-later { background: var(--xingzhou-panel-subtle); }
-/* 「还没到点」整卡已经用底色与左条降级过一次；标题再降一级就看不出这条要做什么 */
-.xz-boundary-item.is-later .xz-boundary-item__body strong { color: var(--xingzhou-text); font-weight: 600; }
-.xz-boundary-item.is-done { opacity: 0.6; }
-.xz-boundary-item__time { color: var(--xingzhou-muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.xz-boundary-item.is-soon .xz-boundary-item__time { color: var(--xingzhou-primary); font-weight: 600; }
-.xz-boundary-item.is-overdue .xz-boundary-item__time { color: var(--xingzhou-danger); font-weight: 600; }
-.xz-boundary-item__body { min-width: 0; display: grid; gap: 1px; }
-/* 标题＝具体事项（要照做的那一句），是这张卡的主文案，不再是 12px/500 的弱化文字 */
-.xz-boundary-item__body strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.xz-boundary-item.is-done .xz-boundary-item__body strong { text-decoration: line-through; }
-/* 补充行＝阶段名 + 状态／相对时间 + 原文剩余分句 */
-.xz-boundary-item__body small { overflow: hidden; color: var(--xingzhou-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.xz-boundary-item.is-overdue .xz-boundary-item__body small { color: var(--xingzhou-danger); }
-.xz-boundary-item__done { flex: 0 0 auto; min-width: 40px; min-height: 40px; padding: 5px 8px; border: 1px solid var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel); cursor: pointer; font-size: 12px; white-space: nowrap; }
-.xz-boundary-item__done:hover { border-color: var(--xingzhou-primary); color: var(--xingzhou-primary); }
-.xz-boundary-item__done:disabled { opacity: 0.55; cursor: wait; }
-.xz-boundary-item.is-done .xz-boundary-item__done { border-color: transparent; color: var(--xingzhou-primary); background: transparent; }
-.xz-boundary-more { margin: 9px 0 0; color: var(--xingzhou-muted); font-size: 12px; }
-
-/*
- * Checklist 视图里的边界提醒时间编辑。
- *
- * 这个输入框是 label 网格的第三个子元素，如果按普通元素排就会被挤到下一行、
- * 让每条提醒都多占一整行（文本 102px + 内容 1fr 的布局没有它的位置）。
- * 因此它绝对定位在行内右上角，默认完全不可见也不占位，只在三种情况下浮出：
- * 悬停该行、键盘聚焦该行（:focus-within）、或这条已经设了时间。
- * 同时隐藏原生 time 控件的时钟按钮与空值占位，避免出现「--:-- + 时钟图标」。
- */
-/*
- * 边界提醒时间入口：紧挨在状态按钮**前面**。
- * 放在行尾（最右）时要横跨整行去读，还得自己对齐是哪一行的，宽屏上很累；
- * 放在状态按钮前，时刻与它修饰的那条提醒天然在同一处视线里。
- * 未设置时只是一个很淡的虚线占位（且不显示 --:--），设置后变成实心胶囊。
- */
 /* 行内删除：默认隐身，悬停或聚焦该行时出现，避免整列都是 × */
 .xz-checklist-remove-reminder { flex: 0 0 auto; width: 22px; min-height: 22px; padding: 0; border: 1px solid transparent; border-radius: 5px; color: var(--xingzhou-muted); background: transparent; cursor: pointer; font-size: 13px; line-height: 1; opacity: 0; transition: opacity .12s ease; }
 .xz-checklist-native-reminders label:hover .xz-checklist-remove-reminder,
@@ -2750,41 +2742,6 @@
 .xz-checklist-remove-reminder.is-confirming { width: auto; padding: 0 7px; border-color: var(--xingzhou-danger); color: var(--b3-theme-on-error, #fff); background: var(--xingzhou-danger); font-size: 11px; opacity: 1; }
 .xz-checklist-remove-reminder:disabled { opacity: .5; cursor: wait; }
 @media (any-pointer: coarse) { .xz-checklist-remove-reminder { opacity: 1; } }
-
-.xz-checklist-native-reminders .xz-checklist-boundary-time { box-sizing: border-box; width: 48px; min-height: 22px; margin: 0; padding: 0; border: 1px dashed var(--xingzhou-border); border-radius: 5px; color: var(--xingzhou-muted); background: transparent; font-size: 10px; font-variant-numeric: tabular-nums; text-align: center; cursor: pointer; }
-.xz-checklist-native-reminders .xz-checklist-boundary-time:hover { border-color: var(--xingzhou-primary); }
-.xz-checklist-native-reminders .xz-checklist-boundary-time.is-set { border-style: solid; border-radius: 5px; border-color: color-mix(in srgb, var(--xingzhou-primary) 45%, var(--xingzhou-border)); color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-weight: 600; }
-.xz-checklist-native-reminders .xz-checklist-boundary-time::-webkit-calendar-picker-indicator { display: none; }
-/* 未设置时不显示 --:--，避免整列都是噪音；悬停或聚焦时才露出可填写的提示 */
-.xz-checklist-native-reminders .xz-checklist-boundary-time:not(.is-set)::-webkit-datetime-edit { color: transparent; }
-.xz-checklist-native-reminders .xz-checklist-boundary-time:not(.is-set):hover::-webkit-datetime-edit,
-.xz-checklist-native-reminders .xz-checklist-boundary-time:not(.is-set):focus::-webkit-datetime-edit { color: var(--xingzhou-muted); }
-.xz-checklist-boundary-badge { margin-left: 6px; padding: 1px 5px; border-radius: 999px; color: var(--xingzhou-primary); background: var(--xingzhou-primary-light); font-size: 9px; font-style: normal; white-space: nowrap; }
-.xz-checklist-boundary-clear { min-width: 26px; min-height: 26px; padding: 0; border: 0; border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: transparent; cursor: pointer; font-size: 13px; }
-.xz-checklist-boundary-clear:hover { color: var(--xingzhou-danger); }
-
-@media (max-width: 980px) {
-    .xz-boundary-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    /*
-     * 两列时每张卡只剩半行宽，若仍按「时刻列 + 正文列 + 按钮列」排，
-     * 正文列被两侧挤到约 150px，具体事项写不到十来个字就要截断。
-     * 因此把时刻与标题合到同一列（时刻仍在左上角，标题左缩进与它对齐），
-     * 标题拿到整行宽度；按钮纵向跨两行、固定在右侧。
-     */
-    .xz-boundary-item { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; row-gap: 3px; }
-    .xz-boundary-item__time { grid-area: 1 / 1; font-size: 12px; }
-    .xz-boundary-item__body { grid-area: 1 / 1; padding-left: 46px; }
-    .xz-boundary-item__done { grid-area: 1 / 2; grid-row: 1 / span 2; align-self: start; }
-}
-
-@media (max-width: 620px) {
-    .xz-daily-boundary-panel > header { flex-direction: column; gap: 4px; }
-    .xz-daily-boundary-panel > header .xz-boundary-actions { align-self: flex-end; }
-    .xz-boundary-list { grid-template-columns: minmax(0, 1fr); }
-    .xz-boundary-item { min-height: 52px; }
-    .xz-boundary-item__done { min-width: 44px; min-height: 44px; }
-    .xz-boundary-item__body small { white-space: normal; }
-}
 
 @media print {
     .xz-trend-toolbar { display: none !important; }

@@ -32,4 +32,17 @@ describe("每日期表单的布局不变量", () => {
     it("不再依赖单个控件的临时补丁，避免回到「只有数字框修好、其它控件照旧溢出」", () => {
         expect(scss).not.toContain(".xz-daily-fields .xz-daily-compact-number { box-sizing: border-box");
     });
+
+    it("生活节律模块自己是尺寸容器，按面板宽度写的 @container 断点才会生效", () => {
+        /*
+         * 真实回归：5.4.1 把今日记录改成「默认单列、@container ≥1100px 才两栏」，
+         * 但生活节律的祖先链（.xz-app-shell > .xz-shell-content > .xz-daily-module）里
+         * 没有尺寸容器，评分规则卡于是一直置顶占满整行。
+         */
+        const body = ruleBody(".xz-daily-module");
+        expect(body).toContain("container-type: inline-size");
+        expect(scss).toContain("@container (min-width: 1100px)");
+        expect(scss).toContain(".xz-daily-right { order: -1; }");
+        expect(scss).toContain(".xz-daily-right { order: 0; }");
+    });
 });

@@ -111,6 +111,15 @@ pnpm build
 - 插件不会自动创建或删除思源文档；
 - `disabledInPublish` 已启用，避免在发布服务中加载个人管理界面。
 
+## 表情包素材与许可
+
+右栏「大肥鱼说」在不含评分字段的阶段会展示社区 Q 版「大肥鱼」表情包，素材来源与许可单独说明如下：
+
+- 来源：[diwer/ai-biaoqingbao](https://github.com/diwer/ai-biaoqingbao)（《大肥鱼表情包：100个中文GIF》）；基础鲸鱼娘角色：上善无形；DeepSeek 女仆二次设计：ZipZipPipe；本套 GIF 的 AI 辅助改绘、动作帧整理、配字与合成：ming
+- 许可：CC BY-NC-SA 4.0（署名、非商业性使用、相同方式共享），说明见 https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh-hans
+- 使用范围：仅用于非商业的个人插件；不收费、不设置赞赏/收费下载、不接商业推广；不是 DeepSeek 官方作品，也不代表原作者或 DeepSeek 的认可、合作或背书
+- 许可边界：`public/idle-stickers/` 内的表情包素材单独按 CC BY-NC-SA 4.0 授权，**不纳入**本仓库代码的 MIT 许可；完整说明见 [public/idle-stickers/NOTICE.md](public/idle-stickers/NOTICE.md)
+
 ## 许可证
 
 [MIT](LICENSE)
