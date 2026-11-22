@@ -14,15 +14,22 @@ export const ACTION_TEMPLATE_VERSION = 1;
 export const MAX_ACTION_TEMPLATES = 30;
 const MAX_NAME_LENGTH = 40;
 
-/** 模板里不含成果条目与迁移标记：成果是事实记录，不该被模板复制。 */
+/**
+ * 模板只含可复用的背景字段。
+ *
+ * 不含断点、成果与迁移标记：断点是事实记录、成果是里程碑，都不该被模板复制。
+ * `currentState` 已从模板里移除（它现在是「最新一条断点」的派生视图，不再是可填字段）；
+ * 旧的模板文件里如果还有这个键，读取时忽略即可，不影响解析。
+ */
 export type ActionTemplate = {
     name: string;
-    currentState: string;
     background: string;
     prompt: string;
     guidance: string;
     definition: string;
 };
+
+const TEMPLATE_FIELDS = ["background", "prompt", "guidance", "definition"] as const;
 
 export function defaultActionTemplates(): ActionTemplate[] {
     return [];
@@ -33,10 +40,9 @@ export function normalizeActionTemplate(value: unknown): ActionTemplate | null {
     const source = value as Partial<ActionTemplate>;
     const name = typeof source.name === "string" ? source.name.trim().slice(0, MAX_NAME_LENGTH) : "";
     if (!name) return null;
-    const detail = normalizeActionDetail({ ...source, outcomes: [] });
+    const detail = normalizeActionDetail({ ...source, outcomes: [], checkpoints: [] });
     return {
         name,
-        currentState: detail.currentState,
         background: detail.background,
         prompt: detail.prompt,
         guidance: detail.guidance,
@@ -83,7 +89,6 @@ export function templateFromDetail(name: string, detail: ActionDetail): ActionTe
     if (!trimmed) throw new Error("模板名称不能为空。");
     return {
         name: trimmed,
-        currentState: detail.currentState,
         background: detail.background,
         prompt: detail.prompt,
         guidance: detail.guidance,
@@ -109,7 +114,7 @@ export function templateNames(templates: ActionTemplate[]): string[] {
  */
 export function applyActionTemplate(detail: ActionDetail, template: ActionTemplate, now = Date.now()): ActionDetail {
     const filled: ActionDetail = { ...detail, updatedAt: now };
-    for (const key of ["currentState", "background", "prompt", "guidance", "definition"] as const) {
+    for (const key of TEMPLATE_FIELDS) {
         if (!filled[key].trim() && template[key].trim()) filled[key] = template[key];
     }
     return filled;
@@ -117,15 +122,13 @@ export function applyActionTemplate(detail: ActionDetail, template: ActionTempla
 
 /** 空模板判断：全是空字段时没有保存价值。 */
 export function isTemplateEmpty(template: ActionTemplate): boolean {
-    return !template.currentState.trim() && !template.background.trim() && !template.prompt.trim()
-        && !template.guidance.trim() && !template.definition.trim();
+    return TEMPLATE_FIELDS.every((key) => !template[key].trim());
 }
 
 /** 把模板还原成一份细则草稿（预览或新建时使用）。 */
 export function detailFromTemplate(template: ActionTemplate): ActionDetail {
     return {
         ...createEmptyActionDetail(),
-        currentState: template.currentState,
         background: template.background,
         prompt: template.prompt,
         guidance: template.guidance,

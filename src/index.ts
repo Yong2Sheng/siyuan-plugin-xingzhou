@@ -99,6 +99,21 @@ type AppInstance = {
     mount: HTMLDivElement;
 };
 
+/**
+ * 把 store 规范化成「它自己能被解析回来的形状」。
+ *
+ * 读路径会做旧字段迁移（currentAction → 细则 → 断点），写路径不做就等于少一步，
+ * 写后复核会因此报「写读不一致」。所有写入都要先过这里。
+ * 解析失败时原样返回，让原有的复核流程去报真正的原因。
+ */
+function canonicalStore(store: InternalWorkItemStore): InternalWorkItemStore {
+    try {
+        return parseInternalStore(JSON.parse(JSON.stringify(store))) ?? store;
+    } catch {
+        return store;
+    }
+}
+
 export default class XingzhouPlugin extends Plugin {
     private settings: XingzhouSettings = { ...DEFAULT_SETTINGS, log: { ...DEFAULT_SETTINGS.log } };
     private readonly instances = new Map<Custom, AppInstance>();
@@ -669,6 +684,13 @@ export default class XingzhouPlugin extends Plugin {
      * 每一步都留日志，出问题时能看出是哪一步没走完。
      */
     private async persistStore(previous: InternalWorkItemStore, next: InternalWorkItemStore): Promise<void> {
+        /*
+         * 写入前先规范化：读回来的形状必须和写进去的一致，否则写后复核会报"写读不一致"。
+         * 真实踩过：旧字段迁移（currentAction → 细则 → 断点）只在读取时发生，
+         * 于是刚写下的对象比解析回来的少一步，复核直接失败。
+         */
+        previous = canonicalStore(previous);
+        next = canonicalStore(next);
         const backupFile = backupFileForRevision(previous.revision);
         log.verbose("store", "store.backup.rotate", {
             file: backupFile,

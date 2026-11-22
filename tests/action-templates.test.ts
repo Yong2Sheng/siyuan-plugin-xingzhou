@@ -9,7 +9,6 @@ const NOW = new Date("2026-09-21T10:00:00").getTime();
 function buildTemplate(name = "技术事务"): ActionTemplate {
     return {
         name,
-        currentState: "上次做到 X，卡在 Y",
         background: "为什么要做",
         prompt: "发给 AI 的提示词",
         guidance: "先做领域层",
@@ -22,8 +21,10 @@ describe("行动细则模板（领域层）", () => {
         const detail = setActionDetailField(createEmptyActionDetail(), "prompt", "我自己写的提示词", NOW);
         const next = applyActionTemplate(detail, buildTemplate(), NOW + 1);
         expect(next.prompt).toBe("我自己写的提示词");
-        expect(next.currentState).toBe("上次做到 X，卡在 Y");
         expect(next.definition).toBe("测试全绿");
+        /* 模板不再碰 currentState / 断点：它们是事实记录，不该被模板复制 */
+        expect(next.currentState).toBe("");
+        expect(next.checkpoints).toEqual([]);
         expect(next.updatedAt).toBe(NOW + 1);
     });
 

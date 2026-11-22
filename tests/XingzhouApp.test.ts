@@ -581,42 +581,47 @@ describe("XingzhouApp", () => {
         expect([...document.querySelectorAll("button")].find((button) => button.textContent?.includes("编辑行动内容"))).toBeUndefined();
         // 内部字段齐备时不再提示"字段不可用"，行动细则卡直接可用
         expect(document.querySelector(".xz-plan-card")).not.toBeNull();
-        expect(document.querySelector(".xz-plan-card")?.textContent).toContain("当前状态");
-        const nextActionCard = [...document.querySelectorAll<HTMLElement>(".xz-plan-field")]
-            .find((card) => card.querySelector("h4")?.textContent === "下一步行动") as HTMLElement;
-        nextActionCard.querySelector<HTMLButtonElement>("button")!.click();
+        expect(document.querySelector(".xz-plan-card")?.textContent).toContain("断点");
+        /*
+         * 下一步行动不再是可编辑字段：它来自最新一条断点。
+         * 这里按用户的真实动作走一遍——记一条断点、取消不留痕、再记一条并保存。
+         */
+        const addButton = document.querySelector<HTMLButtonElement>("[data-cp-add]")!;
+        addButton.click();
         await tick();
-        let actionEditor = document.querySelector('textarea[aria-label="下一步行动"]') as HTMLTextAreaElement;
-        expect(actionEditor).toBeInstanceOf(HTMLTextAreaElement);
-        expect(document.activeElement).toBe(actionEditor);
+        expect(document.querySelector("[data-cpf]")).not.toBeNull();
 
         saveItem.mockClear();
-        actionEditor.value = "这次输入需要取消";
-        actionEditor.dispatchEvent(new Event("input", { bubbles: true }));
-        actionEditor.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        (document.querySelector("[data-cpf-did]") as HTMLTextAreaElement).value = "这次输入需要取消";
+        document.querySelector("[data-cpf-did]")!.dispatchEvent(new Event("input", { bubbles: true }));
         await tick();
-        expect(document.querySelector('textarea[aria-label="下一步行动"]')).toBeNull();
+        [...document.querySelectorAll<HTMLButtonElement>("[data-cpf] button")]
+            .find((button) => button.textContent?.trim() === "取消")!
+            .click();
+        await tick();
+        expect(document.querySelector("[data-cpf]")).toBeNull();
         expect(saveItem).not.toHaveBeenCalled();
 
-        nextActionCard.querySelector<HTMLButtonElement>("button")!.click();
+        addButton.click();
         await tick();
-        actionEditor = document.querySelector('textarea[aria-label="下一步行动"]') as HTMLTextAreaElement;
-        actionEditor.value = "把垃圾装袋并带到楼下";
-        actionEditor.dispatchEvent(new Event("input", { bubbles: true }));
-        ([...document.querySelectorAll<HTMLButtonElement>(".xz-action-editor-window__actions button")]
-            .find((candidate) => candidate.textContent?.trim() === "保存") as HTMLButtonElement).click();
+        const didInput = document.querySelector("[data-cpf-did]") as HTMLTextAreaElement;
+        didInput.value = "把垃圾装袋";
+        didInput.dispatchEvent(new Event("input", { bubbles: true }));
+        const nextInput = document.querySelector<HTMLInputElement>('input[placeholder^="下次接着做什么"]')!;
+        nextInput.value = "带到楼下";
+        nextInput.dispatchEvent(new Event("input", { bubbles: true }));
+        await tick();
+        document.querySelector<HTMLButtonElement>("[data-cpf-save]")!.click();
         await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
-        expect(saveItem.mock.calls[0][2]).toEqual({ nextAction: "把垃圾装袋并带到楼下" });
 
-        saveItem.mockClear();
-        ([...document.querySelectorAll<HTMLElement>(".xz-plan-field")].find((card) => card.querySelector("h4")?.textContent === "下一步行动") as HTMLElement).querySelector<HTMLButtonElement>("button")!.click();
-        await tick();
-        actionEditor = document.querySelector('textarea[aria-label="下一步行动"]') as HTMLTextAreaElement;
-        actionEditor.value = "快捷键保存的下一步";
-        actionEditor.dispatchEvent(new Event("input", { bubbles: true }));
-        actionEditor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }));
-        await vi.waitFor(() => expect(saveItem).toHaveBeenCalled());
-        expect(saveItem.mock.calls[0][2]).toEqual({ nextAction: "快捷键保存的下一步" });
+        const checkpointChanges = saveItem.mock.calls[0][2] as {
+            actionDetail?: { checkpoints?: Array<{ did: string; next: string }> };
+            nextAction?: string;
+        };
+        expect(checkpointChanges.actionDetail?.checkpoints?.[0]?.did).toBe("把垃圾装袋");
+        expect(checkpointChanges.actionDetail?.checkpoints?.[0]?.next).toBe("带到楼下");
+        /* 旧的 nextAction 字段仍然写回，作为派生镜像，列表与整理清单照旧可读 */
+        expect(checkpointChanges.nextAction).toBe("带到楼下");
 
         saveItem.mockClear();
         const deadlineMode = document.querySelector('select[aria-label="截止日期设置"]') as HTMLSelectElement;
@@ -1366,8 +1371,8 @@ describe("XingzhouApp", () => {
             const item: WorkItem = {
                 id: "tx-long", rowId: "tx-long", title: "整理 Hardness ratio 笔记", documentId: null, detached: true,
                 type: "事务", status: "进行中", currentAction: longNote, nextAction: "",
-                // 结构化细则的当前状态承接旧的长文，测试的编辑对象就是它
-                actionDetail: { ...createEmptyActionDetail(), currentState: longNote },
+                // 当前状态已变成断点的派生视图；长文编辑的宿主字段改用「行动指导与想法」
+                actionDetail: { ...createEmptyActionDetail(), guidance: longNote },
                 parentIds: [], topProjectIds: [], hardPrerequisiteIds: [], softPrerequisiteIds: [],
                 planDate: null, deadline: null, noDeadline: false, durationMinutes: 30, energy: "", updatedAt: now,
                 executionSlices: [],
@@ -1429,9 +1434,9 @@ describe("XingzhouApp", () => {
             return node!;
         }
 
-        /** 默认打开「当前状态」字段，绝大多数用例编辑的就是它。 */
+        /** 默认打开「行动指导与想法」字段，绝大多数用例编辑的就是它。 */
         async function openEditor(): Promise<HTMLTextAreaElement> {
-            return openFieldEditor("当前状态");
+            return openFieldEditor("行动指导与想法");
         }
 
         /**
@@ -1472,7 +1477,7 @@ describe("XingzhouApp", () => {
             const { saveItem } = mountFixture({
                 item: {
                     nextAction,
-                    actionDetail: { ...createEmptyActionDetail(), currentState: longNote, prompt, background },
+                    actionDetail: { ...createEmptyActionDetail(), guidance: longNote, prompt, background },
                 },
             });
             const saveSpy = saveItem as unknown as { mock: { calls: Array<[WorkItemData, WorkItem, WorkItemChanges]> } };
@@ -1502,9 +1507,10 @@ describe("XingzhouApp", () => {
             backgroundEditor.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
             await vi.waitFor(() => expect(editor()).toBeNull());
 
-            const nextEditor = await openFieldEditor("下一步行动");
-            expect(nextEditor.value).toBe(nextAction);
-            expect(dialogTitle()).toBe("下一步行动");
+            /* 下一步行动已不是可编辑字段（它现在来自最新一条断点），改用另一个有内容的稳定字段验同一件事 */
+            const guidanceEditor = await openFieldEditor("行动指导与想法");
+            expect(guidanceEditor.value).toContain("用 SN taxonomy 举例");
+            expect(dialogTitle()).toBe("行动指导与想法");
         });
 
         it("连续输入期间不改写 DOM 值与选区", async () => {
@@ -1643,7 +1649,7 @@ describe("XingzhouApp", () => {
             // 模拟思源「点窗口外关闭」：宿主销毁对话框，插件应据此保存并复位编辑态
             (document.querySelector(".b3-dialog__close") as HTMLButtonElement).click();
             await vi.waitFor(() => expect(saveSpy.mock.calls.length).toBe(1));
-            expect((saveSpy.mock.calls[0][2] as { actionDetail?: { currentState?: string } }).actionDetail?.currentState).toContain("临时输入");
+            expect((saveSpy.mock.calls[0][2] as { actionDetail?: { guidance?: string } }).actionDetail?.guidance).toContain("临时输入");
             await tick();
 
             expect(editor()).toBeNull();
@@ -1680,7 +1686,7 @@ describe("XingzhouApp", () => {
 
             await saveWindow();
             expect(saveItem).toHaveBeenCalledTimes(1);
-            expect((saveItem.mock.calls[0][2] as { actionDetail?: { currentState?: string } }).actionDetail?.currentState).toContain("第一段输入");
+            expect((saveItem.mock.calls[0][2] as { actionDetail?: { guidance?: string } }).actionDetail?.guidance).toContain("第一段输入");
             // 写入期间窗口仍在、输入框可用：没有 disabled 输入框吞掉按键
             expect(editor()).toBe(node);
             expect(editor()!.disabled).toBe(false);
@@ -1727,8 +1733,8 @@ describe("XingzhouApp", () => {
             const detail = document.querySelector<HTMLElement>(".xz-detail")!;
             detail.scrollTop = 720;
             const fieldButton = [...document.querySelectorAll<HTMLElement>(".xz-plan-field")]
-                .find((candidate) => candidate.querySelector("h4")?.textContent === "当前状态")!
-                .querySelector<HTMLButtonElement>("button")!;
+                .find((candidate) => candidate.querySelector("h4")?.textContent === "行动指导与想法")!
+                .querySelector<HTMLButtonElement>(".xz-plan-field__edit")!;
             fieldButton.click();
             await tick();
             await tick();
@@ -1842,7 +1848,10 @@ describe("切换选中项后本次行动细则跟着换", () => {
             currentAction: "", updatedAt: Date.now(),
             actionDetail: {
                 ...createEmptyActionDetail(),
-                currentState: "上一条的当前状态",
+                checkpoints: [{
+                    id: "cp-ai", createdAt: Date.now() - 86400000, did: "上一条的当前状态",
+                    stuck: "", next: "接着跑超分", entry: null, payload: "", starred: false,
+                }],
                 guidance: "To-do 上一条的行动指导内容，足够长，长到折叠时只显示一行预览。",
             },
         };
@@ -1881,12 +1890,12 @@ describe("切换选中项后本次行动细则跟着换", () => {
         await tick();
 
         expect((document.querySelector(".xz-detail-title-row input") as HTMLInputElement | null)?.value).toBe("第五章");
-        expect(textOf(document.querySelector(".xz-plan-card__count"))).toBe("已填 1/5");
+        expect(textOf(document.querySelector(".xz-plan-card__count"))).toBe("断点 0 条");
         // 展开着的字段必须换成新条目正文
         expect(textOf(detailField("行动指导与想法"))).toContain("按照下面的三步走");
-        // 当前状态：新条目没写，标签要回到「填写」，正文换成空状态提示
-        expect(textOf(detailField("当前状态").querySelector(".xz-plan-field__edit"))).toBe("填写");
-        expect(textOf(detailField("当前状态"))).toContain("写一句「上次做到 / 卡在哪」。");
+        // 断点区：新条目没有断点，最新块整个消失，换成第一次停手的提示
+        expect(document.querySelector(".xz-cp-latest")).toBeNull();
+        expect(textOf(document.querySelector(".xz-cp-block"))).toContain("还没有断点");
         // 背景与约束 / Prompt / 完成定义：不再是上一条的标签与预览
         for (const label of ["背景与约束", "Prompt", "完成定义"]) {
             expect(textOf(detailField(label).querySelector(".xz-plan-field__edit"))).toBe("填写");

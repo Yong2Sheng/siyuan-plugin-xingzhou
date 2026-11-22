@@ -52,7 +52,7 @@ function rightClick(element: Element, x = 120, y = 160): MouseEvent {
 /** 测试数据等价于真实存储层：旧数据没有 actionDetail，读取时由 currentAction 迁移而来。 */
 function withLegacyDetail(item: WorkItem): WorkItem {
     if (item.actionDetail) return item;
-    return { ...item, actionDetail: { ...createEmptyActionDetail(), currentState: item.currentAction } };
+    return { ...item, actionDetail: { ...createEmptyActionDetail(), guidance: item.currentAction } };
 }
 
 describe("细则图片的右键复制入口", () => {
@@ -85,12 +85,12 @@ describe("细则图片的右键复制入口", () => {
         return { openImageMenu, calls };
     }
 
-    /** 打开行动细则里「当前状态」字段的大编辑窗口（结构化后这里的旧入口没了）。 */
+    /** 打开行动细则里「行动指导与想法」的大编辑窗口（当前状态已变成断点的派生视图，不再有可编辑字段）。 */
     async function enterEditing() {
         await vi.waitFor(() => expect(document.querySelector(".xz-plan-field")).not.toBeNull(), { timeout: 4000 });
         [...document.querySelectorAll<HTMLElement>(".xz-plan-field")]
-            .find((field) => field.querySelector("h4")?.textContent === "当前状态")!
-            .querySelector<HTMLButtonElement>("button")!
+            .find((field) => field.querySelector("h4")?.textContent === "行动指导与想法")!
+            .querySelector<HTMLButtonElement>(".xz-plan-field__edit")!
             .click();
         await vi.waitFor(() => expect(document.querySelector(".xz-action-editor-window__input")).not.toBeNull(), { timeout: 4000 });
     }
@@ -125,6 +125,12 @@ describe("细则图片的右键复制入口", () => {
     it("阅读态右键正文图也能弹菜单", async () => {
         stubLute();
         const { openImageMenu, calls } = mount([transactionItem({ currentAction: `看这张截图\n![](${ASSET})` })]);
+        /* 正文默认折叠：先展开「行动指导与想法」，正文里的图才会渲染出来 */
+        await vi.waitFor(() => expect(document.querySelector(".xz-plan-field")).not.toBeNull(), { timeout: 4000 });
+        [...document.querySelectorAll<HTMLElement>(".xz-plan-field")]
+            .find((field) => field.querySelector("h4")?.textContent === "行动指导与想法")!
+            .querySelector<HTMLButtonElement>(".xz-plan-field__toggle")!
+            .click();
         await vi.waitFor(() => expect(document.querySelector(".xz-markdown-preview img")).not.toBeNull(), { timeout: 4000 });
 
         const event = rightClick(document.querySelector(".xz-markdown-preview img") as HTMLImageElement);
@@ -137,6 +143,12 @@ describe("细则图片的右键复制入口", () => {
     it("放大弹窗里的原图同样可右键复制", async () => {
         stubLute();
         const { openImageMenu, calls } = mount([transactionItem({ currentAction: `![](${ASSET})` })]);
+        /* 正文默认折叠：先展开「行动指导与想法」，正文里的图才会渲染出来 */
+        await vi.waitFor(() => expect(document.querySelector(".xz-plan-field")).not.toBeNull(), { timeout: 4000 });
+        [...document.querySelectorAll<HTMLElement>(".xz-plan-field")]
+            .find((field) => field.querySelector("h4")?.textContent === "行动指导与想法")!
+            .querySelector<HTMLButtonElement>(".xz-plan-field__toggle")!
+            .click();
         await vi.waitFor(() => expect(document.querySelector(".xz-markdown-preview img")).not.toBeNull(), { timeout: 4000 });
 
         (document.querySelector(".xz-markdown-preview img") as HTMLImageElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));

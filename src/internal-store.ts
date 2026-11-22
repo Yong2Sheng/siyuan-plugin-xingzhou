@@ -4,6 +4,7 @@ import {
     createEmptyActionDetail,
     hasActionDetailContent,
     migrateLegacyActionText,
+    migrateToCheckpoints,
     normalizeActionDetail,
 } from "./action-detail";
 import { normalizeExecutionSlices } from "./execution-slices";
@@ -347,7 +348,12 @@ function normalizeWorkItem(value: unknown, now = Date.now()): WorkItem | null {
          */
         actionDetail: (() => {
             const detail = normalizeActionDetail(item.actionDetail);
-            return hasActionDetailContent(detail) ? detail : migrateLegacyActionText(detail, currentAction, now);
+            const migrated = hasActionDetailContent(detail) ? detail : migrateLegacyActionText(detail, currentAction, now);
+            /*
+             * 旧文本迁进 currentState 之后，还要再走一次「currentState → 断点」。
+             * 否则同一条数据要读两次才成形，而写后复核只读一次，会报"写读不一致"。
+             */
+            return migrateToCheckpoints(migrated, now).detail;
         })(),
         imageCleanup: normalizeImageCleanup(item.imageCleanup),
         planDate: nullableNumber(item.planDate),

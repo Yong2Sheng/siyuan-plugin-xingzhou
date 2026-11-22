@@ -97,7 +97,7 @@ describe("完成事务的强制处置", () => {
         expect(changes.executionSlices?.find((slice) => slice.id === "slice-done")?.status).toBe("completed");
     });
 
-    it("选「保留为未完成收尾」：不动切片与待办，只在当前状态记一条遗留说明", async () => {
+    it("选「保留为未完成收尾」：不动切片与待办，只在时间轴上追加一条遗留说明", async () => {
         const saveItem = mount(transaction({ todos: [createTodo("整理 3.8.3 变更清单", NOW, "todo-1")] }));
         await clickComplete();
         clickByText(".xz-complete-actions button", "先保留，直接完成");
@@ -107,10 +107,16 @@ describe("完成事务的强制处置", () => {
         expect(changes.status).toBe("已完成");
         expect(changes.todos).toBeUndefined();
         expect(changes.executionSlices).toBeUndefined();
-        expect(changes.actionDetail?.currentState).toContain("遗留");
+        /* 结束说明现在是一条断点：currentState 已变成派生视图，不再是可写字段 */
+        const checkpoints = changes.actionDetail?.checkpoints ?? [];
+        expect(checkpoints).toHaveLength(1);
+        expect(checkpoints[0].did).toContain("遗留");
+        expect(changes.actionDetail?.currentState).toBe("");
+        /* 新断点没写下一步：派生镜像必须跟着清空，列表摘要才不会和断点说的不一致 */
+        expect(changes.nextAction).toBe("");
     });
 
-    it("选「记录原因后完成」：把原因写进当前状态", async () => {
+    it("选「记录原因后完成」：把原因写成一条断点", async () => {
         const saveItem = mount(transaction({ todos: [createTodo("整理 3.8.3 变更清单", NOW, "todo-1")] }));
         await clickComplete();
         const reasonRadio = [...document.querySelectorAll<HTMLInputElement>(".xz-complete-option input")][2];
@@ -124,7 +130,10 @@ describe("完成事务的强制处置", () => {
 
         const changes = saveItem.mock.calls[0][2];
         expect(changes.status).toBe("已完成");
-        expect(changes.actionDetail?.currentState).toContain("项目取消");
+        const checkpoints = changes.actionDetail?.checkpoints ?? [];
+        expect(checkpoints).toHaveLength(1);
+        expect(checkpoints[0].did).toContain("项目取消");
+        expect(changes.nextAction).toBe("");
     });
 
     it("没有未完成项时直接完成，不弹处置层", async () => {

@@ -45,17 +45,21 @@
     import {
         ACTION_DETAIL_FIELDS,
         actionDetailMissing,
-        addOutcome,
+        addCheckpoint,
         createEmptyActionDetail,
+        derivedNextAction,
         migrateLegacyActionText,
         normalizeActionDetail,
-        outcomesForDisplay,
-        removeOutcome,
+        removeCheckpoint,
         setActionDetailField,
-        updateOutcome,
+        toggleCheckpointStar,
+        updateCheckpoint,
         type ActionDetail,
         type ActionDetailField,
+        type CheckpointPatch,
+        type NewCheckpointInput,
     } from "./action-detail";
+    import { collectEntryUsages } from "./entry-points";
     import { completionBlockers, completionReasonLine, type CompletionDisposition } from "./completion";
     import {
         addTodo,
@@ -390,6 +394,8 @@
     $: nextActionImageRows = buildActionImageRows("nextAction", detailDraft.nextAction, actionImageUploads.nextAction, actionImageSizes.nextAction);
     $: currentActionImageTotal = buildActionImageTotal(detailDraft.currentAction, actionImageUploads.currentAction);
     $: nextActionImageTotal = buildActionImageTotal(detailDraft.nextAction, actionImageUploads.nextAction);
+    /* 用过的入口：跨全部工作项收集，本工作项用过的排在前面（表单里一点即填） */
+    $: entryUsages = data ? collectEntryUsages(data.items, selected?.id ?? null) : [];
     $: todayFocusCounts = getTodayFocusCounts(data?.items ?? [], tree);
     // 同一父下连续同值的行：芯片退到背景里，重复的「未设切片／待开始」不再连成一堵墙
     $: repeatIds = collectRepeatSiblingIds(tree, todayFocusCounts);
@@ -1665,20 +1671,28 @@
         }
     }
 
-    function handleOutcomeAdd(item: WorkItem, text: string) {
-        const detail = addOutcome(itemActionDetail(item), text);
-        return saveActionDetail(item, detail);
+    /**
+     * 断点写入的统一出口：三条命令都走这里，保证
+     * ① 只写一次修订号；② 旧的 `nextAction` 字段始终等于最新断点的下一步（派生镜像）。
+     */
+    function saveCheckpointChange(item: WorkItem, detail: ActionDetail) {
+        return saveActionDetail(item, detail, { nextAction: derivedNextAction(detail) });
     }
 
-    function handleOutcomeText(item: WorkItem, id: string, text: string) {
-        const detail = itemActionDetail(item);
-        const current = outcomesForDisplay(detail).find((outcome) => outcome.id === id);
-        if (current?.text === text.trim()) return Promise.resolve();
-        return saveActionDetail(item, updateOutcome(detail, id, text));
+    function handleCheckpointAdd(item: WorkItem, input: NewCheckpointInput) {
+        return saveCheckpointChange(item, addCheckpoint(itemActionDetail(item), input));
     }
 
-    function handleOutcomeRemove(item: WorkItem, id: string) {
-        return saveActionDetail(item, removeOutcome(itemActionDetail(item), id));
+    function handleCheckpointSave(item: WorkItem, id: string, patch: CheckpointPatch) {
+        return saveCheckpointChange(item, updateCheckpoint(itemActionDetail(item), id, patch));
+    }
+
+    function handleCheckpointRemove(item: WorkItem, id: string) {
+        return saveCheckpointChange(item, removeCheckpoint(itemActionDetail(item), id));
+    }
+
+    function handleCheckpointStar(item: WorkItem, id: string) {
+        return saveCheckpointChange(item, toggleCheckpointStar(itemActionDetail(item), id));
     }
 
     function handleDetailFieldSave(item: WorkItem, field: ActionDetailField, value: string) {
@@ -1712,8 +1726,8 @@
         }
         const before = itemActionDetail(item);
         const after = fillDetailFromTemplate(before, template);
-        const filled = (["currentState", "background", "prompt", "guidance", "definition"] as ActionDetailField[])
-            .filter((field) => !before[field].trim() && after[field].trim());
+        const filled = ACTION_DETAIL_FIELDS
+            .filter((field) => !before[field.key].trim() && after[field.key].trim());
         if (filled.length === 0) {
             showMessage(`模板「${name}」没有可填的空字段（已写的内容不会被覆盖）`, 4000);
             return;
@@ -1771,10 +1785,10 @@
             extra.todos = dropOpenTodos(itemTodos(item));
             extra.executionSlices = abandonUnfinishedSlices(item);
         } else if (disposition === "keep-outstanding") {
-            extra.actionDetail = withCompletionNote(item, `（结束时有 ${blockers.summary}未完成，已保留为遗留项。）`);
+            Object.assign(extra, completionNoteChanges(item, `（结束时有 ${blockers.summary}未完成，已保留为遗留项。）`));
         } else {
             const line = completionReasonLine(reason) || `（${localDateKey()} 结束事务。）`;
-            extra.actionDetail = withCompletionNote(item, line);
+            Object.assign(extra, completionNoteChanges(item, line));
         }
         completionBusy = true;
         completionDialogError = "";
@@ -1797,11 +1811,13 @@
             : slice);
     }
 
-    /** 在当前状态里追加一行说明（结束原因、遗留项数量）。 */
-    function withCompletionNote(item: WorkItem, line: string): ActionDetail {
-        const detail = itemActionDetail(item);
-        const current = detail.currentState.trim();
-        return setActionDetailField(detail, "currentState", current ? `${current}\n${line}` : line);
+    /**
+     * 结束事务时追加一条断点（结束原因、遗留项数量），时间轴上留得下痕迹。
+     * 同时带上派生的 nextAction：新断点没写下一步，镜像必须跟着清空，否则列表摘要会和断点说的不一致。
+     */
+    function completionNoteChanges(item: WorkItem, line: string): WorkItemChanges {
+        const detail = addCheckpoint(itemActionDetail(item), { did: line });
+        return { actionDetail: detail, nextAction: derivedNextAction(detail) };
     }
 
     async function markSelectedComplete() {
@@ -3641,23 +3657,23 @@
                         title={selectedProfile?.actionLabel ?? "本次行动细则"}
                         detail={itemActionDetail(selected)}
                         itemId={selected.id}
-                        nextAction={selected.nextAction}
                         autoFacts={itemAutoFacts(selected)}
+                        entryUsages={entryUsages}
                         disabled={Boolean(savingInline || savingSlices)}
                         templateNames={actionTemplateNames}
                         fieldNotice={data.fields.currentAction || data.fields.nextAction ? "" : "内部字段暂不可用，请重新加载插件。"}
                         cleanupBadge={selectedCleanupBadge ?? ""}
                         onCleanupBadge={openCleanupPage}
-                        onImageClick={(event, field) => handleActionImageClick(event, field === "nextAction" ? "nextAction" : `detail:${field}`)}
+                        onImageClick={(event, field) => handleActionImageClick(event, `detail:${field}`)}
                         onImageContextMenu={handleImageContextMenu}
                         on:edit={(event) => openDetailEditorWindow(event.detail.field)}
-                        on:nextAction={() => openDetailEditorWindow("nextAction")}
-                        on:addOutcome={(event) => void handleOutcomeAdd(currentItem, event.detail.text)}
-                        on:outcomeText={(event) => void handleOutcomeText(currentItem, event.detail.id, event.detail.text)}
-                        on:removeOutcome={(event) => void handleOutcomeRemove(currentItem, event.detail.id)}
+                        on:addCheckpoint={(event) => void handleCheckpointAdd(currentItem, event.detail.input)}
+                        on:saveCheckpoint={(event) => void handleCheckpointSave(currentItem, event.detail.id, event.detail.patch)}
+                        on:removeCheckpoint={(event) => void handleCheckpointRemove(currentItem, event.detail.id)}
+                        on:starCheckpoint={(event) => void handleCheckpointStar(currentItem, event.detail.id)}
                         on:copyPrompt={() => void copyPrompt(currentItem)}
                         on:applyTemplate={(event) => void applyActionTemplate(currentItem, event.detail.name)}
-                                        on:saveTemplate={(event) => void saveActionTemplate(currentItem, event.detail.name)}
+                        on:saveTemplate={(event) => void saveActionTemplate(currentItem, event.detail.name)}
                     />
 
                     {#if selectedIssues.length > 0}

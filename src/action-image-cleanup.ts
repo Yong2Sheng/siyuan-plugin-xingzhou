@@ -81,8 +81,10 @@ export function buildImageCleanupPlan(
             guidance: item.actionDetail?.guidance ?? "",
             definition: item.actionDetail?.definition ?? "",
             outcomes: item.actionDetail?.outcomes ?? [],
+            checkpoints: item.actionDetail?.checkpoints ?? [],
             updatedAt: item.actionDetail?.updatedAt ?? null,
             migratedFromCurrentActionAt: item.actionDetail?.migratedFromCurrentActionAt ?? null,
+            checkpointMigrationAt: item.actionDetail?.checkpointMigrationAt ?? null,
         };
         const detailAfter: ActionDetail = { ...detailBefore };
         const detailFields = new Set<ImageCleanupTargetField>();
@@ -114,9 +116,40 @@ export function buildImageCleanupPlan(
             textAfter.push(next);
         }
 
-        if (Object.keys(legacyAfter).length === 0 && detailFields.size === 0) continue;
+        /* 断点里的图（可能是从旧 currentState 迁过来的）同样属于清理范围 */
+        let checkpointsChanged = false;
+        detailAfter.checkpoints = detailBefore.checkpoints.map((checkpoint) => {
+            let changed = false;
+            const strip = (text: string): string => {
+                let next = text;
+                for (const image of listActionImages(text)) {
+                    if (!image.src || !registered.has(image.src)) continue;
+                    const blocked = isReferencedElsewhere(image.src, itemId, scope, allItems);
+                    const allowed = !options.onlyPaths || options.onlyPaths.includes(image.src);
+                    if (blocked || !allowed) {
+                        if (!keptHere.includes(image.src)) keptHere.push(image.src);
+                        continue;
+                    }
+                    const stripped = removeImageLine(next, image.syntax);
+                    if (stripped !== next) {
+                        next = stripped;
+                        changed = true;
+                    }
+                    if (!removableHere.includes(image.src)) removableHere.push(image.src);
+                }
+                return next;
+            };
+            const did = strip(checkpoint.did);
+            const payload = strip(checkpoint.payload);
+            if (!changed) return checkpoint;
+            checkpointsChanged = true;
+            textAfter.push(did, payload);
+            return { ...checkpoint, did, payload };
+        });
+
+        if (Object.keys(legacyAfter).length === 0 && detailFields.size === 0 && !checkpointsChanged) continue;
         const changeSet: WorkItemChanges = { ...legacyAfter };
-        if (detailFields.size > 0) changeSet.actionDetail = detailAfter;
+        if (detailFields.size > 0 || checkpointsChanged) changeSet.actionDetail = detailAfter;
         plan.push({
             itemId,
             field: legacyAfter.currentAction !== undefined ? "currentAction"
@@ -194,6 +227,9 @@ export function itemImageTexts(item: WorkItem): string[] {
         detail?.definition ?? "",
     ];
     for (const outcome of detail?.outcomes ?? []) texts.push(outcome.text);
+    for (const checkpoint of detail?.checkpoints ?? []) {
+        texts.push(checkpoint.did, checkpoint.payload);
+    }
     for (const todo of item.todos ?? []) texts.push(todo.note);
     return texts.filter((text) => Boolean(text && text.trim()));
 }

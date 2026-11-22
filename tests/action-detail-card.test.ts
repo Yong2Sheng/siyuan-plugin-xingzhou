@@ -1,39 +1,73 @@
 import { tick } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";
 import ActionDetailCard from "../src/ActionDetailCard.svelte";
-import { createEmptyActionDetail, type ActionDetail } from "../src/action-detail";
+import {
+    createEmptyActionDetail,
+    type ActionCheckpoint,
+    type ActionDetail,
+} from "../src/action-detail";
 
 /**
- * 回归：Svelte 在编译期按表达式里出现的变量决定要不要重算 DOM。
+ * 回归 + 新结构用例。
+ *
+ * 回归部分：Svelte 在编译期按表达式里出现的变量决定要不要重算 DOM。
  * 卡片曾经用 isFilled(field.key) / preview(field.key) 读取字段，detail 不在依赖里，
  * 于是切换工作项后每条字段的标签、预览与展开正文都停在上一条的内容上。
- * 这些用例在修复前会失败，修复后必须通过。
+ *
+ * 新结构部分：当前状态 / 阶段性成果 / 下一步行动 已合成一条断点时间轴，
+ * 最新一条 = 当前状态 + 恢复包，星标 = 阶段性成果。
  */
 
 function detailWith(overrides: Partial<ActionDetail>): ActionDetail {
     return { ...createEmptyActionDetail(), ...overrides };
 }
 
+function checkpoint(overrides: Partial<ActionCheckpoint> = {}): ActionCheckpoint {
+    return {
+        id: "cp-a",
+        createdAt: new Date("2026-09-20T22:00:00").getTime(),
+        did: "",
+        stuck: "",
+        next: "",
+        entry: null,
+        payload: "",
+        starred: false,
+        ...overrides,
+    };
+}
+
 const DETAIL_A = detailWith({
-    currentState: "A-当前状态",
     background: "A-背景与约束",
     prompt: "A-提示词",
     guidance: "A-行动指导，写得很长很长，长到预览必须截断显示省略号才放得下这一行内容，不能整段铺开。",
     definition: "A-完成定义",
-    outcomes: [{ id: "outcome-a", text: "A-成果", createdAt: 1, fromTodoId: null, date: "2026-09-20" }],
+    checkpoints: [
+        checkpoint({
+            id: "cp-a2",
+            createdAt: new Date("2026-09-20T22:00:00").getTime(),
+            did: "A-上次做到：把入口候选去重做完了",
+            stuck: "名称同步还没做",
+            next: "把 label 回填写上",
+            entry: { type: "vscode", label: "CheckpointList.svelte", target: "~/Agents/xingzhou/src/CheckpointList.svelte" },
+            payload: "按 resolveEntryPointName 那套做，只改显示不改存储。",
+            starred: true,
+        }),
+        checkpoint({ id: "cp-a1", createdAt: new Date("2026-09-18T21:00:00").getTime(), did: "A-更早做到：搭好骨架" }),
+    ],
 });
 
 const DETAIL_B = detailWith({
     background: "B-背景与约束",
     prompt: "B-提示词",
     guidance: "B-行动指导",
+    checkpoints: [checkpoint({ id: "cp-b1", did: "B-上次做到：改完标题", next: "" })],
 });
 
 const DETAIL_C = detailWith({ guidance: "C-行动指导" });
 
 const DETAIL_EMPTY = createEmptyActionDetail();
 
-describe("行动细则卡：切换工作项后字段必须跟着换", () => {
+describe("行动细则卡：断点区", () => {
     let component: ActionDetailCard | undefined;
 
     afterEach(() => {
@@ -58,15 +92,80 @@ describe("行动细则卡：切换工作项后字段必须跟着换", () => {
     const editLabel = (label: string) => text(field(label).querySelector(".xz-plan-field__edit"));
     const previewText = (label: string) => text(field(label).querySelector(".xz-plan-field__preview"));
     const hasPreview = (label: string) => field(label).querySelector(".xz-plan-field__preview") !== null;
+    const latest = () => document.querySelector(".xz-cp-latest");
 
-    function typeInto(input: HTMLInputElement, value: string) {
-        input.value = value;
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-
-    it("标签、预览、展开正文与计数都换成新工作项的内容", async () => {
+    it("最新断点承担「当前状态」：正文、卡点、恢复包都在这一块", async () => {
         mount(DETAIL_A, "a");
-        // 上一条正展开着「行动指导与想法」
+
+        expect(text(document.querySelector(".xz-plan-card__count"))).toBe("断点 2 条");
+        // 当前状态已不是可填字段，卡片里不再有这一行
+        expect([...document.querySelectorAll(".xz-plan-field h4")].map((node) => text(node))).not.toContain("当前状态");
+
+        const block = text(latest());
+        expect(block).toContain("上次做到");
+        expect(block).toContain("A-上次做到：把入口候选去重做完了");
+        expect(block).toContain("名称同步还没做");
+        // 恢复包三样：做什么、从哪进、带什么走
+        expect(block).toContain("把 label 回填写上");
+        expect(block).toContain("CheckpointList.svelte");
+        expect(block).toContain("1 行"); // 交接内容的摘要
+        expect(block).toContain("复制交接内容");
+        // 星标 = 阶段性成果
+        expect(text(latest()!.querySelector(".xz-cp-star"))).toBe("★ 阶段性成果");
+        // 更早的一条只出现在历史计数里，不在最新块
+        expect(text(document.querySelector("[data-cp-history-toggle]"))).toBe("▸ 更早的断点 1 条");
+    });
+
+    it("没有断点时只留一句「还没有断点」，不显示空的恢复包", async () => {
+        mount(DETAIL_EMPTY, "empty");
+        expect(document.querySelector(".xz-cp-latest")).toBeNull();
+        expect(document.querySelector("[data-cp-resume]")).toBeNull();
+        expect(text(document.querySelector(".xz-cp-block"))).toContain("还没有断点");
+        expect(text(document.querySelector(".xz-plan-card__count"))).toBe("断点 0 条");
+    });
+
+    it("记一次断点：表单填完派发 addCheckpoint，含做到哪 / 下一步 / 交接内容", async () => {
+        const events: Array<{ type: string; input?: { did?: string; next?: string; payload?: string } }> = [];
+        mount(DETAIL_B, "b");
+        component!.$on("addCheckpoint", (event: CustomEvent) => events.push({ type: "add", input: event.detail.input }));
+
+        document.querySelector<HTMLButtonElement>("[data-cp-add]")!.click();
+        await tick();
+        expect(document.querySelector("[data-cpf]")).not.toBeNull();
+
+        const did = document.querySelector<HTMLTextAreaElement>("[data-cpf-did]")!;
+        did.value = "把入口候选按类型去重";
+        did.dispatchEvent(new Event("input", { bubbles: true }));
+        const next = document.querySelector<HTMLInputElement>('input[placeholder^="下次接着做什么"]')!;
+        next.value = "补 label 回填";
+        next.dispatchEvent(new Event("input", { bubbles: true }));
+        const payload = document.querySelector<HTMLTextAreaElement>('textarea[placeholder^="趁现在还记得"]')!;
+        payload.value = "先跑名称同步，再核对 12 条历史断点";
+        payload.dispatchEvent(new Event("input", { bubbles: true }));
+        await tick();
+        document.querySelector<HTMLButtonElement>("[data-cpf-save]")!.click();
+        await tick();
+
+        expect(events).toHaveLength(1);
+        expect(events[0].input?.did).toBe("把入口候选按类型去重");
+        expect(events[0].input?.next).toBe("补 label 回填");
+        expect(events[0].input?.payload).toBe("先跑名称同步，再核对 12 条历史断点");
+        // 保存后表单收起
+        expect(document.querySelector("[data-cpf]")).toBeNull();
+    });
+
+    it("点星标派发 starCheckpoint（最新一条与历史各一次）", async () => {
+        const ids: string[] = [];
+        mount(DETAIL_A, "a");
+        component!.$on("starCheckpoint", (event: CustomEvent) => ids.push(event.detail.id));
+
+        latest()!.querySelector<HTMLButtonElement>(".xz-cp-star")!.click();
+        await tick();
+        expect(ids).toEqual(["cp-a2"]);
+    });
+
+    it("切换工作项后字段与断点区都换成新条目的内容", async () => {
+        mount(DETAIL_A, "a");
         field("行动指导与想法").querySelector<HTMLButtonElement>(".xz-plan-field__toggle")!.click();
         await tick();
         expect(text(field("行动指导与想法"))).toContain("A-行动指导");
@@ -74,9 +173,11 @@ describe("行动细则卡：切换工作项后字段必须跟着换", () => {
         component!.$set({ detail: DETAIL_B, itemId: "b" });
         await tick();
 
-        expect(text(document.querySelector(".xz-plan-card__count"))).toBe("已填 3/5");
-        // 当前状态：B 没写，按钮要变回「填写」
-        expect(editLabel("当前状态")).toBe("填写");
+        expect(text(document.querySelector(".xz-plan-card__count"))).toBe("断点 1 条");
+        // 断点区换人：最新一块是新条目的断点，不再显示上一条的正文与恢复包
+        expect(text(latest())).toContain("B-上次做到：改完标题");
+        expect(text(latest())).not.toContain("A-上次做到");
+        expect(text(latest())).toContain("待定"); // B 的下一步没写
         // 未展开字段：单行预览换成 B 的内容
         expect(previewText("背景与约束")).toBe("B-背景与约束");
         expect(previewText("Prompt")).toBe("B-提示词");
@@ -112,24 +213,23 @@ describe("行动细则卡：切换工作项后字段必须跟着换", () => {
         expect(text(field("行动指导与想法"))).not.toContain("A-行动指导");
     });
 
-    it("换工作项复位成果草稿与模板面板，同一条目内的刷新不动草稿", async () => {
+    it("换工作项复位模板面板，同一条目内的刷新不动它", async () => {
         mount(DETAIL_A, "a", { templateNames: ["技术事务"] });
-        typeInto(document.querySelector<HTMLInputElement>(".xz-plan-outcome__add .xz-plan-outcome__input")!, "写了一半的成果");
         document.querySelector<HTMLButtonElement>(".xz-plan-card__link")!.click();
         await tick();
-        typeInto(document.querySelector<HTMLInputElement>(".xz-plan-templates__name")!, "半途的模板名");
+        const nameInput = document.querySelector<HTMLInputElement>(".xz-plan-templates__name")!;
+        nameInput.value = "半途的模板名";
+        nameInput.dispatchEvent(new Event("input", { bubbles: true }));
         expect(document.querySelector(".xz-plan-templates")).not.toBeNull();
 
-        // 同一条目刷新（保存后重新下发 detail）：草稿必须留着
+        // 同一条目刷新（保存后重新下发 detail）：面板必须留着
         component!.$set({ detail: detailWith({ ...DETAIL_A, guidance: "A-行动指导（改过）" }) });
         await tick();
-        expect(document.querySelector<HTMLInputElement>(".xz-plan-outcome__add .xz-plan-outcome__input")?.value).toBe("写了一半的成果");
         expect(document.querySelector(".xz-plan-templates")).not.toBeNull();
 
-        // 换条目：草稿与模板面板都复位
+        // 换条目：面板复位
         component!.$set({ detail: DETAIL_B, itemId: "b" });
         await tick();
-        expect(document.querySelector<HTMLInputElement>(".xz-plan-outcome__add .xz-plan-outcome__input")?.value).toBe("");
         expect(document.querySelector(".xz-plan-templates")).toBeNull();
         expect(document.querySelector<HTMLInputElement>(".xz-plan-templates__name")).toBeNull();
     });

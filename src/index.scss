@@ -3150,6 +3150,901 @@
 /* 下一步行动：仍是独立字段，只是排在卡内最后 */
 
 
+/*
+ * 断点（checkpoint）区与记录表单。
+ *
+ * 为什么是时间轴：当前状态 / 阶段性成果 / 下一步行动 原本是三块各自维护的数据，
+ * 前两块每次停手都会被覆盖，覆盖就丢历史。现在它们是一条只追加的时间轴上的三个视图：
+ * 最新一条 = 当前状态，带星标 = 阶段性成果，最新一条的 next/入口/交接内容 = 恢复包。
+ *
+ * 断点区**不折叠**：一眼要看到现在什么状态、下一步做什么；能折叠的只有历史。
+ * 规则与设计稿 design/checkpoint-v1/checkpoint.css 一致（除输入框外观交给 b3）。
+ */
+
+/* ── 断点区：替代原来的 当前状态 / 阶段性成果 / 下一步行动 ─────────────────── */
+
+.xz-cp-block {
+    padding-bottom: 10px;
+    border: 1px solid var(--xingzhou-border);
+    border-left: 3px solid var(--xingzhou-primary);
+    border-radius: var(--xingzhou-radius);
+    background: color-mix(in srgb, var(--xingzhou-primary) 5%, var(--xingzhou-panel));
+}
+
+.xz-cp-block--empty {
+    border-left-color: var(--xingzhou-border);
+    background: var(--xingzhou-panel);
+}
+
+.xz-cp-block__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    padding: 4px 10px;
+}
+
+.xz-cp-block__head h4 {
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 600;
+}
+
+.xz-cp-block__note {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--xingzhou-muted);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.xz-cp-block__add {
+    margin-left: auto;
+    min-height: 26px;
+    padding: 3px 10px;
+    border: 1px solid color-mix(in srgb, var(--xingzhou-primary) 45%, var(--xingzhou-border));
+    border-radius: 5px;
+    color: var(--xingzhou-primary);
+    background: var(--xingzhou-panel);
+    font: inherit;
+    font-size: 11.5px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.xz-cp-block__add:hover:not(:disabled) {
+    color: var(--b3-theme-on-primary, #fff);
+    background: var(--xingzhou-primary);
+}
+
+.xz-cp-block__add:disabled {
+    opacity: .55;
+    cursor: default;
+}
+
+.xz-cp-block .xz-plan-auto {
+    margin-top: 2px;
+}
+
+/* ── 最新一条：这一张卡的“第一眼” ──────────────────────────────────────── */
+
+.xz-cp-latest {
+    margin: 6px 10px 0;
+    padding: 8px 11px 10px;
+    border: 1px solid var(--xingzhou-border);
+    border-radius: var(--xingzhou-radius);
+    background: var(--xingzhou-panel);
+}
+
+.xz-cp-latest__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    margin-bottom: 4px;
+}
+
+.xz-cp-latest__title {
+    font-size: 11.5px;
+    font-weight: 650;
+    color: var(--xingzhou-primary);
+}
+
+.xz-cp-latest__when {
+    color: var(--xingzhou-muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.xz-cp-star {
+    margin-left: auto;
+    padding: 1px 7px;
+    border: 1px solid transparent;
+    border-radius: 20px;
+    color: var(--xingzhou-muted);
+    background: transparent;
+    font: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.xz-cp-star:hover {
+    border-color: var(--xingzhou-border);
+    color: var(--xingzhou-primary);
+}
+
+.xz-cp-star.is-on {
+    color: var(--xingzhou-primary);
+    background: color-mix(in srgb, var(--xingzhou-primary) 12%, transparent);
+}
+
+.xz-cp-star--sm {
+    margin-left: 0;
+    padding: 0 4px;
+    font-size: 12px;
+}
+
+.xz-cp-latest__head .xz-plan-field__edit {
+    margin-left: 0;
+}
+
+.xz-cp-latest__did {
+    margin: 0;
+    color: var(--xingzhou-text);
+    font-size: 13px;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+}
+
+.xz-cp-latest__stuck {
+    display: flex;
+    gap: 6px;
+    margin: 5px 0 0;
+    color: var(--xingzhou-muted);
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.xz-cp-latest__stuck span {
+    flex: none;
+    padding: 0 5px;
+    border-radius: 20px;
+    background: color-mix(in srgb, var(--xingzhou-danger) 12%, transparent);
+    color: color-mix(in srgb, var(--xingzhou-danger) 80%, var(--xingzhou-text));
+    font-size: 10px;
+    line-height: 1.7;
+}
+
+/* ── 恢复包：下一步 / 入口 / 下次的 prompt ─────────────────────────────── */
+
+.xz-cp-resume {
+    margin-top: 8px;
+    padding-top: 7px;
+    border-top: 1px dashed var(--xingzhou-border);
+}
+
+.xz-cp-resume__label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--xingzhou-muted);
+    font-size: 10.5px;
+    letter-spacing: .04em;
+}
+
+/*
+ * 恢复时唯一要带走的是 prompt，所以它是这张卡里唯一带边框的按钮；
+ * 下一步和入口靠眼睛看、手动打开，保持行内文字，不做复制。
+ */
+.xz-cp-copy {
+    flex: none;
+    min-height: 24px;
+    padding: 2px 9px;
+    border: 1px solid color-mix(in srgb, var(--xingzhou-primary) 45%, var(--xingzhou-border));
+    border-radius: 5px;
+    color: var(--xingzhou-primary);
+    background: var(--xingzhou-panel);
+    font: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.xz-cp-copy:hover {
+    color: var(--b3-theme-on-primary, #fff);
+    background: var(--xingzhou-primary);
+}
+
+.xz-cp-resume__rows {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.xz-cp-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    font-size: 12.5px;
+    line-height: 1.6;
+}
+
+.xz-cp-row__key {
+    flex: none;
+    width: 74px;
+    color: var(--xingzhou-muted);
+    font-size: 11px;
+}
+
+.xz-cp-row__value {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow-wrap: anywhere;
+}
+
+.xz-cp-row__value--strong {
+    color: var(--xingzhou-text);
+    font-weight: 600;
+}
+
+.xz-cp-row__value--muted {
+    color: var(--xingzhou-muted);
+    font-size: 11.5px;
+}
+
+.xz-cp-row__value--pending {
+    color: var(--xingzhou-muted);
+    font-size: 11.5px;
+    font-style: italic;
+}
+
+.xz-cp-act {
+    flex: none;
+    padding: 0 2px;
+    border: 0;
+    color: var(--xingzhou-primary);
+    background: transparent;
+    font: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.xz-cp-act:hover {
+    text-decoration: underline;
+}
+
+/* 入口图标：内联 SVG，不依赖思源的图标字体（口径同拾绪的 entryPointIcon） */
+.xz-cp-icon {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    color: var(--xingzhou-muted);
+    vertical-align: -2px;
+}
+
+.xz-cp-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.xz-cp-entry {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.xz-cp-entry .xz-cp-icon {
+    color: var(--xingzhou-text);
+}
+
+.xz-cp-entry__label {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 入口位置：不提供复制，所以位置要看得见；太长就省略，悬停看全 */
+.xz-cp-entry__target {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--xingzhou-muted);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.xz-cp-payload {
+    margin: 6px 0 0;
+    padding: 7px 9px;
+    border: 1px solid var(--xingzhou-border);
+    border-radius: 5px;
+    color: var(--xingzhou-text);
+    background: var(--xingzhou-surface-light);
+    font-family: var(--b3-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 11.5px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.xz-cp-empty {
+    margin: 4px 10px 2px;
+    padding: 0;
+    width: calc(100% - 20px);
+}
+
+/* ── 历史：更早的断点 ─────────────────────────────────────────────────── */
+
+.xz-cp-history {
+    margin: 8px 10px 0;
+    padding-top: 7px;
+    border-top: 1px solid var(--xingzhou-border);
+}
+
+.xz-cp-history__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.xz-cp-history__toggle {
+    padding: 0;
+    border: 0;
+    color: var(--xingzhou-text);
+    background: transparent;
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.xz-cp-history__toggle:hover {
+    color: var(--xingzhou-primary);
+}
+
+.xz-cp-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.xz-cp-filter__chip {
+    padding: 1px 7px;
+    border: 1px solid var(--xingzhou-border);
+    border-radius: 20px;
+    color: var(--xingzhou-muted);
+    background: transparent;
+    font: inherit;
+    font-size: 10.5px;
+    cursor: pointer;
+}
+
+.xz-cp-filter__chip.is-on {
+    border-color: color-mix(in srgb, var(--xingzhou-primary) 45%, var(--xingzhou-border));
+    color: var(--xingzhou-primary);
+    background: color-mix(in srgb, var(--xingzhou-primary) 10%, transparent);
+}
+
+.xz-cp-history__empty {
+    margin: 6px 0 0;
+    color: var(--xingzhou-muted);
+    font-size: 11.5px;
+}
+
+.xz-cp-list {
+    margin: 7px 0 0;
+    padding: 0 0 0 13px;
+    border-left: 1px solid var(--xingzhou-border);
+    list-style: none;
+}
+
+.xz-cp-item {
+    position: relative;
+    display: flex;
+    gap: 8px;
+    padding: 0 0 9px;
+}
+
+.xz-cp-item:last-child {
+    padding-bottom: 0;
+}
+
+.xz-cp-item__dot {
+    position: absolute;
+    top: 6px;
+    left: -17px;
+    width: 7px;
+    height: 7px;
+    border: 1px solid var(--xingzhou-border);
+    border-radius: 50%;
+    background: var(--xingzhou-panel);
+}
+
+.xz-cp-item.is-star .xz-cp-item__dot {
+    border-color: var(--xingzhou-primary);
+    background: var(--xingzhou-primary);
+}
+
+.xz-cp-item__main {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.xz-cp-item__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 3px 7px;
+}
+
+.xz-cp-item__when {
+    color: var(--xingzhou-muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.xz-cp-item__rel {
+    color: var(--xingzhou-muted);
+    font-size: 10.5px;
+}
+
+.xz-cp-item__star {
+    padding: 0 5px;
+    border-radius: 20px;
+    color: var(--xingzhou-primary);
+    background: color-mix(in srgb, var(--xingzhou-primary) 12%, transparent);
+    font-size: 10px;
+    line-height: 1.7;
+}
+
+.xz-cp-item__edit {
+    margin-left: auto;
+    padding: 0 2px;
+    border: 0;
+    color: var(--xingzhou-muted);
+    background: transparent;
+    font: inherit;
+    font-size: 10.5px;
+    cursor: pointer;
+    /* 历史很长时每行挂一个「编辑」太吵：默认淡出，悬停或键盘聚焦该行时出现 */
+    opacity: 0;
+    transition: opacity .12s ease;
+}
+
+.xz-cp-item:hover .xz-cp-item__edit,
+.xz-cp-item:focus-within .xz-cp-item__edit {
+    opacity: 1;
+}
+
+.xz-cp-item__edit:hover {
+    color: var(--xingzhou-primary);
+}
+
+.xz-cp-item__did {
+    margin: 2px 0 0;
+    color: var(--xingzhou-text);
+    font-size: 12.5px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.xz-cp-item__next {
+    margin: 3px 0 0;
+    color: var(--xingzhou-muted);
+    font-size: 11.5px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+}
+
+.xz-cp-item__expand {
+    margin-top: 3px;
+    padding: 0;
+    border: 0;
+    color: var(--xingzhou-primary);
+    background: transparent;
+    font: inherit;
+    font-size: 10.5px;
+    cursor: pointer;
+}
+
+.xz-cp-item__more {
+    margin-top: 4px;
+    padding: 5px 8px;
+    border-radius: 5px;
+    background: var(--xingzhou-surface-light);
+}
+
+.xz-cp-item__more p {
+    margin: 0 0 2px;
+    color: var(--xingzhou-muted);
+    font-size: 11.5px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.xz-cp-item__more p:last-child {
+    margin-bottom: 0;
+}
+
+.xz-cp-item__entry .xz-cp-icon {
+    margin-right: 4px;
+}
+
+.xz-cp-item__more span {
+    margin-right: 6px;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--xingzhou-muted) 14%, transparent);
+    font-size: 10px;
+}
+
+/* 稳定字段的纯文本（设计稿不渲染 Markdown） */
+.xz-cp-plain {
+    padding: 0 10px 4px;
+    color: var(--xingzhou-text);
+    font-size: 13px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* ── 记录／编辑表单 ───────────────────────────────────────────────────── */
+
+.xz-cpf {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin: 8px 10px 0;
+    padding: 9px 11px 10px;
+    border: 1px solid color-mix(in srgb, var(--xingzhou-primary) 45%, var(--xingzhou-border));
+    border-radius: var(--xingzhou-radius);
+    background: var(--xingzhou-panel);
+}
+
+.xz-cp-item .xz-cpf {
+    margin: 4px 0 0;
+}
+
+.xz-cpf__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+}
+
+.xz-cpf__head h4 {
+    margin: 0;
+    font-size: 12px;
+}
+
+.xz-cpf__when {
+    color: var(--xingzhou-muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.xz-cpf__head .xz-plan-field__edit {
+    margin-left: auto;
+}
+
+.xz-cpf__prev {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0;
+    padding: 4px 7px;
+    border-radius: 4px;
+    color: var(--xingzhou-muted);
+    background: color-mix(in srgb, var(--xingzhou-muted) 9%, transparent);
+    font-size: 11px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+}
+
+.xz-cpf__prev span {
+    flex: none;
+    padding: 0 5px;
+    border-radius: 20px;
+    background: color-mix(in srgb, var(--xingzhou-muted) 16%, transparent);
+    font-size: 10px;
+}
+
+.xz-cpf__field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.xz-cpf__key {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    color: var(--xingzhou-text);
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.xz-cpf__key i {
+    color: var(--xingzhou-muted);
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 400;
+}
+
+/* 思源的 b3-text-field 样式在沙盒里不存在，这里补一份等价外观 */
+.xz-cpf__input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 28px;
+    /* 外观交给思源的 b3-text-field，这里只负责尺寸与排版（预览里没有 b3 样式） */
+    font: inherit;
+    font-size: 12.5px;
+    line-height: 1.55;
+}
+
+.xz-cpf__input--area {
+    min-height: 46px;
+    resize: vertical;
+}
+
+.xz-cpf__select {
+    flex: 0 0 96px;
+    width: 96px;
+}
+
+.xz-cpf__entry-empty {
+    padding: 4px 8px;
+    border: 1px dashed var(--xingzhou-border);
+    border-radius: 5px;
+    color: var(--xingzhou-muted);
+    background: transparent;
+    font: inherit;
+    font-size: 11.5px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.xz-cpf__entry-empty:hover {
+    border-color: var(--xingzhou-primary);
+    color: var(--xingzhou-primary);
+}
+
+.xz-cpf__entry-set {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    padding: 3px 0;
+}
+
+/* 用过的入口：常用的摆一排，一点即填（不用先展开菜单） */
+.xz-cpf__usages {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.xz-cpf__usages-hint {
+    margin-right: 2px;
+    color: var(--xingzhou-muted);
+    font-size: 10.5px;
+}
+
+.xz-cpf__usage {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 24px;
+    padding: 2px 8px;
+    border: 1px solid var(--xingzhou-border);
+    border-radius: 20px;
+    color: var(--xingzhou-text);
+    background: var(--xingzhou-panel);
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.xz-cpf__usage:hover {
+    border-color: var(--xingzhou-primary);
+    color: var(--xingzhou-primary);
+}
+
+.xz-cpf__usage-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 别的事务用过的：灰一点并标来源，避免和本事务的混在一起 */
+.xz-cpf__usage-from {
+    flex: none;
+    color: var(--xingzhou-muted);
+    font-size: 10px;
+}
+
+.xz-cpf__picker {
+    margin-top: 5px;
+    padding: 7px 8px 8px;
+    border: 1px solid var(--xingzhou-border);
+    border-radius: 5px;
+    background: var(--xingzhou-surface-light);
+}
+
+/* 「＋ 记一下卡点」这类低优先入口 */
+.xz-cpf__link {
+    align-self: flex-start;
+    padding: 0;
+    border: 0;
+    color: var(--xingzhou-primary);
+    background: transparent;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.xz-cpf__link:hover {
+    text-decoration: underline;
+}
+
+.xz-cpf__picker-new {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.xz-cpf__picker-new .xz-cpf__input:not(.xz-cpf__select) {
+    flex: 1 1 140px;
+    width: auto;
+}
+
+.xz-cpf__mini {
+    flex: none;
+    min-height: 28px;
+    padding: 2px 10px;
+    border: 1px solid var(--xingzhou-border);
+    border-radius: 5px;
+    color: var(--xingzhou-text);
+    background: var(--xingzhou-panel);
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.xz-cpf__mini:hover:not(:disabled) {
+    border-color: var(--xingzhou-primary);
+    color: var(--xingzhou-primary);
+}
+
+.xz-cpf__mini:disabled {
+    opacity: .55;
+    cursor: default;
+}
+
+.xz-cpf__picker-note {
+    margin: 6px 0 0;
+    color: var(--xingzhou-muted);
+    font-size: 10.5px;
+    line-height: 1.55;
+}
+
+.xz-cpf__foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding-top: 2px;
+}
+
+.xz-cpf__save {
+    min-height: 28px;
+    padding: 3px 12px;
+    border: 1px solid var(--xingzhou-primary);
+    border-radius: 5px;
+    color: var(--b3-theme-on-primary, #fff);
+    background: var(--xingzhou-primary);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.xz-cpf__save:disabled {
+    opacity: .5;
+    cursor: default;
+}
+
+.xz-cpf__star {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--xingzhou-text);
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.xz-cpf__hint {
+    margin-left: auto;
+    color: var(--xingzhou-muted);
+    font-size: 10.5px;
+}
+
+/* ── 窄屏：恢复包改成竖排，动作跟值同一行 ─────────────────────────────── */
+
+@container (max-width: 620px) {
+    .xz-cp-block__head {
+        flex-wrap: wrap;
+    }
+
+    .xz-cp-block__note {
+        order: 3;
+        width: 100%;
+        white-space: normal;
+    }
+
+    .xz-cp-latest {
+        margin: 6px 8px 0;
+        padding: 8px 9px 9px;
+    }
+
+    .xz-cp-star {
+        margin-left: 0;
+    }
+
+    .xz-cp-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: baseline;
+    }
+
+    .xz-cp-row__key {
+        grid-column: 1 / -1;
+        width: auto;
+        font-size: 10.5px;
+    }
+
+    .xz-cp-history,
+    .xz-cpf {
+        margin-left: 8px;
+        margin-right: 8px;
+    }
+
+    .xz-cp-filter {
+        margin-left: 0;
+    }
+
+    .xz-cpf__hint {
+        display: none;
+    }
+}
+
+@container (max-width: 460px) {
+    .xz-cp-row {
+        grid-template-columns: 1fr auto;
+    }
+
+    .xz-cp-filter__chip {
+        font-size: 10px;
+    }
+}
+
 /* ── 完成确认层（completion.ts / CompletionDialog.svelte） ────────────────── */
 .xz-complete-dialog { box-sizing: border-box; width: min(560px, 100%); max-height: min(84vh, 720px); overflow: auto; padding: 16px 18px 14px; border: 1px solid var(--xingzhou-border); border-radius: calc(var(--xingzhou-radius) + 4px); background: var(--xingzhou-panel); box-shadow: 0 12px 32px color-mix(in srgb, var(--xingzhou-text) 28%, transparent); }
 .xz-complete-dialog h2 { margin: 6px 0 8px; font-size: 17px; line-height: 1.45; }
