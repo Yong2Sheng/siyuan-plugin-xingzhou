@@ -2,13 +2,32 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
-## Unreleased
+## 6.0.0 - 2026-11-22
+
+Action Details is now a **checkpoint timeline** instead of a set of independently maintained fields: Current State,
+Staged results and Next Action were the same thing seen at different moments, and the first two were overwritten
+every time you stopped — which erased the history.
 
 ### Added
 
+- **Checkpoints**: append one every time you stop, recording what got done, the blocker, the next step, the entry point and the handoff. Append-only, so finishing the next step means adding another checkpoint instead of rewriting the last; the newest one is Current State.
+- **Entry points**: where to resume (type + name + location) with inline SVG icons that do not depend on SiYuan's icon font, so ChatGPT / VS Code / Jupyter brand marks render correctly. The form lists "used before" entries for one-tap fill, deduplicated across work items, those from the current item first, with the source item shown for entries used elsewhere. Only web pages and SiYuan blocks can be opened from SiYuan; local paths show their location only.
+- **Handoff**: what to carry into the next session — an AI prompt, or the steps you are going to follow yourself (which is why it is no longer called a prompt).
+- **"Big Fatty Fish says"** in the right panel: in stages with no score fields, a community Q-style sticker plus a snarky line replaces the score input; tap to make it wobble and ask for another line. Lines and poke reactions are 120 each, so a full cycle never repeats. The artwork is licensed separately under CC BY-NC-SA 4.0.
+
 ### Changed
 
+- Current State, Staged results and Next Action are no longer writable fields: Current State is the newest checkpoint, a star marks a Staged result, and Next Action is the newest checkpoint's next step (empty reads "to be decided" and never falls back to an older checkpoint).
+- The checkpoint block never collapses (the point is seeing the current state and next step at a glance); only the history collapses.
+- Templates copy only the four background fields (Background & constraints / Prompt / Guidance & ideas / Definition of done); they no longer write Current State or copy checkpoints.
+- Completing a Transaction appends a checkpoint with the reason and leftovers instead of appending a line to Current State; the derived next-step field is cleared with it.
+- **Removed the boundary panel** (`DailyBoundaryPanel`) and its layout setting. Boundary reminders themselves are unchanged and still surface at the top of Today's Record.
+- Existing data migrates automatically: Current State becomes one plain checkpoint and every Staged result becomes a starred checkpoint, keeping timestamps and sources. Migration is idempotent and **never deletes the old fields**, so deleting all checkpoints will not resurrect them; Next Action is still written back as a derived field, so list summaries and the review list keep their criteria.
+
 ### Fixed
+
+- **Post-write verification failure**: legacy-field migration only happened on read, so the object just written lagged one step behind the object parsed back and verification reported a mismatch. Reads now migrate fully in one pass, and writes canonicalise the store into "the shape it will be parsed back into" first.
+- The derived `nextAction` was not cleared when a Transaction completed, so list summaries could disagree with the checkpoints.
 
 ## 5.4.1 - 2026-10-18
 
