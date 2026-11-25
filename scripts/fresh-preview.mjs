@@ -20,6 +20,12 @@ const TARGETS = {
     phase: { config: "design/vite.phase-preview.config.mjs", html: "design/phase-preview.html", prefix: "phase-preview." },
     rungs: { config: "design/vite.phase-rungs.config.mjs", html: "design/phase-rungs.html", prefix: "phase-rungs." },
     twodays: { config: "design/vite.phase-two-days.config.mjs", html: "design/phase-two-days.html", prefix: "phase-two-days." },
+    affairs: {
+        config: "design/vite.personal-affairs-gate.config.mjs",
+        html: "design/personal-affairs-gate-frame.html",
+        prefix: "personal-affairs-gate.",
+        markers: ["是否安排个人事务", "xz-daily-affairs-decision", "按“不适用”保存"],
+    },
 };
 
 /** 本次修复必须出现在产物里的标记：产物里找不到就说明我改的源码没进构建。 */
@@ -27,7 +33,7 @@ const REQUIRED_MARKERS = ["data-wake-only", "data-form-block", "rungForDate"];
 
 const names = process.argv.slice(2).filter((name) => name in TARGETS);
 if (names.length === 0) {
-    console.error("用法：node scripts/fresh-preview.mjs phase|rungs|twodays [更多目标]");
+    console.error("用法：node scripts/fresh-preview.mjs phase|rungs|twodays|affairs [更多目标]");
     process.exit(2);
 }
 
@@ -65,11 +71,12 @@ for (const name of names) {
     const okPointer = pointsTo === bundle.file;
     // 校验 2：产物里确实含本次改动
     const content = fs.readFileSync(path.join(ROOT, "design", bundle.file), "utf-8");
-    const missing = REQUIRED_MARKERS.filter((marker) => !content.includes(marker));
+    const markers = target.markers ?? REQUIRED_MARKERS;
+    const missing = markers.filter((marker) => !content.includes(marker));
 
     console.log(`产物：${bundle.file}（${(fs.statSync(path.join(ROOT, "design", bundle.file)).size / 1024).toFixed(0)} KB）`);
     console.log(`页面指向：${pointsTo} ${okPointer ? "✓" : "✗ 不一致"}`);
-    console.log(`产物含最新标记：${missing.length === 0 ? "✓ " + REQUIRED_MARKERS.join(" / ") : "✗ 缺少 " + missing.join(" / ")}`);
+    console.log(`产物含最新标记：${missing.length === 0 ? "✓ " + markers.join(" / ") : "✗ 缺少 " + missing.join(" / ")}`);
     if (!okPointer || missing.length > 0) failed = true;
 }
 

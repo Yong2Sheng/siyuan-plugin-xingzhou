@@ -1509,6 +1509,8 @@
 .xz-daily-closure-choice { width: min(100%, var(--xz-daily-structured-width)); }
 .xz-daily-closure-details { margin-top: 12px; }
 .xz-daily-closure-note { box-sizing: border-box; width: min(100%, 680px); margin: 12px 0 0; padding: 10px 12px; border-left: 3px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; line-height: 1.6; }
+/* 自相矛盾的状态（判断为「否」但今天还排着切片）用警示色，别和普通说明混在一起。 */
+.xz-daily-closure-note--conflict { border-left-color: var(--b3-theme-warning, #d79b35); background: color-mix(in srgb, var(--b3-theme-warning, #d79b35) 12%, var(--xingzhou-bg)); }
 .xz-daily-yesterday-hint { box-sizing: border-box; width: min(100%, 680px); margin: 0 0 12px; padding: 8px 10px; border-left: 3px solid color-mix(in srgb, var(--xingzhou-primary) 55%, transparent); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 12px; line-height: 1.6; }
 .xz-daily-closure-bottom { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 10px; }
 .xz-daily-decision-pair { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -1664,16 +1666,15 @@
 .xz-daily-onset-note em { color: color-mix(in srgb, var(--xingzhou-muted) 88%, transparent); font-size: 11px; font-style: normal; }
 .xz-daily-bedtime-note { box-sizing: border-box; min-height: 42px; display: flex; align-items: center; margin: 22px 0 0; padding: 8px 10px; border-left: 3px solid var(--xingzhou-primary); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-primary-light); font-size: 13px; }
 .xz-daily-personal-project-row { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-/* 个人事务区：左列是「是否有补充说明」判断和它展开的输入框，右列是「今日个人安排」，避免触发控件与结果分离。 */
+/*
+ * 个人事务区：左列是「是否安排个人事务」判断和它下面紧跟的实际时长，右列是「今日个人安排」。
+ * 判断决定要不要填，时长就贴在判断下面（宽度足够时），不让左列只剩一个下拉、空出一大截。
+ */
 .xz-daily-personal-decision { min-width: 0; display: grid; align-content: start; gap: 6px; }
 .xz-daily-personal-decision > label { min-width: 0; display: grid; align-content: start; gap: 6px; color: var(--xingzhou-muted); font-size: 14px; }
-.xz-daily-personal-decision + .xz-daily-project-picker, .xz-daily-personal-decision + .xz-daily-project-picker .xz-daily-project-note { min-width: 0; }
-.xz-daily-fields.two:has(> .xz-daily-personal-decision) > .xz-daily-field { grid-column: 1 / -1; }
+.xz-daily-personal-decision + .xz-daily-project-picker { min-width: 0; }
 .xz-daily-project-picker { min-width: 0; display: grid; align-content: start; gap: 7px; color: var(--xingzhou-muted); font-size: 14px; }
 .xz-daily-project-picker__heading { min-height: 22px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.xz-daily-fields .xz-daily-project-note { grid-template-rows: 22px 76px; gap: 7px; }
-.xz-daily-project-note > span { display: flex; min-height: 22px; align-items: baseline; }
-.xz-daily-fields .xz-daily-project-note > textarea { height: 76px; min-height: 76px; }
 .xz-daily-project-picker__heading > button { padding: 0; border: 0; color: var(--xingzhou-primary); background: transparent; cursor: pointer; font-size: 12px; }
 .xz-daily-project-picker__empty { box-sizing: border-box; min-height: 152px; display: flex; align-items: center; justify-content: center; margin: 0; padding: 11px 12px; border: 1px dashed var(--xingzhou-border); border-radius: var(--xingzhou-radius); color: var(--xingzhou-muted); background: var(--xingzhou-panel-subtle); font-size: 12px; line-height: 1.55; text-align: center; }
 /* 今日个人安排：高度随条目自适应，最少约三行、最多五行的位置，再多就在框内滚动。 */
@@ -1998,6 +1999,13 @@
     .xz-daily-review__actual { margin-left: 0; width: 100%; }
     .xz-daily-progress, .xz-daily-progress.holiday, .xz-daily-fields.two, .xz-daily-fields.three, .xz-daily-fields.xz-daily-flow-columns { grid-template-columns: 1fr; }
     .xz-daily-fields.xz-daily-flow-columns > .xz-daily-flow-column { display: contents; }
+    /*
+     * 个人事务区在窄屏塌成单列：判断与时长原本同属左列，用 display:contents 摊平后
+     * 再把「今日个人安排」提到时长前面，顺序是 判断 → 列表 → 时长。
+     */
+    .xz-daily-fields.two:has(> .xz-daily-personal-decision) > .xz-daily-personal-decision { display: contents; }
+    .xz-daily-fields.two:has(> .xz-daily-personal-decision) > .xz-daily-project-picker { order: 2; }
+    .xz-daily-fields.two:has(> .xz-daily-personal-decision) > .xz-daily-personal-decision > .xz-daily-field { order: 3; }
     .xz-daily-time-pair { display: contents; }
     .xz-daily-flow-start { order: 1; }
     .xz-daily-flow-end { order: 2; }
@@ -2005,7 +2013,6 @@
     .xz-daily-flow-adjustments { order: 4; }
     .xz-daily-flow-training { order: 5; }
     .xz-daily-personal-project-row, .xz-daily-decision-pair, .xz-daily-lights-off-inline, .xz-daily-closure-bottom { grid-template-columns: 1fr; }
-    .xz-daily-fields.two:has(> .xz-daily-personal-decision) > .xz-daily-project-note > textarea { height: 88px; min-height: 88px; }
     .xz-daily-bedtime-note { margin-top: 0; }
     .xz-daily-history-row, .xz-daily-rubric-row, .xz-daily-timeline-row { grid-template-columns: 1fr 1fr; }
     .xz-slice-config { grid-template-columns: 1fr; }
@@ -3461,6 +3468,7 @@
 .xz-cp-entry .xz-cp-icon {
     color: var(--xingzhou-text);
 }
+
 /*
  * DSH 用品牌蓝：和旁边深灰正文拉开色相，14–16px 下不必只靠形状分辨。
  * 暗色 #4d6bfe 在深底上偏暗（3.9:1），提亮一档到 5.6:1。
@@ -3829,6 +3837,7 @@
     min-height: 46px;
     resize: vertical;
 }
+
 /* 卡点可能有很多个：一行一个，框随内容长高，单行时不至于空一大块 */
 .xz-cpf__stuck {
     min-height: 30px;

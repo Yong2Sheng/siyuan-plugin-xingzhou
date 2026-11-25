@@ -13,21 +13,23 @@ describe("生活节律完整度检查", () => {
             "not-started", "not-started", "not-started", "not-started", "not-started",
         ]);
         expect(empty.missing.map((item) => item.label)).toContain("是否安排专业学习");
-        expect(empty.missing.map((item) => item.label)).not.toContain("今晚个人事务补充说明（可选）");
-        expect(empty.missing.map((item) => item.label)).not.toContain("今晚个人事务补充说明");
+        expect(empty.missing.map((item) => item.label)).not.toContain("今晚是否安排个人事务");
     });
 
-    it("个人事务补充说明的决策只表示阶段已开始，不会成为必填项", () => {
+    /**
+     * 「是否安排个人事务」只决定这一块填不填，本身不是待补项；
+     * 但回答过（是或否）就说明下班后这一段已经开始，阶段状态从「未开始」变成「未完成」。
+     */
+    it("个人事务判断只表示阶段已开始，不会成为必填项", () => {
         const record = createDailyRecord("2026-09-04", "research-workday", 1000);
-        record.fields.hasPersonalProjectNote = "yes";
+        record.fields.personalAffairsPlanned = "yes";
         const decided = calculateDailyCompletion(record);
-        expect(decided.missing.map((item) => item.label)).not.toContain("今晚个人事务补充说明");
+        expect(decided.missing.map((item) => item.label)).not.toContain("今晚是否安排个人事务");
         expect(decided.stages.find((stage) => stage.stage === "after-work")?.state).toBe("incomplete");
 
-        record.fields.hasPersonalProjectNote = "no";
-        record.fields.personalProjectNoteDraft = "先散步，再整理账目";
+        record.fields.personalAffairsPlanned = "no";
         const skipped = calculateDailyCompletion(record);
-        expect(skipped.missing.map((item) => item.label)).not.toContain("今晚个人事务补充说明");
+        expect(skipped.missing.map((item) => item.label)).not.toContain("今晚是否安排个人事务");
         expect(skipped.stages.find((stage) => stage.stage === "after-work")?.state).toBe("incomplete");
     });
 
@@ -111,7 +113,7 @@ describe("生活节律完整度检查", () => {
         holiday.fields.personalProjectLinks = workday.fields.personalProjectLinks.map((link) => ({ ...link }));
         expect(calculateDailyCompletion(holiday).stages.find((stage) => stage.stage === "recovery")?.state).toBe("not-started");
 
-        workday.fields.personalProjectPlan = "晚上整理发布说明";
+        workday.fields.personalProjectDurationMinutes = 45;
         expect(calculateDailyCompletion(workday).stages.find((stage) => stage.stage === "after-work")?.state).toBe("incomplete");
     });
 

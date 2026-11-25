@@ -148,6 +148,16 @@
     $: workApplicable = isWorkMetricApplicable(draft.dayType);
     $: isSaturdayReset = draft.dayType === "saturday-reset";
     $: isConferenceDay = draft.dayType === "conference-day";
+    /** 个人事务这一块的措辞：下班后说「今晚」，周六与休假说「今天」，开会日说「会后」。 */
+    $: personalAffairsWording = isConferenceDay ? "会后" : !workApplicable || isSaturdayReset ? "今天" : "今晚";
+    $: personalAffairsLabel = `${personalAffairsWording}是否安排个人事务`;
+    /**
+     * 当天已经排进「今日个人安排」的切片数：判断选「否」却还有切片时给出冲突提示，
+     * 列表照常显示——它是取消安排的唯一入口，藏起来就再也取消不掉了。
+     */
+    $: todaySliceCount = workItems
+        ? flattenWorkItemTree(buildWorkItemTree(workItems.items)).reduce((count, item) => count + slicesOnDate(item, currentDate).length, 0)
+        : 0;
     $: yesterdayFirstAction = previousDayFirstAction(store?.records ?? [], currentDate);
     /** 前一天的记录：昨晚的计划写在它里面，实际熄灯与早晨回答写在当前记录里。 */
     $: previousRecord = store?.records.find((record) => record.date === shiftDateKey(currentDate, -1)) ?? null;
@@ -604,39 +614,20 @@
         markDirty();
     }
 
+    /**
+     * 「今晚／今天／会后是否安排个人事务」：所有日期类型共用的一次判断。
+     * 选「否」时把时长按「不适用」处理（null，不计 0 分钟），切片快照一并清掉；
+     * 开会日原有口径还包括个人结果文字，这里保持不变，其他日期不清结果文字。
+     */
     function changePersonalAffairsPlanned(value: string) {
         const allowed: PresenceState[] = ["", "yes", "no"];
         if (!allowed.includes(value as PresenceState)) return;
         draft.fields.personalAffairsPlanned = value as PresenceState;
         if (value !== "yes") {
             draft.fields.personalProjectLinks = [];
-            draft.fields.hasPersonalProjectNote = "";
-            draft.fields.personalProjectPlan = "";
-            draft.fields.personalProjectNoteDraft = "";
             draft.fields.personalProjectDurationMinutes = null;
-            draft.fields.personalLifeResult = "";
+            if (draft.dayType === "conference-day") draft.fields.personalLifeResult = "";
         }
-        draft = { ...draft, fields: { ...draft.fields } };
-        markDirty();
-    }
-
-    /**
-     * 补充说明先做一次是／否判断：选“否”时正文清空但不销毁，改回“是”即可恢复。
-     * 正文存 personalProjectPlan，暂存内容存 personalProjectNoteDraft（只在选“否”时保留）。
-     */
-    function changeHasPersonalProjectNote(value: string) {
-        const allowed: PresenceState[] = ["", "yes", "no"];
-        if (!allowed.includes(value as PresenceState)) return;
-        if (value === "no") {
-            draft.fields.personalProjectNoteDraft = draft.fields.personalProjectPlan || draft.fields.personalProjectNoteDraft;
-            draft.fields.personalProjectPlan = "";
-        } else if (value === "yes") {
-            draft.fields.personalProjectPlan = draft.fields.personalProjectPlan || draft.fields.personalProjectNoteDraft;
-            draft.fields.personalProjectNoteDraft = "";
-        } else {
-            draft.fields.personalProjectNoteDraft = "";
-        }
-        draft.fields.hasPersonalProjectNote = value as PresenceState;
         draft = { ...draft, fields: { ...draft.fields } };
         markDirty();
     }
@@ -1128,7 +1119,7 @@
 
                 {#if missingOpen && !recordExcluded}
                     <section class="xz-daily-missing-panel" aria-label="待补项目">
-                        <header><div><strong>{completion.missing.length ? `还有 ${completion.missing.length} 项待补` : "今日关键记录已补齐"}</strong><small>{completion.missing.length ? "只检查关键字段；备注和补充说明仍是可选项。" : "普通备注与补充说明无需填写。"}</small></div><button type="button" aria-label="关闭待补项目" on:click={() => missingOpen = false}>×</button></header>
+                        <header><div><strong>{completion.missing.length ? `还有 ${completion.missing.length} 项待补` : "今日关键记录已补齐"}</strong><small>{completion.missing.length ? "只检查关键字段；备注与个人事务细节仍是可选项。" : "普通备注与个人事务细节无需填写。"}</small></div><button type="button" aria-label="关闭待补项目" on:click={() => missingOpen = false}>×</button></header>
                         {#if completion.missing.length}
                             <div>{#each completion.missing as item (item.stage + item.id)}<button type="button" on:click={() => void inspectMissing(item)}><span>{completionStageLabel(completion, item.stage)}</span><strong>{item.label}</strong><i>›</i></button>{/each}</div>
                         {:else}
@@ -1380,45 +1371,22 @@
                     <section class="xz-daily-form-section">
                         <h3>{isSaturdayReset ? "自由时间与个人安排" : isConferenceDay ? "会后个人事务" : "下班后个人安排"}</h3>
                         {#if isSaturdayReset}<p class="xz-daily-closure-note">完全无工作区间已经开始；这里只记录个人生活或兴趣事务，不进行科研、专业学习或工作闭环。</p>{/if}
-                        {#if isConferenceDay}
-                            <div class="xz-daily-fields two">
-                                <label><span>会后是否安排个人事务</span><select value={draft.fields.personalAffairsPlanned} on:change|stopPropagation={(event) => changePersonalAffairsPlanned(event.currentTarget.value)}><option value="">尚未确认</option><option value="no">不安排</option><option value="yes">安排</option></select></label>
-                            </div>
-                            {#if draft.fields.personalAffairsPlanned === "yes"}
-                                <div class="xz-daily-fields two xz-daily-closure-details">
-                                    <div class="xz-daily-personal-decision">
-                                        <label><span>会后是否有个人事务补充说明</span><select value={draft.fields.hasPersonalProjectNote} on:change|stopPropagation={(event) => changeHasPersonalProjectNote(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
-                                        {#if draft.fields.hasPersonalProjectNote === "yes"}
-                                            <label class="xz-daily-project-note"><span>会后个人事务补充说明</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder="可补充会议结束后准备如何安排个人事务"></textarea></label>
-                                        {:else if draft.fields.hasPersonalProjectNote === "no"}
-                                            <p class="xz-daily-closure-note">已选择“否”，不写补充说明；会议结束后的安排仍以上方“今日个人安排”为准。</p>
-                                        {:else}
-                                            <p class="xz-daily-closure-note">先确认是否需要补充说明，再决定是否填写。</p>
-                                        {/if}
-                                    </div>
-                                    <DailyWorkItemPicker data={workItems} date={currentDate} loading={workItemsLoading} error={workItemsError} {saveWorkItem} {openWorkItem} on:change={applyWorkItemChange} />
+                        <div class="xz-daily-fields two">
+                            <div class="xz-daily-personal-decision">
+                                <label><span>{personalAffairsLabel}</span><select value={draft.fields.personalAffairsPlanned} on:change|stopPropagation={(event) => changePersonalAffairsPlanned(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是，安排了</option><option value="no">否，不安排</option></select></label>
+                                {#if draft.fields.personalAffairsPlanned === "yes"}
                                     <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
-                                </div>
-                            {:else if draft.fields.personalAffairsPlanned === "no"}
-                                <p class="xz-daily-closure-note">今晚用于同事活动、社交或休息，不安排个人事务，无需填写相关计划和时长。</p>
-                            {:else}
-                                <p class="xz-daily-closure-note">等会议结束后再决定；会议期间不预设自由时间。</p>
-                            {/if}
-                        {:else}
-                            <div class="xz-daily-fields two">
-                                <div class="xz-daily-personal-decision">
-                                    <label><span>{isSaturdayReset ? "今日是否有个人事务补充说明" : "今晚是否有个人事务补充说明"}</span><select value={draft.fields.hasPersonalProjectNote} on:change|stopPropagation={(event) => changeHasPersonalProjectNote(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
-                                    {#if draft.fields.hasPersonalProjectNote === "yes"}
-                                        <label class="xz-daily-project-note"><span>{isSaturdayReset ? "今日个人事务补充说明" : "今晚个人事务补充说明"}</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder={isSaturdayReset ? "可补充今天准备如何休息或推进兴趣事务" : "可补充今晚准备如何推进这些个人事务"}></textarea></label>
-                                    {:else if draft.fields.hasPersonalProjectNote === "no"}
-                                        <p class="xz-daily-closure-note">已选择“否”，不写补充说明；{isSaturdayReset ? "今天" : "今晚"}的安排仍以上方“今日个人安排”为准。</p>
-                                    {:else}
-                                        <p class="xz-daily-closure-note">先确认是否需要补充说明，再决定是否填写。</p>
-                                    {/if}
-                                </div>
-                                <DailyWorkItemPicker data={workItems} date={currentDate} loading={workItemsLoading} error={workItemsError} {saveWorkItem} {openWorkItem} on:change={applyWorkItemChange} />
-                                <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
+                                {/if}
                             </div>
+                            <DailyWorkItemPicker data={workItems} date={currentDate} loading={workItemsLoading} error={workItemsError} {saveWorkItem} {openWorkItem} on:change={applyWorkItemChange} />
+                        </div>
+                        {#if draft.fields.personalAffairsPlanned === ""}
+                            <p class="xz-daily-closure-note">先确认{personalAffairsWording}是否安排个人事务，再决定是否填写个人安排。</p>
+                        {:else if draft.fields.personalAffairsPlanned === "no"}
+                            <p class="xz-daily-closure-note">{personalAffairsWording}不安排个人事务；个人项目实际时长按“不适用”保存，不计为 0 分钟。</p>
+                            {#if todaySliceCount > 0}
+                                <p class="xz-daily-closure-note xz-daily-closure-note--conflict">今日个人安排里还有 {todaySliceCount} 条执行切片；若{personalAffairsWording}确实不安排，请先在上方列表里取消安排，或把上面的判断改回“是”。</p>
+                            {/if}
                         {/if}
                     </section>
                 {/if}
@@ -1428,13 +1396,9 @@
                         <h3>恢复与生活</h3>
                         <div class="xz-daily-fields two">
                             <div class="xz-daily-personal-decision">
-                                <label><span>今日是否有个人事务补充说明</span><select value={draft.fields.hasPersonalProjectNote} on:change|stopPropagation={(event) => changeHasPersonalProjectNote(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是</option><option value="no">否</option></select></label>
-                                {#if draft.fields.hasPersonalProjectNote === "yes"}
-                                    <label class="xz-daily-project-note"><span>今日个人事务补充说明</span><textarea bind:value={draft.fields.personalProjectPlan} placeholder="可补充今天准备如何推进这些个人事务"></textarea></label>
-                                {:else if draft.fields.hasPersonalProjectNote === "no"}
-                                    <p class="xz-daily-closure-note">已选择“否”，不写补充说明；今天的安排仍以上方“今日个人安排”为准。</p>
-                                {:else}
-                                    <p class="xz-daily-closure-note">先确认是否需要补充说明，再决定是否填写。</p>
+                                <label><span>{personalAffairsLabel}</span><select value={draft.fields.personalAffairsPlanned} on:change|stopPropagation={(event) => changePersonalAffairsPlanned(event.currentTarget.value)}><option value="">尚未确认</option><option value="yes">是，安排了</option><option value="no">否，不安排</option></select></label>
+                                {#if draft.fields.personalAffairsPlanned === "yes"}
+                                    <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
                                 {/if}
                             </div>
                             <DailyWorkItemPicker
@@ -1448,8 +1412,15 @@
                             />
                             <ScoreInput bind:value={draft.fields.daytimeEnergy} rubric={rubricById.daytimeEnergy} on:inspect={inspectRubric} on:change={markDirty} />
                             <label><span>今天的个人生活或兴趣项目结果</span><textarea bind:value={draft.fields.personalLifeResult}></textarea></label>
-                            <div class="xz-daily-field"><span>个人项目实际时长</span><DurationSelect bind:value={draft.fields.personalProjectDurationMinutes} maxHours={12} ariaLabel="个人项目实际时长" /></div>
                         </div>
+                        {#if draft.fields.personalAffairsPlanned === ""}
+                            <p class="xz-daily-closure-note">先确认{personalAffairsWording}是否安排个人事务，再决定是否填写个人安排。</p>
+                        {:else if draft.fields.personalAffairsPlanned === "no"}
+                            <p class="xz-daily-closure-note">{personalAffairsWording}不安排个人事务；个人项目实际时长按“不适用”保存，不计为 0 分钟。</p>
+                            {#if todaySliceCount > 0}
+                                <p class="xz-daily-closure-note xz-daily-closure-note--conflict">今日个人安排里还有 {todaySliceCount} 条执行切片；若{personalAffairsWording}确实不安排，请先在上方列表里取消安排，或把上面的判断改回“是”。</p>
+                            {/if}
+                        {/if}
                     </section>
                 {/if}
 

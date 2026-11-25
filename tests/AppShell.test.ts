@@ -229,14 +229,15 @@ describe("行舟一级模块外壳", () => {
 
         clickButton("会后");
         await vi.waitFor(() => expect(document.body.textContent).toContain("会后是否安排个人事务"));
-        expect(document.querySelector(".xz-daily-project-picker")).toBeNull();
+        expect(document.querySelector(".xz-daily-project-picker")).not.toBeNull();
+        expect(document.querySelector('[aria-label="个人项目实际时长小时"]')).toBeNull();
         const decision = [...document.querySelectorAll("label")]
             .find((label) => label.textContent?.includes("会后是否安排个人事务"))
             ?.querySelector("select") as HTMLSelectElement;
         decision.value = "yes";
         decision.dispatchEvent(new Event("change", { bubbles: true }));
         await tick();
-        expect(document.querySelector(".xz-daily-project-picker")).not.toBeNull();
+        expect(document.querySelector('[aria-label="个人项目实际时长小时"]')).not.toBeNull();
 
         clickButton("每日 Checklist");
         await vi.waitFor(() => expect(document.body.textContent).toContain("开会日 · 会议开始至结束不预设自由时间"));
@@ -324,59 +325,78 @@ describe("行舟一级模块外壳", () => {
         clickButton("下班后");
         await vi.waitFor(() => expect(document.body.textContent).toContain("下班后工作闭环（按需）"));
         expect(document.querySelector(".xz-daily-project-picker")).not.toBeNull();
-        expect([...document.querySelectorAll("label")].some((label) => label.textContent?.includes("今晚是否有个人事务补充说明"))).toBe(true);
-        expect(document.querySelector('[aria-label="个人项目实际时长小时"]')).not.toBeNull();
+        expect([...document.querySelectorAll("label")].some((label) => label.textContent?.includes("今晚是否安排个人事务"))).toBe(true);
+        expect(document.querySelector('[aria-label="个人项目实际时长小时"]')).toBeNull();
         expect([...document.querySelectorAll("label")].some((label) => label.textContent?.includes("完成训练"))).toBe(false);
     });
 
-    it("个人事务补充说明先判断是／否，选“否”收起输入框但改回“是”能恢复文字", async () => {
+    /**
+     * 用户真实路径：打开「下班后」→ 先判断今晚是否安排个人事务 →
+     * 选「是」才给时长；选「否」收起时长并按不适用保存；今天已排切片时给出冲突提示。
+     * 来回切三次，确认每一次的可见结果与落库值都跟着变。
+     */
+    it("个人事务先判断是否安排：选是才给时长，选否收起并按不适用保存", async () => {
+        const now = new Date();
+        const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        const items = sampleWorkItems();
+        const action = items.find((item) => item.id === "action-1");
+        if (!action) throw new Error("缺少测试事务");
+        action.executionSlices = [{ id: "slice-1", scheduledDate: todayKey, status: "scheduled", completedAt: null, updatedAt: 1000 }];
         let store = researchDailyStore();
-        const loadDaily = vi.fn().mockResolvedValue(store);
-        const saveDaily = vi.fn(async (record: DailyRecord) => store = upsertDailyRecord(store, record, 2000));
-        component = new DailyRhythm({ target: document.body, props: { loadDaily, saveDaily } });
+        const saveDaily = vi.fn(async (record: DailyRecord) => (store = upsertDailyRecord(store, record, 2000)));
+        component = new DailyRhythm({
+            target: document.body,
+            props: {
+                loadDaily: vi.fn().mockResolvedValue(store),
+                saveDaily,
+                loadWorkItems: vi.fn().mockResolvedValue(sampleWorkItemData(items)),
+            },
+        });
         await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
         clickButton("下班后");
         await vi.waitFor(() => expect(document.body.textContent).toContain("下班后个人安排"));
 
-        const decision = [...document.querySelectorAll("label")]
-            .find((label) => label.textContent?.includes("今晚是否有个人事务补充说明"))
+        const decision = () => [...document.querySelectorAll("label")]
+            .find((label) => label.textContent?.includes("今晚是否安排个人事务"))
             ?.querySelector("select") as HTMLSelectElement | undefined;
-        if (!decision) throw new Error("没有找到个人事务补充说明判断选择框");
-        const noteTextarea = () => [...document.querySelectorAll("label")]
-            .find((label) => label.textContent?.includes("今晚个人事务补充说明"))
-            ?.querySelector("textarea") as HTMLTextAreaElement | undefined;
-        expect(noteTextarea()).toBeUndefined();
-        expect(decision.closest(".xz-daily-personal-decision")?.nextElementSibling?.classList.contains("xz-daily-project-picker")).toBe(true);
+        const duration = () => document.querySelector('[aria-label="个人项目实际时长小时"]');
+        const choose = (value: string) => {
+            const select = decision();
+            if (!select) throw new Error("没有找到「今晚是否安排个人事务」判断");
+            select.value = value;
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+        };
 
-        decision.value = "yes";
-        decision.dispatchEvent(new Event("change", { bubbles: true }));
-        await tick();
-        const note = noteTextarea();
-        if (!note) throw new Error("选择是后没有显示补充说明输入框");
-        note.value = "先散步 30 分钟，再整理家庭账目。";
-        note.dispatchEvent(new Event("input", { bubbles: true }));
+        // 尚未确认：只给判断和提示，不提前摆时长
+        expect(decision()?.value).toBe("");
+        expect(duration()).toBeNull();
+        expect(document.body.textContent).toContain("先确认今晚是否安排个人事务");
 
-        decision.value = "no";
-        decision.dispatchEvent(new Event("change", { bubbles: true }));
+        // 是：时长出现，且不再有「不安排」的说明
+        choose("yes");
         await tick();
-        expect(noteTextarea()).toBeUndefined();
-        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalledTimes(1), { timeout: 2000 });
-        expect(saveDaily.mock.calls[0][0].fields).toMatchObject({
-            hasPersonalProjectNote: "no",
-            personalProjectPlan: "",
-            personalProjectNoteDraft: "先散步 30 分钟，再整理家庭账目。",
-        });
+        expect(duration()).not.toBeNull();
+        expect(document.body.textContent).not.toContain("今晚不安排个人事务");
 
-        decision.value = "yes";
-        decision.dispatchEvent(new Event("change", { bubbles: true }));
+        // 否：时长立刻收起；列表保留（取消安排的入口不能消失）+ 冲突提示
+        choose("no");
         await tick();
-        expect(noteTextarea()?.value).toBe("先散步 30 分钟，再整理家庭账目。");
-        await vi.waitFor(() => expect(saveDaily).toHaveBeenCalledTimes(2), { timeout: 2000 });
-        expect(saveDaily.mock.calls[1][0].fields).toMatchObject({
-            hasPersonalProjectNote: "yes",
-            personalProjectPlan: "先散步 30 分钟，再整理家庭账目。",
-            personalProjectNoteDraft: "",
-        });
+        expect(duration()).toBeNull();
+        expect(document.body.textContent).toContain("今晚不安排个人事务；个人项目实际时长按“不适用”保存");
+        expect(document.querySelector(".xz-daily-project-picker")).not.toBeNull();
+        expect(document.body.textContent).toContain("还有 1 条执行切片");
+
+        // 改回「是」：时长回来，判断落库
+        choose("yes");
+        await tick();
+        expect(duration()).not.toBeNull();
+        await vi.waitFor(() => expect(saveDaily.mock.calls.at(-1)?.[0].fields.personalAffairsPlanned).toBe("yes"), { timeout: 3000 });
+
+        // 再改回「否」：时长按不适用落库，不是 0
+        choose("no");
+        await tick();
+        await vi.waitFor(() => expect(saveDaily.mock.calls.at(-1)?.[0].fields.personalAffairsPlanned).toBe("no"), { timeout: 3000 });
+        expect(saveDaily.mock.calls.at(-1)?.[0].fields.personalProjectDurationMinutes).toBeNull();
     });
 
     it("先确认午饭后是否安排专业学习，再按需显示输入框", async () => {

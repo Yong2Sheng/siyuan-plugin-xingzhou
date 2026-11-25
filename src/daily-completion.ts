@@ -68,7 +68,7 @@ export function calculateDailyCompletion(record: DailyRecord, previousRecord: Da
 
     if (holiday) {
         stages.push(stageResult("recovery", "恢复", recoveryChecks(fields), touched(fields, [
-            "daytimeEnergy", "personalLifeResult", "hasPersonalProjectNote", "personalProjectPlan", "personalProjectDurationMinutes",
+            "daytimeEnergy", "personalLifeResult", "personalAffairsPlanned", "personalProjectDurationMinutes",
         ])));
     } else {
         stages.push(stageResult("learning", saturday ? "上午复盘" : "午饭后", learningChecks(fields, saturday), touched(fields, saturday
@@ -197,7 +197,7 @@ function afterWorkChecks(record: DailyRecord): Check[] {
             "personal-affairs-plan",
             "会后个人事务",
             "今日个人安排（来自项目与事务）",
-            fields.personalProjectLinks.length > 0 || text(fields.personalProjectPlan),
+            fields.personalProjectLinks.length > 0,
         ));
     }
     return checks;
@@ -262,7 +262,7 @@ function eveningTouched(fields: DailyRecordFields, holiday: boolean, saturday: b
 function afterWorkTouched(fields: DailyRecordFields, conference: boolean): boolean {
     const keys: Array<keyof DailyRecordFields> = [
         "closureNeed", "closureObject", "closurePlannedMinutes", "closureHasNextStep", "closureNextStep", "closureActualMinutes",
-        "hasPersonalProjectNote", "personalProjectPlan", "personalProjectDurationMinutes",
+        "personalAffairsPlanned", "personalProjectDurationMinutes",
     ];
     if (conference) keys.push("personalAffairsPlanned", "personalProjectLinks");
     return touched(fields, keys);

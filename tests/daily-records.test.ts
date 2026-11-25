@@ -87,10 +87,9 @@ describe("生活节律内部数据库", () => {
         ]);
     });
 
-    it("开会日明确不安排个人事务时清空相关填写，安排时保留内容", () => {
+    it("明确不安排个人事务时清空时长与切片快照，安排时保留内容", () => {
         const record = createDailyRecord("2026-09-03", "conference-day", 1000);
         record.fields.personalAffairsPlanned = "no";
-        record.fields.personalProjectPlan = "此前的个人计划";
         record.fields.personalProjectDurationMinutes = 60;
         record.fields.personalLifeResult = "此前的结果";
         record.fields.personalProjectLinks = [{ workItemId: "personal-1", titleSnapshot: "写小说", pathSnapshot: "", typeSnapshot: "事务" }];
@@ -99,72 +98,54 @@ describe("生活节律内部数据库", () => {
         expect(skipped.fields).toMatchObject({
             personalAffairsPlanned: "no",
             personalProjectLinks: [],
-            personalProjectPlan: "",
             personalProjectDurationMinutes: null,
             personalLifeResult: "",
         });
 
         record.fields.personalAffairsPlanned = "yes";
         const planned = upsertDailyRecord(createEmptyDailyStore(1200), record, 1300).records[0];
-        expect(planned.fields).toMatchObject({ personalAffairsPlanned: "yes", personalProjectPlan: "此前的个人计划", personalProjectDurationMinutes: 60 });
+        expect(planned.fields).toMatchObject({ personalAffairsPlanned: "yes", personalProjectDurationMinutes: 60 });
         expect(planned.fields.personalProjectLinks).toHaveLength(1);
     });
 
-    it("旧记录里已有的个人事务补充说明会被推断为已选择“是”，不隐藏正文", () => {
-        const legacy = createDailyRecord("2026-09-04", "research-workday", 1000);
-        legacy.fields.personalProjectPlan = "先散步，再整理账目";
-        const migrated = upsertDailyRecord(createEmptyDailyStore(900), legacy, 1100).records[0];
-        expect(migrated.fields).toMatchObject({
-            hasPersonalProjectNote: "yes",
-            personalProjectPlan: "先散步，再整理账目",
-            personalProjectNoteDraft: "",
-        });
-
-        const untouched = createDailyRecord("2026-09-04", "research-workday", 1000);
-        expect(upsertDailyRecord(createEmptyDailyStore(900), untouched, 1100).records[0].fields).toMatchObject({
-            hasPersonalProjectNote: "",
-            personalProjectPlan: "",
-            personalProjectNoteDraft: "",
-        });
-    });
-
-    it("补充说明选择“否”时清空正文但保留暂存，改回“是”可恢复", () => {
+    it("判断对所有日期类型生效：普通工作日选否同样把时长按不适用保存", () => {
         const record = createDailyRecord("2026-09-04", "research-workday", 1000);
-        record.fields.hasPersonalProjectNote = "no";
-        record.fields.personalProjectPlan = "";
-        record.fields.personalProjectNoteDraft = "先散步 30 分钟，再整理家庭账目。";
-        const skipped = upsertDailyRecord(createEmptyDailyStore(900), record, 1100).records[0];
-        expect(skipped.fields).toMatchObject({
-            hasPersonalProjectNote: "no",
-            personalProjectPlan: "",
-            personalProjectNoteDraft: "先散步 30 分钟，再整理家庭账目。",
-        });
-        expect(parseDailyStore({ version: 1, revision: 1, createdAt: 1, updatedAt: 1, records: [skipped] })?.records[0].fields.personalProjectNoteDraft)
-            .toBe("先散步 30 分钟，再整理家庭账目。");
-
-        const restored = { ...skipped, fields: { ...skipped.fields, hasPersonalProjectNote: "yes" as const, personalProjectPlan: "先散步 30 分钟，再整理家庭账目。" } };
-        expect(upsertDailyRecord(createEmptyDailyStore(1200), restored, 1300).records[0].fields).toMatchObject({
-            hasPersonalProjectNote: "yes",
-            personalProjectPlan: "先散步 30 分钟，再整理家庭账目。",
-            personalProjectNoteDraft: "",
-        });
-    });
-
-    it("开会日不安排个人事务时连同补充说明与暂存一起清空", () => {
-        const record = createDailyRecord("2026-09-03", "conference-day", 1000);
         record.fields.personalAffairsPlanned = "no";
-        record.fields.personalProjectPlan = "会后计划";
-        record.fields.personalProjectNoteDraft = "会后暂存";
+        record.fields.personalProjectDurationMinutes = 45;
         const saved = upsertDailyRecord(createEmptyDailyStore(900), record, 1100).records[0];
-        expect(saved.fields).toMatchObject({
-            personalAffairsPlanned: "no",
-            hasPersonalProjectNote: "",
-            personalProjectPlan: "",
-            personalProjectNoteDraft: "",
-        });
+        expect(saved.fields.personalAffairsPlanned).toBe("no");
+        expect(saved.fields.personalProjectDurationMinutes).toBeNull();
     });
 
-    it("把只选择时分的睡眠输入解析为明确的跨日日期时间", () => {        const evening = createDailyRecord("2026-09-03", "research-workday", 1000);
+    it("旧记录没有判断时，按时长或当天切片推断为“是”，不会把已填时长藏起来", () => {
+        const withDuration = createDailyRecord("2026-09-04", "research-workday", 1000);
+        withDuration.fields.personalProjectDurationMinutes = 60;
+        expect(upsertDailyRecord(createEmptyDailyStore(900), withDuration, 1100).records[0].fields.personalAffairsPlanned).toBe("yes");
+
+        const withLinks = createDailyRecord("2026-09-04", "research-workday", 1000);
+        withLinks.fields.personalProjectLinks = [{ workItemId: "personal-1", titleSnapshot: "写小说", pathSnapshot: "", typeSnapshot: "事务" }];
+        expect(upsertDailyRecord(createEmptyDailyStore(900), withLinks, 1100).records[0].fields.personalAffairsPlanned).toBe("yes");
+
+        const bare = createDailyRecord("2026-09-04", "research-workday", 1000);
+        expect(upsertDailyRecord(createEmptyDailyStore(900), bare, 1100).records[0].fields.personalAffairsPlanned).toBe("");
+    });
+
+    it("已废弃的「个人事务补充说明」字段在重新保存后被丢弃", () => {
+        const legacy = createDailyRecord("2026-09-04", "research-workday", 1000);
+        const raw = legacy.fields as Record<string, unknown>;
+        raw.hasPersonalProjectNote = "yes";
+        raw.personalProjectPlan = "先散步，再整理账目";
+        raw.personalProjectNoteDraft = "暂存内容";
+        const saved = upsertDailyRecord(createEmptyDailyStore(900), legacy, 1100).records[0];
+        expect(Object.keys(saved.fields)).not.toContain("personalProjectPlan");
+        expect(Object.keys(saved.fields)).not.toContain("personalProjectNoteDraft");
+        expect(Object.keys(saved.fields)).not.toContain("hasPersonalProjectNote");
+        // 只剩说明文字、没有时长也没有切片的旧记录：判断留空＝尚未确认
+        expect(saved.fields.personalAffairsPlanned).toBe("");
+    });
+
+    it("把只选择时分的睡眠输入解析为明确的跨日日期时间", () => {
+        const evening = createDailyRecord("2026-09-03", "research-workday", 1000);
         evening.fields.lightsOffTime = "22:07";
         evening.fields.wakeTime = "06:10";
         expect(resolveSleepDateTimes(evening).fields).toMatchObject({
