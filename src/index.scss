@@ -2554,6 +2554,12 @@
 
 /* ---------------------------------------------------------------- 趋势视图 */
 
+/*
+ * 思源把深浅色挂在 html[data-theme-mode]，不设 html[data-theme]（3.8.x 实机确认）。
+ * 这里曾经只写 [data-theme="dark"]，于是深色下的图表配色一次都没生效过。
+ * 两个都留着：主题 id 恰好叫 dark 时也能命中，且不依赖思源版本的写法。
+ */
+[data-theme-mode="dark"],
 [data-theme="dark"] {
     --xz-chart-1: #d8b45f;
     --xz-chart-2: #6f9fd8;
@@ -3255,24 +3261,77 @@
     overflow-wrap: anywhere;
 }
 
-.xz-cp-latest__stuck {
-    display: flex;
-    gap: 6px;
-    margin: 5px 0 0;
-    color: var(--xingzhou-muted);
-    font-size: 12px;
-    line-height: 1.6;
-    overflow-wrap: anywhere;
+/*
+ * 卡在：独立小节，和「上次做到」正文用同一条虚线分开（与「下次怎么开始」同一节奏）。
+ * 以前它是正文下面的一行 flex，标签被 align-items 默认的 stretch 拉成整段高度，
+ * 文案一长就成了一个竖着的胶囊；标签也不再参与文本流。
+ */
+.xz-cp-stuck {
+    min-width: 0;
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px dashed var(--xingzhou-border);
 }
 
-.xz-cp-latest__stuck span {
-    flex: none;
-    padding: 0 5px;
-    border-radius: 20px;
-    background: color-mix(in srgb, var(--xingzhou-danger) 12%, transparent);
-    color: color-mix(in srgb, var(--xingzhou-danger) 80%, var(--xingzhou-text));
-    font-size: 10px;
-    line-height: 1.7;
+.xz-cp-stuck__head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.xz-cp-stuck__title {
+    color: color-mix(in srgb, var(--xingzhou-danger) 76%, var(--xingzhou-text));
+    font-size: 10.5px;
+    font-weight: 650;
+    letter-spacing: .04em;
+}
+
+.xz-cp-stuck__count {
+    color: var(--xingzhou-muted);
+    font-size: 10.5px;
+}
+
+/* 一行一个卡点：行首圆点，长行照常换行 */
+.xz-cp-stuck__list {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    color: var(--xingzhou-text);
+    font-size: 12.5px;
+    line-height: 1.6;
+}
+
+.xz-cp-stuck__list li {
+    position: relative;
+    padding-left: 12px;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.xz-cp-stuck__list li::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: .62em;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--xingzhou-danger) 55%, var(--xingzhou-muted));
+}
+
+/* 历史条目里的同一结构：不重复虚线、不加大间距 */
+.xz-cp-stuck--compact {
+    margin-top: 5px;
+    padding-top: 0;
+    border-top: 0;
+}
+
+.xz-cp-stuck--compact .xz-cp-stuck__list {
+    gap: 2px;
+    font-size: 12px;
 }
 
 /* ── 恢复包：下一步 / 入口 / 下次的 prompt ─────────────────────────────── */
@@ -3401,6 +3460,19 @@
 
 .xz-cp-entry .xz-cp-icon {
     color: var(--xingzhou-text);
+}
+/*
+ * DSH 用品牌蓝：和旁边深灰正文拉开色相，14–16px 下不必只靠形状分辨。
+ * 暗色 #4d6bfe 在深底上偏暗（3.9:1），提亮一档到 5.6:1。
+ */
+.xz-cp-icon[data-type="dsh"] {
+    color: #4d6bfe;
+}
+
+/* 思源把深浅色挂在 html[data-theme-mode]；[data-theme] 只在个别主题 id 上出现，两个都写上更稳 */
+[data-theme-mode="dark"] .xz-cp-icon[data-type="dsh"],
+[data-theme="dark"] .xz-cp-icon[data-type="dsh"] {
+    color: #6b84ff;
 }
 
 .xz-cp-entry__label {
@@ -3756,6 +3828,20 @@
 .xz-cpf__input--area {
     min-height: 46px;
     resize: vertical;
+}
+/* 卡点可能有很多个：一行一个，框随内容长高，单行时不至于空一大块 */
+.xz-cpf__stuck {
+    min-height: 30px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+}
+
+.xz-cpf__stuck-hint {
+    display: block;
+    margin-top: 3px;
+    color: var(--xingzhou-muted);
+    font-size: 10.5px;
+    line-height: 1.5;
 }
 
 .xz-cpf__select {

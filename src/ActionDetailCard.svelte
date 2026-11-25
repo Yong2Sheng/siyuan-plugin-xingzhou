@@ -68,6 +68,15 @@
     /** 已同步的条目标识：换条目时复位只属于上一条的临时状态 */
     let sourceId = itemId;
 
+    /** 一行一个卡点：数据层本来就是多行字符串，展示层按行拆开，旧数据不用迁移。 */
+    function splitStuck(value: string): string[] {
+        return value
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+    }
+
+    $: stuckLines = splitStuck(latest?.stuck ?? "");
     $: checkpoints = checkpointsForDisplay(detail);
     $: latest = latestCheckpoint(detail);
     $: older = checkpoints.filter((item) => item.id !== latest?.id);
@@ -202,10 +211,6 @@
         expandedCheckpoints = next;
     }
 
-    function isCheckpointExpanded(id: string): boolean {
-        return expandedCheckpoints.has(id);
-    }
-
     function submitTemplate() {
         const name = templateNameDraft.trim();
         if (!name) return;
@@ -294,8 +299,18 @@
                     {#if latest.did}
                         <div class="xz-cp-latest__did">{@html renderActionMarkdown(latest.did)}</div>
                     {/if}
-                    {#if latest.stuck}
-                        <p class="xz-cp-latest__stuck"><span>卡在</span>{latest.stuck}</p>
+                    {#if stuckLines.length > 0}
+                        <section class="xz-cp-stuck" data-cp-stuck>
+                            <div class="xz-cp-stuck__head">
+                                <span class="xz-cp-stuck__title">卡在</span>
+                                {#if stuckLines.length > 1}<span class="xz-cp-stuck__count">{stuckLines.length} 处</span>{/if}
+                            </div>
+                            <ul class="xz-cp-stuck__list">
+                                {#each stuckLines as line, index (index)}
+                                    <li>{line}</li>
+                                {/each}
+                            </ul>
+                        </section>
                     {/if}
 
                     <div class="xz-cp-resume" data-cp-resume>
@@ -314,7 +329,7 @@
                                 {#if latest.entry}
                                     <span class="xz-cp-row__value">
                                         <span class="xz-cp-entry" title={latest.entry.target || latest.entry.label}>
-                                            <EntryIcon type={latest.entry.type} />
+                                            <EntryIcon type={latest.entry.type} size={16} />
                                             <span class="xz-cp-entry__label">{latest.entry.label}</span>
                                             {#if latest.entry.target}
                                                 <span class="xz-cp-entry__target" title={latest.entry.target}>{latest.entry.target}</span>
@@ -410,9 +425,18 @@
                                                 <button class="xz-cp-item__edit" type="button" disabled={disabled} on:click={() => startEdit(item.id)}>编辑</button>
                                             </div>
                                             <p class="xz-cp-item__did">{preview(item.did)}</p>
-                                            {#if isCheckpointExpanded(item.id)}
+                                            {#if expandedCheckpoints.has(item.id)}
                                                 <div class="xz-cp-item__more">
-                                                    {#if item.stuck}<p><span>卡在</span>{item.stuck}</p>{/if}
+                                                    {#if item.stuck}
+                                                        <div class="xz-cp-stuck xz-cp-stuck--compact">
+                                                            <div class="xz-cp-stuck__head"><span class="xz-cp-stuck__title">卡在</span></div>
+                                                            <ul class="xz-cp-stuck__list">
+                                                                {#each splitStuck(item.stuck) as line, index (index)}
+                                                                    <li>{line}</li>
+                                                                {/each}
+                                                            </ul>
+                                                        </div>
+                                                    {/if}
                                                     {#if item.entry}
                                                         <p class="xz-cp-item__entry"><span>入口</span><EntryIcon type={item.entry.type} size={12} />{item.entry.label} · {item.entry.target}</p>
                                                     {/if}
@@ -421,7 +445,7 @@
                                             {/if}
                                             {#if item.stuck || item.entry || item.payload.trim()}
                                                 <button class="xz-cp-item__expand" type="button" on:click={() => toggleExpandCheckpoint(item.id)}>
-                                                    {isCheckpointExpanded(item.id) ? "收起详情" : "看详情"}
+                                                    {expandedCheckpoints.has(item.id) ? "收起详情" : "看详情"}
                                                 </button>
                                             {/if}
                                             {#if item.next}

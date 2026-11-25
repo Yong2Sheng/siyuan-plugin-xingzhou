@@ -65,6 +65,35 @@ const DETAIL_B = detailWith({
 
 const DETAIL_C = detailWith({ guidance: "C-行动指导" });
 
+const STUCK_LINES = [
+    "第一条「顺口」建立在错误事实上",
+    "第二条有「府里」世界词错误",
+    "多条消息现在只是显示层拆分",
+];
+
+const DETAIL_STUCK = detailWith({
+    checkpoints: [
+        checkpoint({
+            id: "cp-stuck-new",
+            createdAt: new Date("2026-09-20T22:00:00").getTime(),
+            did: "把聊天从问答切到场景模式",
+            stuck: STUCK_LINES.join("\n"),
+            next: "先把分条发送的暂停点补上",
+        }),
+        checkpoint({
+            id: "cp-stuck-old",
+            createdAt: new Date("2026-09-18T21:00:00").getTime(),
+            did: "跑通 6 段检索的召回质量",
+            stuck: "召回 11/20\n第二条检索把人物卡当成背景",
+            entry: { type: "dsh", label: "角色各自的聊天特质", target: "DSH · 会话" },
+        }),
+    ],
+});
+
+const DETAIL_STUCK_ONE = detailWith({
+    checkpoints: [checkpoint({ id: "cp-one", did: "改完标题", stuck: "只有一处卡点" })],
+});
+
 const DETAIL_EMPTY = createEmptyActionDetail();
 
 describe("行动细则卡：断点区", () => {
@@ -211,6 +240,78 @@ describe("行动细则卡：断点区", () => {
         await tick();
         expect(text(field("行动指导与想法"))).toContain("还没写，点这里开始。");
         expect(text(field("行动指导与想法"))).not.toContain("A-行动指导");
+    });
+
+    it("卡点按行拆成多条：三行就是三条，标签不再参与文本行", async () => {
+        mount(DETAIL_STUCK, "stuck");
+        const section = document.querySelector("[data-cp-stuck]")!;
+        expect(section).not.toBeNull();
+        // 以前它是一段内联文本，换行会被折叠成一行
+        const items = [...section.querySelectorAll(".xz-cp-stuck__list li")].map((node) => text(node));
+        expect(items).toEqual(STUCK_LINES);
+        expect(text(section.querySelector(".xz-cp-stuck__title"))).toBe("卡在");
+        expect(text(section.querySelector(".xz-cp-stuck__count"))).toBe("3 处");
+    });
+
+    it("只有一处卡点时不显示条数，小节照旧独立成段", async () => {
+        mount(DETAIL_STUCK_ONE, "stuck-one");
+        const section = document.querySelector("[data-cp-stuck]")!;
+        expect([...section.querySelectorAll("li")].map((node) => text(node))).toEqual(["只有一处卡点"]);
+        expect(section.querySelector(".xz-cp-stuck__count")).toBeNull();
+    });
+
+    it("没有卡点时不出这个小节，避免留一条空虚线", async () => {
+        mount(DETAIL_B, "b");
+        expect(document.querySelector("[data-cp-stuck]")).toBeNull();
+    });
+
+    it("历史条目「看详情」点了真的展开：旧断点的多行卡点按行显示", async () => {
+        mount(DETAIL_STUCK, "stuck");
+        document.querySelector<HTMLButtonElement>("[data-cp-history-toggle]")!.click();
+        await tick();
+
+        const expand = document.querySelector<HTMLButtonElement>(".xz-cp-item__expand")!;
+        expect(text(expand)).toBe("看详情");
+        expand.click();
+        await tick();
+
+        // 曾经这里永远不展开：模板用 isCheckpointExpanded(id) 包了一层，
+        // Svelte 编译期看不到它依赖 expandedCheckpoints，改了 Set 也不重渲染。
+        const more = document.querySelector(".xz-cp-item__more")!;
+        expect(more).not.toBeNull();
+        expect(text(expand)).toBe("收起详情");
+        const items = [...more.querySelectorAll(".xz-cp-stuck--compact li")].map((node) => text(node));
+        expect(items).toEqual(["召回 11/20", "第二条检索把人物卡当成背景"]);
+
+        expand.click();
+        await tick();
+        expect(document.querySelector(".xz-cp-item__more")).toBeNull();
+    });
+
+    it("表单里的卡点是多行框：三个卡点按行存进 stuck", async () => {
+        const events: Array<{ stuck?: string }> = [];
+        mount(DETAIL_B, "b");
+        component!.$on("addCheckpoint", (event: CustomEvent) => events.push(event.detail.input));
+
+        document.querySelector<HTMLButtonElement>("[data-cp-add]")!.click();
+        await tick();
+        const did = document.querySelector<HTMLTextAreaElement>("[data-cpf-did]")!;
+        did.value = "做到哪";
+        did.dispatchEvent(new Event("input", { bubbles: true }));
+
+        // 卡点默认收起，点开才出现；控件必须是 textarea，单行 input 存不下第二个卡点
+        document.querySelector<HTMLButtonElement>(".xz-cpf__link")!.click();
+        await tick();
+        const stuck = document.querySelector<HTMLTextAreaElement>("[data-cpf-stuck]")!;
+        expect(stuck.tagName).toBe("TEXTAREA");
+        stuck.value = STUCK_LINES.join("\n");
+        stuck.dispatchEvent(new Event("input", { bubbles: true }));
+        await tick();
+
+        document.querySelector<HTMLButtonElement>("[data-cpf-save]")!.click();
+        await tick();
+        expect(events).toHaveLength(1);
+        expect(events[0].stuck?.split("\n")).toEqual(STUCK_LINES);
     });
 
     it("换工作项复位模板面板，同一条目内的刷新不动它", async () => {

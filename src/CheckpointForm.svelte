@@ -11,6 +11,7 @@
     import EntryIcon from "./EntryIcon.svelte";
     import type { ActionCheckpoint, ActionEntryPoint } from "./action-detail";
     import { ENTRY_TYPES, entryTypeLabel, type EntryUsage } from "./entry-points";
+    import { autoResizeTextarea } from "./textarea-autosize";
 
     export let initial: ActionCheckpoint;
     /** 用过的入口；本工作项的排前面 */
@@ -103,8 +104,17 @@
 
     {#if stuckOpen}
         <label class="xz-cpf__field">
-            <span class="xz-cpf__key">卡在哪<i>可选</i></span>
-            <input class="b3-text-field xz-cpf__input" type="text" bind:value={stuck} {disabled} placeholder="真正让事情停下来的那个点" />
+            <span class="xz-cpf__key">卡在哪<i>可选 · 一行一个</i></span>
+            <textarea
+                class="b3-text-field xz-cpf__input xz-cpf__input--area xz-cpf__stuck"
+                rows="1"
+                bind:value={stuck}
+                use:autoResizeTextarea={stuck}
+                {disabled}
+                placeholder="一行一个卡点，例如：第一条建立在错误事实上；府里世界词错误"
+                data-cpf-stuck
+            ></textarea>
+            <span class="xz-cpf__stuck-hint">回车换行＝另一个卡点；回来时按行显示，每条单独一行</span>
         </label>
     {:else}
         <button class="xz-cpf__link" type="button" on:click={() => (stuckOpen = true)}>＋ 记一下卡点</button>
