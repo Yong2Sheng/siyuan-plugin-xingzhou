@@ -446,6 +446,29 @@ describe("行舟一级模块外壳", () => {
         expect(document.querySelector(".xz-daily-missing-panel")).toBeNull();
     });
 
+    it("休假日选「否，不安排」后恢复徽标显示已完成，不再挂一项待补", async () => {
+        const now = new Date();
+        const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        const holiday = createDailyRecord(date, "holiday", 1000);
+        holiday.fields.personalAffairsPlanned = "no";
+        holiday.fields.daytimeEnergy = 4;
+        let dailyStore = upsertDailyRecord(createEmptyDailyStore(1000), holiday, 1000);
+
+        component = new DailyRhythm({
+            target: document.body,
+            props: {
+                loadDaily: vi.fn().mockResolvedValue(dailyStore),
+                saveDaily: vi.fn(async (record: DailyRecord) => dailyStore = upsertDailyRecord(dailyStore, record, 2000)),
+            },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
+
+        // 用户看到的是徽标本身：以前这里显示「1」，改成「✓ 已完成」
+        const recovery = document.querySelector<HTMLButtonElement>('.xz-daily-stage-nav button[aria-label^="恢复，"]');
+        expect(recovery?.getAttribute("aria-label")).toContain("已完成");
+        expect(recovery?.getAttribute("data-completion")).toBe("✓");
+    });
+
     it("切换日期时同步刷新阶段徽标和无障碍状态", async () => {
         const completedDate = "2030-01-07";
         const blankDate = "2030-01-08";

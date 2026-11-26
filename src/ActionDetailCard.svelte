@@ -81,7 +81,8 @@
     $: latest = latestCheckpoint(detail);
     $: older = checkpoints.filter((item) => item.id !== latest?.id);
     $: starredCount = checkpoints.filter((item) => item.starred).length;
-    $: visibleOlder = filter === "star" ? older.filter((item) => item.starred) : older;
+    /** 正在编辑的那条永远留在列表里：切到「只看成果」时表单不能跟着被筛掉 */
+    $: visibleOlder = filter === "star" ? older.filter((item) => item.starred || item.id === editingId) : older;
     $: editing = editingId ? checkpoints.find((item) => item.id === editingId) ?? null : null;
 
     $: if (itemId !== sourceId) {
@@ -211,6 +212,12 @@
         expandedCheckpoints = next;
     }
 
+    /** 收起历史会连带卸掉正在编辑的那条表单：先把编辑态收干净，不留看不见的 editingId。 */
+    function toggleHistory() {
+        historyOpen = !historyOpen;
+        if (!historyOpen) editingId = null;
+    }
+
     function submitTemplate() {
         const name = templateNameDraft.trim();
         if (!name) return;
@@ -281,6 +288,18 @@
             {/if}
 
             {#if latest}
+                {#if editing && editing.id === latest.id}
+                    <CheckpointForm
+                        initial={latest}
+                        usages={entryUsages}
+                        currentItemId={itemId}
+                        modeLabel="编辑这条断点"
+                        nowLabel={formatWhen(latest.createdAt)}
+                        {disabled}
+                        on:save={(event) => handleSave(event.detail.value)}
+                        on:cancel={cancelForm}
+                    />
+                {:else}
                 <section class="xz-cp-latest" data-cp-latest>
                     <header class="xz-cp-latest__head">
                         <span class="xz-cp-latest__title">上次做到</span>
@@ -359,6 +378,7 @@
                         {/if}
                     </div>
                 </section>
+                {/if}
             {:else if !formOpen}
                 <button class="xz-plan-empty xz-cp-empty" type="button" disabled={disabled} on:click={startNew}>
                     还没有断点。第一次停手时记一条：做到哪、下次从哪进。
@@ -383,7 +403,7 @@
             {#if older.length > 0}
                 <div class="xz-cp-history" data-cp-history>
                     <div class="xz-cp-history__head">
-                        <button class="xz-cp-history__toggle" type="button" on:click={() => (historyOpen = !historyOpen)} data-cp-history-toggle>
+                        <button class="xz-cp-history__toggle" type="button" on:click={toggleHistory} data-cp-history-toggle>
                             {historyOpen ? "▾" : "▸"} 更早的断点 {older.length} 条
                         </button>
                         <div class="xz-cp-filter">

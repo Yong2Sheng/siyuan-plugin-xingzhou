@@ -314,6 +314,68 @@ describe("行动细则卡：断点区", () => {
         expect(events[0].stuck?.split("\n")).toEqual(STUCK_LINES);
     });
 
+    it("只有一条断点时点「编辑」也能打开表单，改完保存回这一条", async () => {
+        // 回归：编辑表单曾经只挂在「更早的断点」历史分支里，
+        // 只有一条断点时历史区根本不渲染，点「编辑」只设了 editingId 却没有任何地方读它。
+        const saved: Array<{ id: string; did?: string; starred?: boolean }> = [];
+        mount(DETAIL_B, "b");
+        component!.$on("saveCheckpoint", (event: CustomEvent) => saved.push({ id: event.detail.id, ...event.detail.patch }));
+
+        latest()!.querySelector<HTMLButtonElement>(".xz-plan-field__edit")!.click();
+        await tick();
+
+        const form = document.querySelector<HTMLFormElement>("[data-cpf]");
+        expect(form).not.toBeNull();
+        expect(text(form!.querySelector(".xz-cpf__head h4"))).toBe("编辑这条断点");
+        const did = form!.querySelector<HTMLTextAreaElement>("[data-cpf-did]")!;
+        expect(did.value).toBe("B-上次做到：改完标题");
+
+        did.value = "B-改完标题（补齐回填）";
+        did.dispatchEvent(new Event("input", { bubbles: true }));
+        await tick();
+        form!.querySelector<HTMLButtonElement>("[data-cpf-save]")!.click();
+        await tick();
+
+        expect(saved).toHaveLength(1);
+        expect(saved[0].id).toBe("cp-b1");
+        expect(saved[0].did).toBe("B-改完标题（补齐回填）");
+        // 保存后退出编辑态，回到只读的最新断点，而不是停在一张空表单上
+        expect(document.querySelector("[data-cpf]")).toBeNull();
+        expect(latest()).not.toBeNull();
+    });
+
+    it("编辑最新断点时点「取消」回到只读态，不派发保存", async () => {
+        const saved: unknown[] = [];
+        mount(DETAIL_B, "b");
+        component!.$on("saveCheckpoint", (event: CustomEvent) => saved.push(event.detail));
+
+        latest()!.querySelector<HTMLButtonElement>(".xz-plan-field__edit")!.click();
+        await tick();
+        document.querySelector<HTMLButtonElement>("[data-cpf] .xz-plan-field__edit")!.click();
+        await tick();
+
+        expect(saved).toHaveLength(0);
+        expect(document.querySelector("[data-cpf]")).toBeNull();
+        expect(text(latest())).toContain("B-上次做到：改完标题");
+    });
+
+    it("正在编辑的旧断点切到「阶段性成果」筛选也不消失", async () => {
+        mount(DETAIL_A, "a");
+        document.querySelector<HTMLButtonElement>("[data-cp-history-toggle]")!.click();
+        await tick();
+
+        // cp-a1 没标星：编辑它，再切到只看成果，表单不能跟着被筛掉
+        const older = [...document.querySelectorAll<HTMLElement>(".xz-cp-item")].find((node) => text(node).includes("更早做到"))!;
+        older.querySelector<HTMLButtonElement>(".xz-cp-item__edit")!.click();
+        await tick();
+        expect(document.querySelector("[data-cpf]")).not.toBeNull();
+
+        const starChip = [...document.querySelectorAll<HTMLButtonElement>(".xz-cp-filter__chip")].find((node) => text(node).includes("阶段性成果"))!;
+        starChip.click();
+        await tick();
+        expect(document.querySelector("[data-cpf]")).not.toBeNull();
+    });
+
     it("换工作项复位模板面板，同一条目内的刷新不动它", async () => {
         mount(DETAIL_A, "a", { templateNames: ["技术事务"] });
         document.querySelector<HTMLButtonElement>(".xz-plan-card__link")!.click();

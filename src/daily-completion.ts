@@ -204,10 +204,13 @@ function afterWorkChecks(record: DailyRecord): Check[] {
 }
 
 function recoveryChecks(fields: DailyRecordFields): Check[] {
-    return [
-        check("recovery-energy", "白天精力", "白天精力", number(fields.daytimeEnergy)),
-        check("recovery-life-result", "个人生活或兴趣项目结果", "今天的个人生活或兴趣项目结果", text(fields.personalLifeResult)),
-    ];
+    const checks = [check("recovery-energy", "白天精力", "白天精力", number(fields.daytimeEnergy))];
+    /* 选了「否，不安排」就没有个人事务的结果可写：这一项转为可选，不再变成待补项。
+       输入框仍留在界面上，想记也可以记。 */
+    if (fields.personalAffairsPlanned !== "no") {
+        checks.push(check("recovery-life-result", "个人生活或兴趣项目结果", "今天的个人生活或兴趣项目结果", text(fields.personalLifeResult)));
+    }
+    return checks;
 }
 
 function eveningChecks(record: DailyRecord): Check[] {
@@ -221,7 +224,12 @@ function eveningChecks(record: DailyRecord): Check[] {
         check("anomaly-decision", "是否有其他异常或观察", "是否有其他异常或观察需要记录", text(fields.hasAnomalyOrObservation)),
         check("bedtime-decision", "今晚的睡前安排", "今晚的睡前安排", text(fields.bedtimePreparation)),
     ];
-    if (workApplicable && (!conference || fields.personalAffairsPlanned === "yes")) checks.push(
+    /* 个人生活结果只在真正有个人事务的日子才要求：
+       开会日只有回答「是」才出现；其他日子选了「否，不安排」即视为不适用。 */
+    const needsLifeResult = conference
+        ? fields.personalAffairsPlanned === "yes"
+        : fields.personalAffairsPlanned !== "no";
+    if (workApplicable && needsLifeResult) checks.push(
         check("personal-life-result", "个人生活或兴趣项目结果", "今天的个人生活或兴趣项目结果", text(fields.personalLifeResult)),
     );
     if (workApplicable) checks.push(check("after-hours-decision", saturday ? "中午下班后是否接触工作" : conference ? "会议结束后是否继续处理工作" : "下班后是否处理工作", saturday ? "中午下班后是否接触了工作" : conference ? "会议结束后是否继续处理工作" : "下班后是否处理了工作", text(fields.afterHoursWorkOccurred)));

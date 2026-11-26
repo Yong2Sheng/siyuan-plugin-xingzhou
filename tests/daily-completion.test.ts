@@ -137,6 +137,42 @@ describe("生活节律完整度检查", () => {
         expect(result.missing.map((item) => item.label)).toEqual(expect.arrayContaining(["休息／个人生活重点", "个人生活或兴趣项目结果"]));
     });
 
+    it("休假日选「否，不安排」后个人生活结果转为可选，恢复阶段不再挂一项待补", () => {
+        const record = createDailyRecord("2026-09-07", "holiday", 1000);
+        record.fields.personalAffairsPlanned = "no";
+        record.fields.daytimeEnergy = 4;
+
+        const result = calculateDailyCompletion(record);
+        expect(result.missing.map((item) => item.label)).not.toContain("个人生活或兴趣项目结果");
+        expect(result.stages.find((stage) => stage.stage === "recovery")).toMatchObject({ state: "complete", missing: [] });
+
+        // 回答「是」或还没回答时，这一项照旧要求
+        record.fields.personalAffairsPlanned = "yes";
+        expect(calculateDailyCompletion(record).missing.map((item) => item.label)).toContain("个人生活或兴趣项目结果");
+        record.fields.personalAffairsPlanned = "";
+        expect(calculateDailyCompletion(record).missing.map((item) => item.label)).toContain("个人生活或兴趣项目结果");
+    });
+
+    it("科研工作日选「否，不安排」后 21:00 不再要求个人生活结果，其余晚间字段照旧", () => {
+        const record = createDailyRecord("2026-09-04", "research-workday", 1000);
+        record.fields.bestThing = "把断点卡的编辑接上了";
+        record.fields.obstacleOrCost = "上下文老是被打断";
+        record.fields.hasAnomalyOrObservation = "no";
+        record.fields.bedtimePreparation = "free";
+        record.fields.afterHoursWorkOccurred = "no";
+        record.fields.tomorrowFirstAction = "先跑一遍组件测试";
+        record.fields.personalAffairsPlanned = "no";
+
+        const skipped = calculateDailyCompletion(record);
+        expect(skipped.missing.map((item) => item.label)).not.toContain("个人生活或兴趣项目结果");
+        expect(skipped.stages.find((stage) => stage.stage === "evening")?.state).toBe("complete");
+
+        record.fields.personalAffairsPlanned = "yes";
+        expect(calculateDailyCompletion(record).missing.map((item) => item.label)).toContain("个人生活或兴趣项目结果");
+        record.fields.personalAffairsPlanned = "";
+        expect(calculateDailyCompletion(record).missing.map((item) => item.label)).toContain("个人生活或兴趣项目结果");
+    });
+
     it("开会日不要求预计结束时间，会后不安排个人事务时不检查个人结果", () => {
         const record = createDailyRecord("2026-09-07", "conference-day", 1000);
         record.fields.workStartTime = "09:00";

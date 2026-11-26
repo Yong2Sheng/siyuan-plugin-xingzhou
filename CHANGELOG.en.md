@@ -2,6 +2,17 @@
 
 This file records notable changes to Xingzhou. The default changelog is Chinese; see [CHANGELOG.md](CHANGELOG.md).
 
+## Unreleased
+
+### Added
+
+### Changed
+
+### Fixed
+
+- **Checkpoint "Edit" did nothing**: the edit form only lived inside the "earlier checkpoints" history list, so with a single checkpoint (or a collapsed history) the click only set edit state and nothing changed on screen. The newest checkpoint now turns into the edit form in place, prefilled, and returns to the read-only card after saving; switching to the Staged results filter or collapsing the history mid-edit no longer leaves a hidden edit state behind.
+- **A false missing item on holidays**: after choosing "No, nothing arranged", "today's personal life or interest project result" no longer counts as missing (the input stays, so you can still write something) and the recovery stage only needs daytime energy. On research workdays the same field at 21:00 follows the same rule instead of nagging; "Yes" and "not decided yet" still require it, and the conference-day behaviour is unchanged.
+
 ## 6.0.0 - 2026-11-22
 
 Action Details is now a **checkpoint timeline** instead of a set of independently maintained fields: Current State,
