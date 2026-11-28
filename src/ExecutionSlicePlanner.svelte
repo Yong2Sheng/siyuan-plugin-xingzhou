@@ -44,8 +44,12 @@
         remaining: ExecutionSliceDayLoad;
     };
 
-    /** 重排面板一次列出多少天，从明天起算。 */
-    const RESCHEDULE_DAY_COUNT = 14;
+    /**
+     * 重排面板一次列出多少天，从**今天**起算。
+     * 久未做的切片（例如 10 月排的、11 月底才有空）要能直接挪到今天补上；
+     * 只列明天起的话，用户只能先挪到明天再等一天，等于把「今天有空」这个事实丢掉。
+     */
+    const RESCHEDULE_DAY_COUNT = 15;
     /** 菜单没打开时给按钮文案用的占位日期，只在无菜单渲染时被读到。 */
     const FALLBACK_DAY: CalendarDay = {
         key: "", day: 0, inMonth: false, isToday: false, isPast: false, afterDeadline: false,
@@ -93,6 +97,13 @@
     $: rescheduleKeepLabel = `还是挪到 ${rescheduleDayLabel(sliceContextMenu?.day ?? FALLBACK_DAY)}`;
     $: todaySlices = slicesOnDate(item, today);
     $: todaySlice = todaySlices.find((slice) => slice.status === "scheduled") ?? todaySlices[0] ?? null;
+    /** 已经排在未来的切片日期（升序），用来在「待安排 0」时把原因说清楚。 */
+    $: scheduledDateKeys = (item.executionSlices ?? [])
+        .filter((slice) => slice.status === "scheduled")
+        .map((slice) => slice.scheduledDate)
+        .sort();
+    /** 待安排为 0 时，想让今天也能安排，至少要先把目标提到「已完成 + 已安排 + 1」。 */
+    $: nextTargetSuggestion = completed + scheduledDateKeys.length + 1;
     $: investmentSummary = target && item.durationMinutes !== null
         ? `预计总投入 ${target * item.durationMinutes} 分钟`
         : "总投入待计算";
@@ -101,10 +112,14 @@
         ? `今天已安排 ${todaySlices.filter((slice) => slice.status === "scheduled").length} 片`
         : !target
             ? "设置目标切片数后，即可点击日历安排执行日期"
-            : !item.deadline
-                ? `未设置截止日期，可从今天起自由安排；还有 ${available} 个切片待安排`
-                : available > 0
+            : available > 0
+                // 有可用片时先回答「还剩几片」，截止日期只影响能排到哪一天
+                ? item.deadline
                     ? `还有 ${available} 个切片待安排`
+                    : `未设置截止日期，可从今天起自由安排；还有 ${available} 个切片待安排`
+                : scheduledDateKeys.length
+                    // 待安排 0 不是「没事可做」，而是这些片已经在别的日期上了：说清在哪、怎么腾出今天
+                    ? `已排满：${shortDateKeys(scheduledDateKeys)} 已有安排；先取消其中一片，或把目标切片数提到 ${nextTargetSuggestion}`
                     : "所有有效切片均已完成或安排";
 
     async function saveTarget() {
@@ -214,7 +229,7 @@
     }
 
     /**
-     * 重排面板的可选日期：从明天起连续 14 天。
+     * 重排面板的可选日期：从今天起连续 15 天（含今天）。
      * 超出截止日期、或该事务当天已有切片的日期仍列出来但置灰，让「为什么不能选」看得见。
      * 过期切片同样可以往后重排，重排本身不消耗「待安排」名额。
      */
@@ -223,14 +238,14 @@
         start.setHours(0, 0, 0, 0);
         return Array.from({ length: RESCHEDULE_DAY_COUNT }, (_, index) => {
             const date = new Date(start);
-            date.setDate(start.getDate() + index + 1);
+            date.setDate(start.getDate() + index);
             const key = localDateKey(date.getTime());
             return {
                 key,
                 day: date.getDate(),
                 inMonth: date.getMonth() === monthCursor.getMonth(),
                 isToday: key === today,
-                isPast: false,
+                isPast: key < today,
                 afterDeadline: Boolean(item.deadline && key > localDateKey(item.deadline)),
                 slice: slicesOnDate(item, key)[0] ?? null,
                 load: { count: 0, minutes: 0, unestimatedCount: 0 },
@@ -258,7 +273,7 @@
     function rescheduleDayTitle(day: CalendarDay): string {
         if (day.afterDeadline) return `${day.key} 超出截止日期`;
         if (day.slice) return `${day.key} 已有该事务的切片`;
-        return `把切片重排到 ${day.key}`;
+        return day.isToday ? `把切片挪到今天（${day.key}）` : `把切片重排到 ${day.key}`;
     }
 
     /** 单片的完成／放弃：走与今天那格按钮同一条保存路径，改期痕迹由领域层保留、由状态决定是否显示。 */
@@ -418,6 +433,25 @@
         return first > today ? first : today;
     }
 
+    /**
+     * 空着却不能安排的格子，必须说明原因。
+     * 以前这些按钮直接 disabled、title 为空：点今天没有任何反应，用户只会以为功能坏了。
+     */
+    function dayBlockedReason(day: CalendarDay): string {
+        if (day.slice || disabled) return "";
+        if (day.isPast || !day.inMonth) return "";
+        if (day.afterDeadline) return "超出截止日期";
+        if (!target) return "先设置目标切片数";
+        if (available > 0) return "";
+        return `待安排 0：${shortDateKeys(scheduledDateKeys)} 已有安排，先取消其中一片或调高目标切片数`;
+    }
+
+    /** 「11-28、11-29」这种短日期；太多时只列前两天并给出天数。 */
+    function shortDateKeys(keys: string[]): string {
+        const shown = keys.slice(0, 2).map((key) => key.slice(5));
+        return keys.length <= 2 ? shown.join("、") : `${shown.join("、")} 等 ${keys.length} 天`;
+    }
+
     /** 格子的悬停说明：优先说清「这一片是改期过来的」，其次才是撤销提示。 */
     function dayCellTitle(day: CalendarDay): string | undefined {
         const slice = day.slice;
@@ -426,7 +460,8 @@
                 ? `${day.key} 这一片由 ${fullDateLabel(slice.rescheduledFrom)} 改期而来${slice.status === "missed" ? "，已经过期未完成" : ""}`
                 : `${day.key} 这一片改期过`;
         }
-        return slice?.status === "completed" ? "点击撤销这次完成" : undefined;
+        if (slice?.status === "completed") return "点击撤销这次完成";
+        return dayBlockedReason(day) || undefined;
     }
 
     /** 日期里挂着改期过的待做片时，把「已安排」说明成「已改期」。 */
@@ -549,6 +584,7 @@
                     {@const remaining = dayLoadValue(day.remaining)}
                     {@const load = dayLoadValue(day.load)}
                     {@const isCleared = !day.isPast && remaining.count === 0 && load.count > 0}
+                    {@const blocked = dayBlockedReason(day)}
                     <button
                         class:outside={!day.inMonth}
                         class:today={day.isToday}
@@ -562,7 +598,7 @@
                         type="button"
                         data-date={day.key}
                         title={dayCellTitle(day)}
-                        aria-label={`${day.key}${dayLoadDescription(day) ? `，${dayLoadDescription(day)}` : ""}${day.slice?.status === "completed" ? "；点击撤销这次完成" : ""}`}
+                        aria-label={`${day.key}${dayLoadDescription(day) ? `，${dayLoadDescription(day)}` : ""}${day.slice?.status === "completed" ? "；点击撤销这次完成" : ""}${blocked ? `；不可安排：${blocked}` : ""}`}
                         aria-pressed={Boolean(day.slice)}
                         disabled={disabled || Boolean(day.slice && day.slice.status === "abandoned") || (!day.slice?.status && !canSchedule(day))}
                         on:click={() => activateDate(day)}
@@ -597,7 +633,7 @@
     {#if sliceContextMenu}
         <div class="xz-slice-context-menu" style={`left:${sliceContextMenu.x}px;top:${sliceContextMenu.y}px`} role="group" aria-label="切片操作" use:menuDismiss>
             {#if sliceContextMenu.mode === "reschedule"}
-                <div class="xz-slice-context-title">把 {rescheduleDayLabel(sliceContextMenu.day)} 的切片重排到<em>未来 {RESCHEDULE_DAY_COUNT} 天，已占用的日期不可选</em></div>
+                <div class="xz-slice-context-title">把 {rescheduleDayLabel(sliceContextMenu.day)} 的切片重排到<em>今天起 {RESCHEDULE_DAY_COUNT} 天，已占用的日期不可选</em></div>
                 {#if rescheduleIsRepeat}
                     <div class="xz-slice-reschedule-warning">这一片已经改期过一次（原定 {fullDateLabel(rescheduleOriginalDate)}）。再往后挪就是第 2 次——要么今天做掉，要么把它缩到能立刻开动的尺度。</div>
                     <div class="xz-slice-reschedule-extra">

@@ -91,12 +91,45 @@ describe("生活节律完整度检查", () => {
         record.fields.hasWatchSleepScore = "yes";
         record.fields.hasMorningWeight = "yes";
         missing = calculateDailyCompletion(record).missing.map((item) => item.label);
-        expect(missing).toEqual(expect.arrayContaining(["手表睡眠评分", "晨起体重"]));
+        expect(missing).toEqual(expect.arrayContaining(["手表睡眠评分", "晨起体重", "睡眠时长"]));
 
         record.fields.hasWatchSleepScore = "no";
         record.fields.hasMorningWeight = "no";
         missing = calculateDailyCompletion(record).missing.map((item) => item.label);
-        expect(missing).not.toEqual(expect.arrayContaining(["是否有手表睡眠评分", "手表睡眠评分", "是否测量晨起体重", "晨起体重"]));
+        expect(missing).not.toEqual(expect.arrayContaining(["是否有手表睡眠评分", "手表睡眠评分", "是否测量晨起体重", "晨起体重", "睡眠时长"]));
+    });
+
+    /**
+     * 复现 2026-11-27（休假日）：选了「今天没有手表睡眠数据」之后，
+     * 界面隐藏了睡眠时长输入并写着「无需填写」，完成度却仍按它算待补，
+     * 导致早晨永远差一项。睡眠时长必须和评分、入睡时间同口径：只有选了「是」才要求。
+     */
+    it("休假日选了「没有手表数据」后，早晨不会因为睡眠时长一直待补", () => {
+        const record = createDailyRecord("2026-11-27", "holiday", 1000);
+        record.fields.wakeTime = "14:20";
+        record.fields.hasWatchSleepScore = "no";
+        record.fields.hasMorningWeight = "no";
+        record.fields.subjectiveSleepQuality = 4;
+        record.fields.restAndLifePlan = "给车做保养";
+        record.fields.hasDayAdjustments = "no";
+        record.fields.trainingCompleted = "no";
+
+        const result = calculateDailyCompletion(record);
+        expect(result.missing.map((item) => item.label)).not.toContain("睡眠时长");
+        expect(result.stages.find((stage) => stage.stage === "morning")).toMatchObject({ state: "complete", missing: [] });
+        // 剩余待补只有恢复 2 项与 21:00 的 4 项，都是确实还没开始的阶段
+        expect(result.missing.map((item) => `${item.stage}/${item.label}`)).toEqual([
+            "recovery/白天精力",
+            "recovery/个人生活或兴趣项目结果",
+            "evening/今天做得最好的一件事",
+            "evening/今天最大的阻碍或消耗",
+            "evening/是否有其他异常或观察",
+            "evening/今晚的睡前安排",
+        ]);
+
+        // 选「是」但没填时长时，它才重新成为待补项
+        record.fields.hasWatchSleepScore = "yes";
+        expect(calculateDailyCompletion(record).missing.map((item) => item.label)).toContain("睡眠时长");
     });
 
     it("自动同步的执行切片不单独触发阶段待补状态", () => {

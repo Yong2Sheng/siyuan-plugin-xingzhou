@@ -591,12 +591,13 @@
         markDirty();
     }
 
-    /** 评分与入睡时间同属「手表睡眠数据」：改选「否」时两者一起清掉，避免留下孤儿值。 */
+    /** 睡眠时长、评分与入睡时间同属「手表睡眠数据」：改选「否」时一起清掉，避免留下孤儿值。 */
     function changeHasWatchSleepScore(value: string) {
         const allowed: PresenceState[] = ["", "yes", "no"];
         if (!allowed.includes(value as PresenceState)) return;
         draft.fields.hasWatchSleepScore = value as PresenceState;
         if (value !== "yes") {
+            draft.fields.sleepDurationMinutes = null;
             draft.fields.watchSleepScore = null;
             draft.fields.watchSleepOnsetTime = "";
             draft.fields.hasWatchSleepOnset = "";

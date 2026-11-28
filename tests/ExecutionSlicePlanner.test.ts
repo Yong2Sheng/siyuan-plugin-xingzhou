@@ -233,7 +233,10 @@ describe("执行切片配置", () => {
         await tick();
         expect(document.querySelector(".xz-slice-context-menu button.is-neutral")).toBeNull();
         expect(document.querySelector(".xz-slice-context-title")?.textContent).toContain("重排到");
-        expect(document.querySelectorAll("[data-reschedule-date]").length).toBe(14);
+        const dates = [...document.querySelectorAll("[data-reschedule-date]")].map((button) => button.getAttribute("data-reschedule-date"));
+        expect(dates).toHaveLength(15);
+        // 面板从今天起算：久没做的切片要能直接挪到今天，而不是只能等到明天
+        expect(dates[0]).toBe(localDateKey());
         expect(save).not.toHaveBeenCalled();
     });
 
@@ -283,6 +286,77 @@ describe("执行切片配置", () => {
         /* 改期后的新日期是干净的待做片：橙色「已改期」而不是红／主题色 */
         expect(dayCell(targetKey).classList.contains("rescheduled")).toBe(true);
         expect(dayCell(targetKey).classList.contains("missed")).toBe(false);
+    });
+
+    /** 用户的真实处境：10 月排了切片，忙到 11 月底才有空，这时要能直接把那片挪到今天。 */
+    it("过期切片可以直接重排到今天，并标出「今」", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const todayKey = localDateKey();
+        const { past: pastKey } = await monthKeys();
+        const current = transaction({
+            sliceTargetCount: 1,
+            executionSlices: [{ id: "past", scheduledDate: pastKey, status: "missed", completedAt: null, updatedAt: 1 }],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: current, save } });
+        await tick();
+
+        dayCell(pastKey).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 120, clientY: 160 }));
+        await tick();
+        ([...document.querySelectorAll<HTMLButtonElement>(".xz-slice-context-menu button")]
+            .find((button) => button.textContent?.trim() === "重排到…") as HTMLButtonElement).click();
+        await tick();
+
+        const todayOption = document.querySelector<HTMLButtonElement>(`[data-reschedule-date="${todayKey}"]`);
+        if (!todayOption) throw new Error("重排面板里没有今天");
+        expect(todayOption.disabled).toBe(false);
+        expect(todayOption.textContent).toContain("今");
+        expect(todayOption.getAttribute("title")).toContain("挪到今天");
+
+        todayOption.click();
+        await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+        expect(save.mock.calls[0][0].executionSlices).toEqual([
+            expect.objectContaining({ id: "past", scheduledDate: todayKey, status: "scheduled" }),
+        ]);
+    });
+
+    /** 待安排为 0 时，今天以前是「点了没反应」：现在格子和顶部汇总都要说明切片已经排在哪天。 */
+    it("待安排为 0 时说明切片已经排在哪天，而不是静默失效", async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const todayKey = localDateKey();
+        const inDays = (offset: number) => {
+            const date = new Date();
+            date.setHours(12, 0, 0, 0);
+            date.setDate(date.getDate() + offset);
+            return keyOf(date);
+        };
+        const first = inDays(1);
+        const second = inDays(2);
+        const current = transaction({
+            sliceTargetCount: 2,
+            executionSlices: [
+                { id: "a", scheduledDate: first, status: "scheduled", completedAt: null, updatedAt: 1, rescheduledFrom: "2026-10-20" },
+                { id: "b", scheduledDate: second, status: "scheduled", completedAt: null, updatedAt: 2, rescheduledFrom: "2026-10-21" },
+            ],
+        });
+        component = new ExecutionSlicePlanner({ target: document.body, props: { item: current, save } });
+        await tick();
+
+        const today = dayCell(todayKey);
+        expect(today.disabled).toBe(true);
+        expect(today.click).toBeTypeOf("function");
+        today.click();
+        await tick();
+        expect(save).not.toHaveBeenCalled();
+
+        expect(today.getAttribute("title")).toContain("待安排 0");
+        expect(today.getAttribute("title")).toContain(first.slice(5));
+        expect(today.getAttribute("aria-label")).toContain("不可安排");
+
+        const summary = document.querySelector(".xz-slice-progress-summary")?.textContent ?? "";
+        expect(summary).toContain("已排满");
+        expect(summary).toContain(first.slice(5));
+        expect(summary).toContain("先取消其中一片");
+        expect(summary).toContain("提到 3");
     });
 
     it("补记完成后完成日记回原计划日，撤销文案不再区分补记", async () => {

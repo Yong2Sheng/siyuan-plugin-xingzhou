@@ -469,6 +469,40 @@ describe("行舟一级模块外壳", () => {
         expect(recovery?.getAttribute("data-completion")).toBe("✓");
     });
 
+    /**
+     * 复现用户 2026-11-27 的场景：休假日把早晨该填的都填了、手表数据选「否」，
+     * 徽标却一直显示「早晨 1」。睡眠时长随「否」一起不要求后，早晨应显示已完成。
+     */
+    it("休假日填完早晨并选「没有手表数据」后，早晨徽标显示已完成", async () => {
+        const now = new Date();
+        const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        const holiday = createDailyRecord(date, "holiday", 1000);
+        holiday.fields.wakeTime = "14:20";
+        holiday.fields.hasWatchSleepScore = "no";
+        holiday.fields.hasMorningWeight = "no";
+        holiday.fields.subjectiveSleepQuality = 4;
+        holiday.fields.restAndLifePlan = "给车做保养";
+        holiday.fields.hasDayAdjustments = "no";
+        holiday.fields.trainingCompleted = "no";
+        const dailyStore = upsertDailyRecord(createEmptyDailyStore(1000), holiday, 1000);
+
+        component = new DailyRhythm({
+            target: document.body,
+            props: { loadDaily: vi.fn().mockResolvedValue(dailyStore), saveDaily: vi.fn() },
+        });
+        await vi.waitFor(() => expect(document.querySelector(".xz-daily-stage-nav")).not.toBeNull());
+
+        const morning = document.querySelector<HTMLButtonElement>('.xz-daily-stage-nav button[aria-label^="早晨，"]');
+        expect(morning?.getAttribute("aria-label")).toBe("早晨，已完成");
+        expect(morning?.dataset.completion).toBe("✓");
+        // 只剩恢复 2 项与 21:00 的 4 项
+        expect(document.body.textContent).toContain("待补 6 项");
+
+        clickButton("检查待补");
+        await tick();
+        expect(document.querySelector(".xz-daily-missing-panel")?.textContent).not.toContain("睡眠时长");
+    });
+
     it("切换日期时同步刷新阶段徽标和无障碍状态", async () => {
         const completedDate = "2030-01-07";
         const blankDate = "2030-01-08";
@@ -590,7 +624,7 @@ describe("行舟一级模块外壳", () => {
         expect(document.querySelector('[aria-label="手表入睡时间小时"]')).toBeNull();
         await vi.waitFor(() => expect(saveDaily.mock.calls.length).toBeGreaterThan(savesBefore), { timeout: 2000 });
         expect(saveDaily.mock.calls.at(-1)?.[0].fields).toMatchObject({
-            hasWatchSleepScore: "no", watchSleepScore: null, watchSleepOnsetTime: "", hasWatchSleepOnset: "",
+            hasWatchSleepScore: "no", sleepDurationMinutes: null, watchSleepScore: null, watchSleepOnsetTime: "", hasWatchSleepOnset: "",
         });
     });
 

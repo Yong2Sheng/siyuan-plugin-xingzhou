@@ -118,7 +118,12 @@ function morningChecks(record: DailyRecord, previousRecord: DailyRecord | null):
     const checks = [
         check("lights-off", "昨晚熄灯", "昨晚熄灯", lightsOffAdherenceSatisfied(record, previousRecord)),
         check("wake-time", "今日起床", "今日起床", text(fields.wakeTime)),
-        check("sleep-duration", "睡眠时长", "睡眠时长", number(fields.sleepDurationMinutes)),
+        /* 睡眠时长与评分、入睡时间同属手表数据：只有确认「有手表数据」才要求。
+           选「否」时界面明确说「睡眠时长、评分与入睡时间都无需填写」，这个输入框也不显示，
+           若照旧要求，这一项就永远补不上，早晨会一直挂着待补。 */
+        ...(fields.hasWatchSleepScore === "yes"
+            ? [check("sleep-duration", "睡眠时长", "睡眠时长", number(fields.sleepDurationMinutes))]
+            : []),
         check("watch-sleep-score-decision", "是否有手表睡眠评分", "今天是否有手表睡眠评分", text(fields.hasWatchSleepScore)),
     ];
     if (fields.hasWatchSleepScore === "yes") checks.push(check("watch-sleep-score", "手表睡眠评分", "手表睡眠评分", number(fields.watchSleepScore)));
